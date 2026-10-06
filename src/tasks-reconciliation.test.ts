@@ -20,11 +20,21 @@ describe('live Tasks reconciliation', () => {
     expect(result.pending.size).toBe(0)
   })
 
-  it('keeps a paused job visible with its Resume action even in the Scheduled task view', () => {
+  it('keeps paused jobs visible with their Resume action in the Scheduled task view', () => {
     const paused = job({ enabled: false, state: 'paused' })
-    const sections = deriveTaskSections([paused], 'scheduled')
-    expect(sections.scheduled).toEqual([])
+    const scheduled = job({ job_id: 'daily-report', name: 'Daily report' })
+    const sections = deriveTaskSections([paused, scheduled], 'scheduled')
+    expect(sections.scheduled).toEqual([scheduled])
     expect(sections.attention).toEqual([paused])
+  })
+
+  it('shows only running jobs in the Running filter', () => {
+    const running = job({ job_id: 'active', state: 'running' })
+    const paused = job({ job_id: 'paused', enabled: false, state: 'paused' })
+    const sections = deriveTaskSections([running, paused], 'running')
+    expect(sections.running).toEqual([running])
+    expect(sections.scheduled).toEqual([])
+    expect(sections.attention).toEqual([])
   })
 
   it('normalizes a full Dashboard job record with id into the task view contract', () => {

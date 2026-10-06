@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Bot, ListTodo, MessageSquare, Plus, RefreshCw, Search, Settings as SettingsIcon, Users, X } from 'lucide-react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Bot, CalendarClock, ListTodo, MessageSquare, Plus, RefreshCw, Search, Settings as SettingsIcon, Users, X } from 'lucide-react'
 
 import { ChatView } from './components/ChatView'
 import { BotAvatar } from './components/BotAvatar'
@@ -78,6 +78,7 @@ export default function App() {
   const [searching, setSearching] = useState(false)
   const [settings, setSettings] = useState(false)
   const [actionMenuOpen, setActionMenuOpen] = useState(false)
+  const [createTaskOpen, setCreateTaskOpen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [createStep, setCreateStep] = useState(0)
   const [creating, setCreating] = useState(false)
@@ -386,10 +387,6 @@ export default function App() {
   if (settings) return <ConnectionSettings profiles={profiles.length} sessions={sessions.length} connected={connectionStatus === 'connected'} endpoint={activeEndpoint !== 'http://127.0.0.1:9119' ? activeEndpoint : undefined} theme={theme} setTheme={setTheme} close={() => setSettings(false)} refresh={() => refresh()} onPairingBusy={setPairingBusyState} onPaired={async endpoint => { const normalized = activateEndpoint(endpoint); const data = await refresh(normalized, true); if (!data) throw new Error(lastConnectionErrorRef.current || 'Signed in, but authenticated Hermes REST or live WebSocket verification failed.'); localStorage.setItem('hermes-mobile-active-endpoint', normalized) }}/>
   if (selected && profileSheet) return <BotProfileSheet profile={profiles.find(profile => profile.name === selected.profile)} session={selected} onClose={() => setProfileSheet(false)} onUpdated={() => void refresh()}/>
   if (selected) return <ErrorBoundary onReset={() => setSelected(null)}><ChatView session={selected} conversationLoading={conversationLoading} messages={messages} settledAssistant={settledAssistant?.sessionId === selected.id && settledAssistant.profile === selected.profile ? settledAssistant : null} profiles={profiles} streaming={streaming} sending={sending} toolActivities={toolActivities} error={error} back={() => setSelected(null)} refresh={() => void openSession(selected)} openProfile={() => setProfileSheet(true)} onSessionModelChange={handleSessionModelChange} submit={submit} submitVoice={submitVoice} stop={stop}/></ErrorBoundary>
-  if (tab === 'tasks') return <>
-    <TasksView back={() => setTab('bots')} profiles={profiles}/>
-    <NavIsland tab={tab} setTab={setTab}/>
-  </>
 
   return <main className="app roster-shell">
     <div className="roster-pinned">
@@ -408,7 +405,7 @@ export default function App() {
               className={`header-action-btn primary action-group-trigger ${actionMenuOpen ? 'open' : ''}`}
               aria-haspopup="menu"
               aria-expanded={actionMenuOpen}
-              aria-label="New bot or group"
+              aria-label={tab === 'tasks' ? 'New task or bot' : 'New bot or group'}
               onClick={() => setActionMenuOpen(open => !open)}
             >
               <Plus size={16}/>
@@ -426,10 +423,19 @@ export default function App() {
                   type="button"
                   role="menuitem"
                   className="action-group-item"
-                  onClick={() => { setActionMenuOpen(false); setCreateOpen(true) }}
+                  onClick={() => { setActionMenuOpen(false); if (tab === 'tasks') setCreateTaskOpen(true); else setCreateOpen(true); }}
                 >
-                  <Bot size={15}/>
-                  <span>New Bot</span>
+                  {tab === 'tasks' ? <CalendarClock size={15}/> : <Bot size={15}/>}
+                  <span>{tab === 'tasks' ? 'New task' : 'New Bot'}</span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="action-group-item"
+                  onClick={() => { setActionMenuOpen(false); if (tab === 'tasks') setCreateOpen(true); else setCreateTaskOpen(true); }}
+                >
+                  {tab === 'tasks' ? <Bot size={15}/> : <CalendarClock size={15}/>}
+                  <span>{tab === 'tasks' ? 'New Bot' : 'New task'}</span>
                 </button>
                 <button
                   type="button"
@@ -447,44 +453,92 @@ export default function App() {
           </div>
         </div>
       </header>
-      {searching && <div className="search"><Search size={16}/><input autoFocus value={query} onChange={event => setQuery(event.target.value)} placeholder={tab === 'bots' ? 'Search bots and group chats…' : 'Search sessions…'}/><button onClick={() => { setQuery(''); setSearching(false) }}><X size={16}/></button></div>}
+      {searching && <div className="search"><Search size={16}/><input autoFocus value={query} onChange={event => setQuery(event.target.value)} placeholder={tab === 'bots' ? 'Search bots and group chats…' : tab === 'sessions' ? 'Search sessions…' : 'Search tasks…'}/><button onClick={() => { setQuery(''); setSearching(false) }}><X size={16}/></button></div>}
     </div>
-    <div className="roster-list-scroll" ref={rosterScrollRef} onTouchStart={rosterTouchStart} onTouchMove={rosterTouchMove} onTouchEnd={rosterTouchEnd}>
-      {rosterPullActive && <div className="roster-pull-cue" style={{ height: `${rosterPullRefreshing ? 46 : rosterPullDistance}px` }}><RefreshCw size={15} className={rosterPullRefreshing ? 'pull-refresh-spinner' : ''}/><span>{rosterPullRefreshing ? 'Refreshing…' : rosterPullDistance >= 56 ? 'Release to refresh' : 'Pull to refresh'}</span></div>}
-      {error && <Notice message={error} retry={() => void refresh()}/>}
-      {loading && !profiles.length ? <Skeleton/> : tab === 'bots' ? <section className="bot-list" key="bots-list">{rows.map(({ profile, session }, index) => <button className="bot-row enter" style={{ animationDelay: `${Math.min(index, 8) * 28}ms` }} key={profile.name} disabled={!session} onClick={() => session && void openSession(session)}><BotAvatar profile={profile} fallbackName={profile.name}/><span className="bot-copy"><b>{profile.display_name || titleize(profile.name)}</b><small>{session?.preview || profile.description || 'No messages yet'} </small></span><span className="meta">{ago(session?.last_active)}{session && <i className={session.unread ? 'unread' : ''}/>}</span></button>)}</section> : <section className="bot-list" key="sessions-list">{visibleSessions.map((session, index) => <button className="bot-row enter" style={{ animationDelay: `${Math.min(index, 8) * 28}ms` }} key={`${session.profile}:${session.id}`} onClick={() => void openSession(session)}><BotAvatar profile={profiles.find(profile => profile.name === session.profile)} fallbackName={session.profile} variant="session"/><span className="bot-copy"><b>{session.title || 'Untitled session'}</b><small>{titleize(session.profile || 'default')} · {session.preview}</small></span><span className="meta">{ago(session.last_active)}</span></button>)}</section>}
-    </div>
+    {tab === 'tasks' ? (
+      <TasksView
+        profiles={profiles}
+        query={searching ? query : ''}
+        createOpen={createTaskOpen}
+        setCreateOpen={setCreateTaskOpen}
+      />
+    ) : (
+      <div className="roster-list-scroll" ref={rosterScrollRef} onTouchStart={rosterTouchStart} onTouchMove={rosterTouchMove} onTouchEnd={rosterTouchEnd}>
+        {rosterPullActive && <div className="roster-pull-cue" style={{ height: `${rosterPullRefreshing ? 46 : rosterPullDistance}px` }}><RefreshCw size={15} className={rosterPullRefreshing ? 'pull-refresh-spinner' : ''}/><span>{rosterPullRefreshing ? 'Refreshing…' : rosterPullDistance >= 56 ? 'Release to refresh' : 'Pull to refresh'}</span></div>}
+        {error && <Notice message={error} retry={() => void refresh()}/>}
+        {loading && !profiles.length ? <Skeleton/> : tab === 'bots' ? <section className="bot-list" key="bots-list">{rows.map(({ profile, session }, index) => <button className="bot-row enter" style={{ animationDelay: `${Math.min(index, 8) * 28}ms` }} key={profile.name} disabled={!session} onClick={() => session && void openSession(session)}><BotAvatar profile={profile} fallbackName={profile.name}/><span className="bot-copy"><b>{profile.display_name || titleize(profile.name)}</b><small>{session?.preview || profile.description || 'No messages yet'} </small></span><span className="meta">{ago(session?.last_active)}{session && <i className={session.unread ? 'unread' : ''}/>}</span></button>)}</section> : <section className="bot-list" key="sessions-list">{visibleSessions.map((session, index) => <button className="bot-row enter" style={{ animationDelay: `${Math.min(index, 8) * 28}ms` }} key={`${session.profile}:${session.id}`} onClick={() => void openSession(session)}><BotAvatar profile={profiles.find(profile => profile.name === session.profile)} fallbackName={session.profile} variant="session"/><span className="bot-copy"><b>{session.title || 'Untitled session'}</b><small>{titleize(session.profile || 'default')} · {session.preview}</small></span><span className="meta">{ago(session.last_active)}</span></button>)}</section>}
+      </div>
+    )}
     <NavIsland tab={tab} setTab={setTab}/>
   </main>
 }
 
+const TABS: Array<{ id: Tab; label: string; icon: typeof Bot }> = [
+  { id: 'bots', label: 'Bots', icon: Bot },
+  { id: 'sessions', label: 'Sessions', icon: MessageSquare },
+  { id: 'tasks', label: 'Tasks', icon: ListTodo },
+]
+
 function NavIsland({ tab, setTab }: { tab: Tab; setTab: (tab: Tab) => void }) {
+  const [indicatorStyle, setIndicatorStyle] = useState<{ left: number; width: number } | null>(null)
+  const [hasAnimated, setHasAnimated] = useState(false)
+  const itemRefs = useRef<Record<Tab, HTMLButtonElement | null>>({
+    bots: null,
+    sessions: null,
+    tasks: null,
+  })
+
+  useLayoutEffect(() => {
+    const el = itemRefs.current[tab]
+    if (el) {
+      setIndicatorStyle({
+        left: el.offsetLeft,
+        width: el.offsetWidth,
+      })
+      if (!hasAnimated) {
+        requestAnimationFrame(() => setHasAnimated(true))
+      }
+    }
+  }, [tab, hasAnimated])
+
+  useEffect(() => {
+    const handleResize = () => {
+      const el = itemRefs.current[tab]
+      if (el) {
+        setIndicatorStyle({
+          left: el.offsetLeft,
+          width: el.offsetWidth,
+        })
+      }
+    }
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [tab])
+
   return (
     <nav className="nav-island" aria-label="Page navigation">
-      <button
-        type="button"
-        className={`nav-island-item ${tab === 'bots' ? 'active' : ''}`}
-        onClick={() => setTab('bots')}
-      >
-        <Bot size={13} strokeWidth={1.6} />
-        <span>Bots</span>
-      </button>
-      <button
-        type="button"
-        className={`nav-island-item ${tab === 'sessions' ? 'active' : ''}`}
-        onClick={() => setTab('sessions')}
-      >
-        <MessageSquare size={13} strokeWidth={1.6} />
-        <span>Sessions</span>
-      </button>
-      <button
-        type="button"
-        className={`nav-island-item ${tab === 'tasks' ? 'active' : ''}`}
-        onClick={() => setTab('tasks')}
-      >
-        <ListTodo size={13} strokeWidth={1.6} />
-        <span>Tasks</span>
-      </button>
+      {indicatorStyle && (
+        <span
+          className={`nav-island-indicator ${hasAnimated ? 'animate' : ''}`}
+          style={{
+            transform: `translateX(${indicatorStyle.left}px)`,
+            width: `${indicatorStyle.width}px`,
+          }}
+          aria-hidden="true"
+        />
+      )}
+      {TABS.map(({ id, label, icon: Icon }) => (
+        <button
+          key={id}
+          type="button"
+          ref={el => { itemRefs.current[id] = el }}
+          className={`nav-island-item ${tab === id ? 'active' : ''}`}
+          onClick={() => setTab(id)}
+        >
+          <Icon size={13} strokeWidth={1.6} />
+          <span>{label}</span>
+        </button>
+      ))}
     </nav>
   )
 }
