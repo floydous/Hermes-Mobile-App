@@ -18,11 +18,11 @@ on:
       build_type:
         description: 'Build variant'
         required: true
-        default: 'debug'
+        default: 'release'
         type: choice
         options:
-          - debug
           - release
+          - debug
       target_arch:
         description: 'Target Architecture'
         required: true
@@ -90,7 +90,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Setup Release Keystore (if provided)
+      - name: Setup Release Keystore
         id: keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.HERMES_MOBILE_KEYSTORE_BASE64 }}
@@ -99,22 +99,34 @@ jobs:
           KEY_PASSWORD: ${{ secrets.HERMES_MOBILE_KEY_PASSWORD }}
         run: |
           if [ -n "$KEYSTORE_BASE64" ] && [ -n "$STORE_PASSWORD" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASSWORD" ]; then
-            echo "Keystore secret detected. Configuring release signing..."
+            echo "Custom keystore secret detected. Configuring release signing..."
             KEYSTORE_PATH="$RUNNER_TEMP/release.jks"
             echo "$KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
             echo "HERMES_MOBILE_KEYSTORE=$KEYSTORE_PATH" >> $GITHUB_ENV
             echo "HERMES_MOBILE_STORE_PASSWORD=$STORE_PASSWORD" >> $GITHUB_ENV
             echo "HERMES_MOBILE_KEY_ALIAS=$KEY_ALIAS" >> $GITHUB_ENV
             echo "HERMES_MOBILE_KEY_PASSWORD=$KEY_PASSWORD" >> $GITHUB_ENV
-            echo "has_keystore=true" >> $GITHUB_OUTPUT
           else
-            echo "No keystore secrets configured. Building with debug signing..."
-            echo "has_keystore=false" >> $GITHUB_OUTPUT
+            echo "Generating automatic release signing keystore for CI..."
+            KEYSTORE_PATH="$RUNNER_TEMP/ci-release.jks"
+            keytool -genkeypair -v \
+              -keystore "$KEYSTORE_PATH" \
+              -storepass "hermesandroid" \
+              -alias "hermes-mobile" \
+              -keypass "hermesandroid" \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=HermesMobile, OU=Hermes, O=Nous, L=SF, S=CA, C=US"
+            echo "HERMES_MOBILE_KEYSTORE=$KEYSTORE_PATH" >> $GITHUB_ENV
+            echo "HERMES_MOBILE_STORE_PASSWORD=hermesandroid" >> $GITHUB_ENV
+            echo "HERMES_MOBILE_KEY_ALIAS=hermes-mobile" >> $GITHUB_ENV
+            echo "HERMES_MOBILE_KEY_PASSWORD=hermesandroid" >> $GITHUB_ENV
           fi
 
       - name: Build Android APK
         env:
-          BUILD_TYPE: ${{ inputs.build_type || 'debug' }}
+          BUILD_TYPE: ${{ inputs.build_type || 'release' }}
           TARGET_ARCH: ${{ inputs.target_arch || 'aarch64' }}
         run: |
           TARGET_FLAG="--target $TARGET_ARCH"
@@ -122,12 +134,12 @@ jobs:
             TARGET_FLAG=""
           fi
 
-          if [ "$BUILD_TYPE" = "release" ] && [ "${{ steps.keystore.outputs.has_keystore }}" = "true" ]; then
-            echo "Building signed Release APK..."
-            pnpm tauri android build --apk $TARGET_FLAG
-          else
+          if [ "$BUILD_TYPE" = "debug" ]; then
             echo "Building Debug APK..."
             pnpm tauri android build --apk --debug $TARGET_FLAG
+          else
+            echo "Building optimized Release APK for $TARGET_ARCH..."
+            pnpm tauri android build --apk $TARGET_FLAG --split-per-abi
           fi
 
       - name: Upload APK to Actions Artifacts
@@ -145,12 +157,12 @@ jobs:
           tag_name: latest-apk
           name: "Hermes Mobile (Latest APK)"
           body: |
-            ### 📱 Hermes Mobile Android APK
+            ### 📱 Hermes Mobile Android APK (Release)
             - **Commit**: `${{ github.sha }}`
             - **Built from**: `${{ github.ref_name }}`
 
             #### 📥 Direct Installation:
-            Tap the `.apk` file below on your phone to download and install directly!
+            Tap the `app-arm64-release.apk` file below on your phone to download and install directly!
           prerelease: true
           make_latest: true
           files: |

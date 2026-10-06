@@ -6,7 +6,6 @@ import remarkGfm from 'remark-gfm'
 
 import type { LiveMessage, LiveProfile } from '../hermes'
 import { formatMessageTime, formatResponseStats } from '../message-stats'
-import { BotAvatar } from './BotAvatar'
 
 function CodeBlock({ className, children }: { className?: string; children: ReactNode }) {
   const [copied, setCopied] = useState(false)
@@ -71,13 +70,12 @@ export const MessageCard = memo(function MessageCard({ message, onEdit, profile,
 
   return <article className={`message-row assistant-row ${revealTimestamp ? 'timestamp-visible' : ''}`} onPointerDown={event => setSwipeStartX(event.clientX)} onPointerUp={event => finishSwipe(event.clientX)} onPointerCancel={() => setSwipeStartX(null)}>
     <div className="assistant-message-layout">
-      <BotAvatar profile={profile} fallbackName={fallbackName} variant="message"/>
-      <div className="assistant-message-content">
+      <div className="assistant-bubble">
         {message.reasoning && <details className="thinking-card"><summary><span className="thinking-title"><Lightbulb size={14}/><b>Thinking</b><em>{reasoningSummary}</em></span><span className="disclosure">⌄</span></summary><div className="thinking-copy"><MarkdownContent>{message.reasoning}</MarkdownContent></div></details>}
         {textContent && <MarkdownContent>{textContent}</MarkdownContent>}
         {stats && <div className="response-stats" aria-label="Response generation statistics">{stats}</div>}
-        <div className="message-actions"><button onClick={() => void copy()}>{copied ? <Check size={13}/> : <Copy size={13}/>}<span>{copied ? 'Copied' : 'Copy'}</span></button></div>
       </div>
+      <div className="message-actions"><button onClick={() => void copy()}>{copied ? <Check size={13}/> : <Copy size={13}/>}<span>{copied ? 'Copied' : 'Copy'}</span></button></div>
     </div>
     {timestamp && <time className="message-time">{timestamp}</time>}
   </article>
