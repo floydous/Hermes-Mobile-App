@@ -16,5 +16,7 @@ export function formatResponseStats(message: LiveMessage): string | null {
 
 export function formatMessageTime(timestamp?: number): string | null {
   if (!timestamp) return null
-  return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(new Date(timestamp * 1000))
+  return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' })
+    .format(new Date(timestamp * 1000))
+    .replace('.', ':')
 }

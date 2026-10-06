@@ -144,8 +144,14 @@ export async function createProfile(input: { name: string; description: string; 
 }
 
 export async function loadMessages(sessionId: string, profile: string, baseUrl = activeHermes): Promise<LiveMessage[]> {
-  const raw = await invoke<string>('hermes_session_messages', { baseUrl, sessionId, profile })
-  return (JSON.parse(raw) as { messages: LiveMessage[] }).messages
+  const safeProfile = profile || 'default'
+  const raw = await invoke<string>('hermes_session_messages', { baseUrl, sessionId, profile: safeProfile })
+  const parsed = JSON.parse(raw) as { messages?: LiveMessage[] }
+  const messages = Array.isArray(parsed?.messages) ? parsed.messages : []
+  return messages.map(msg => ({
+    ...msg,
+    content: typeof msg.content === 'string' ? msg.content : msg.content == null ? '' : String(msg.content),
+  }))
 }
 
 export async function transcribeAudio(profile: string, dataUrl: string, mimeType: string, baseUrl = activeHermes): Promise<string> {

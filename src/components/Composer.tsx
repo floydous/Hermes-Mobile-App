@@ -35,7 +35,7 @@ export type ComposerProps = {
 
 const reasoningChoices = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']
 const labelReasoning = (value: string) => value === 'none' ? 'Off' : value === 'xhigh' ? 'XHigh' : value[0].toUpperCase() + value.slice(1)
-const titleize = (value: string) => value.split(/[-_]+/).filter(Boolean).map(part => part[0].toUpperCase() + part.slice(1)).join(' ')
+const titleize = (value?: string | null) => (value || '').split(/[-_]+/).filter(Boolean).map(part => (part[0] ? part[0].toUpperCase() + part.slice(1) : '')).join(' ') || 'Bot'
 
 const toDataUrl = (file: File): Promise<string> => new Promise((resolve, reject) => {
   const reader = new FileReader()
@@ -120,14 +120,14 @@ export const Composer = memo(function Composer({ session, profiles, sending, dra
       }).finally(() => {
         if (!cancelled) setSlashLoading(false)
       })
-    }, 90)
+    }, 200)
     return () => { cancelled = true; window.clearTimeout(timer) }
   }, [session.id, session.profile, slashText])
 
   useEffect(() => {
     const field = textareaRef.current
     if (!field) return
-    field.style.height = '0px'
+    field.style.height = 'auto'
     field.style.height = `${Math.min(132, Math.max(24, field.scrollHeight))}px`
   }, [draft])
 

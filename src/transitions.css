@@ -1,0 +1,115 @@
+:root {
+  --ease-out-smooth: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-page: 0.26s;
+  --duration-tab: 0.2s;
+}
+
+/* Base page smooth entrance */
+.app {
+  animation: app-page-enter var(--duration-page) var(--ease-out-smooth) backwards;
+  will-change: opacity, transform;
+}
+
+/* Sub-page drill-in (Settings, Chat, Wizard, Tasks, Profile sheets) */
+.app.panel,
+.app.chat-shell,
+.app.wizard,
+.app.tasks-sheet,
+.app.task-detail {
+  animation-name: app-subpage-enter;
+}
+
+/* Returning to main Roster */
+.app.roster-shell {
+  animation-name: app-roster-enter;
+}
+
+@keyframes app-page-enter {
+  0% {
+    opacity: 0;
+    transform: translateY(10px) scale(0.994);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes app-subpage-enter {
+  0% {
+    opacity: 0;
+    transform: translateY(14px) scale(0.99);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes app-roster-enter {
+  0% {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.996);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Edge swipe gesture compatibility */
+.app.edge-swipe-active,
+.app.edge-swipe-committed {
+  animation: none !important;
+}
+
+/* Roster tab switch (Bots <-> Sessions) */
+.bot-list {
+  animation: app-tab-enter var(--duration-tab) var(--ease-out-smooth) backwards;
+  will-change: opacity, transform;
+}
+
+@keyframes app-tab-enter {
+  0% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Create wizard step transition */
+.wizard > section {
+  animation: app-step-enter 0.24s var(--ease-out-smooth) backwards;
+  will-change: opacity, transform;
+}
+
+@keyframes app-step-enter {
+  0% {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Respect user preference for reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .app,
+  .app.panel,
+  .app.chat-shell,
+  .app.wizard,
+  .app.tasks-sheet,
+  .app.task-detail,
+  .app.roster-shell,
+  .bot-list,
+  .wizard > section {
+    animation: none !important;
+    transform: none !important;
+    will-change: auto !important;
+  }
+}

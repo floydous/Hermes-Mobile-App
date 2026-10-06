@@ -162,7 +162,16 @@ fn hermes_session_messages(
     profile: String,
 ) -> Result<String, String> {
     let origin = server_origin(&base_url);
-    authenticated_get(&app, &origin, &format!("/api/sessions/{session_id}/messages?profile={profile}&limit=120&order=latest&include_compacted=true"))
+    let target_profile = if profile.trim().is_empty() { "default" } else { profile.trim() };
+    authenticated_get(
+        &app,
+        &origin,
+        &format!(
+            "/api/sessions/{}/messages?profile={}&limit=120&order=latest&include_compacted=true",
+            urlencoding::encode(&session_id),
+            urlencoding::encode(target_profile)
+        ),
+    )
 }
 
 fn authenticated_post(origin: &str, path: &str, body: serde_json::Value) -> Result<String, String> {

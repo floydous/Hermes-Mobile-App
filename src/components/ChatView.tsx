@@ -32,7 +32,7 @@ type Props = {
   stop: () => void
 }
 
-const titleize = (value: string) => value.split(/[-_]+/).filter(Boolean).map(part => part[0].toUpperCase() + part.slice(1)).join(' ')
+const titleize = (value?: string | null) => (value || '').split(/[-_]+/).filter(Boolean).map(part => (part[0] ? part[0].toUpperCase() + part.slice(1) : '')).join(' ') || 'Bot'
 
 export function ChatView({ session, conversationLoading, messages, settledAssistant, profiles, streaming, sending, toolActivities, error, back, refresh, openProfile, onSessionModelChange, submit, submitVoice, stop }: Props) {
   const shellRef = useRef<HTMLElement>(null)
@@ -53,8 +53,8 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
   const [editRequest, setEditRequest] = useState<ComposerEditRequest | null>(null)
   const [modelLabel, setModelLabel] = useState(session.model || '')
   const dropFilesRef: ComposerDropFilesRef = useRef<((files: File[]) => void) | null>(null)
-  const botProfile = profiles.find(profile => profile.name === session.profile)
-  const botName = botProfile?.display_name || (session.title && session.title !== 'Bot Chat' ? session.title : titleize(session.profile))
+  const botProfile = profiles.find(profile => profile.name === (session.profile || 'default'))
+  const botName = botProfile?.display_name || (session.title && session.title !== 'Bot Chat' ? session.title : titleize(session.profile || 'default'))
 
   const visibleError = error || controlError
   const activeAssistantText = settledAssistant?.content || streaming

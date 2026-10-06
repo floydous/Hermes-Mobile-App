@@ -13,5 +13,14 @@ import './appearance-picker.css'
 import './theme.css'
 import './connection-settings.css'
 import './edge-swipe.css'
+import './transitions.css'
 
-createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>)
+const rootElement = document.getElementById('root')
+if (rootElement) {
+  const root = createRoot(rootElement)
+  root.render(
+    <StrictMode>
+      <App />
+    </StrictMode>
+  )
+}

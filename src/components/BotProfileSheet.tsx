@@ -7,7 +7,7 @@ import { CapabilityManager } from './CapabilityManager'
 import { useEdgeSwipeBack } from '../edge-swipe'
 
 type Props = { profile?: LiveProfile; session: LiveSession; onClose: () => void; onUpdated: () => void }
-const titleize = (value: string) => value.split(/[-_]+/).filter(Boolean).map(part => part[0].toUpperCase() + part.slice(1)).join(' ')
+const titleize = (value?: string | null) => (value || '').split(/[-_]+/).filter(Boolean).map(part => (part[0] ? part[0].toUpperCase() + part.slice(1) : '')).join(' ') || 'Bot'
 
 export function BotProfileSheet({ profile, session, onClose, onUpdated }: Props) {
   const shellRef = useRef<HTMLElement>(null)
