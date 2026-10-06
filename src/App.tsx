@@ -43,6 +43,17 @@ const roles: Record<string, [string, string]> = {
   Custom: ['', ''],
 }
 
+export type ActiveBotTurn = {
+  sessionId: string
+  profile: string
+  status: 'thinking' | 'tool' | 'streaming'
+  statusText: string
+  streamingText: string
+  toolActivities: ToolActivity[]
+  userMessage?: { id: number; role: 'user'; content: string }
+  startedAt: number
+}
+
 export default function App() {
   const [tab, setTab] = useState<Tab>('bots')
   const [profiles, setProfiles] = useState<LiveProfile[]>([])
@@ -74,6 +85,9 @@ export default function App() {
   const sendingRef = useRef(false)
   sendingRef.current = sending
   const [toolActivities, setToolActivities] = useState<ToolActivity[]>([])
+  const [activeTurns, setActiveTurns] = useState<Record<string, ActiveBotTurn>>({})
+  const activeTurnsRef = useRef<Record<string, ActiveBotTurn>>({})
+  activeTurnsRef.current = activeTurns
   const [query, setQuery] = useState('')
   const [searching, setSearching] = useState(false)
   const [settings, setSettings] = useState(false)
@@ -229,33 +243,53 @@ export default function App() {
       preview: session.preview || '',
     }
     const requestId = ++sessionLoadRef.current
-    const turnId = ++chatTurnGenerationRef.current
+    const activeTurn = activeTurnsRef.current[safeSession.profile]
     const startedAt = performance.now()
     flushSync(() => {
       setSelected(safeSession)
       setProfileSheet(false)
-      setMessages([])
       setSettledAssistant(null)
       setError('')
-      setSending(false)
-      setStreaming('')
-      setToolActivities([])
-      setConversationLoading(true)
+      if (activeTurn) {
+        setSending(true)
+        setStreaming(activeTurn.streamingText)
+        setToolActivities(activeTurn.toolActivities)
+        setConversationLoading(false)
+        if (activeTurn.userMessage) {
+          setMessages([activeTurn.userMessage])
+        }
+      } else {
+        setMessages([])
+        setSending(false)
+        setStreaming('')
+        setToolActivities([])
+        setConversationLoading(true)
+      }
     })
     return (async () => {
       try {
         const loaded = await loadMessages(safeSession.id, safeSession.profile)
-        if (requestId !== sessionLoadRef.current || turnId !== chatTurnGenerationRef.current) return
+        if (requestId !== sessionLoadRef.current) return
         const latestAssistant = latestUsage ? [...loaded].reverse().findIndex(message => message.role === 'assistant') : -1
-        setMessages(latestAssistant >= 0 ? loaded.map((message, index) => index === loaded.length - latestAssistant - 1 ? { ...message, usage: latestUsage } : message) : loaded)
+        const resolvedLoaded = latestAssistant >= 0 ? loaded.map((message, index) => index === loaded.length - latestAssistant - 1 ? { ...message, usage: latestUsage } : message) : loaded
+
+        const currentActive = activeTurnsRef.current[safeSession.profile]
+        if (currentActive?.userMessage) {
+          const hasUserMsg = resolvedLoaded.some(m => m.id === currentActive.userMessage?.id || (m.role === 'user' && m.content === currentActive.userMessage?.content))
+          setMessages(hasUserMsg ? resolvedLoaded : [...resolvedLoaded, currentActive.userMessage])
+        } else {
+          setMessages(resolvedLoaded)
+        }
       }
       catch (reason) {
-        if (requestId === sessionLoadRef.current && turnId === chatTurnGenerationRef.current) setError(reason instanceof Error ? reason.message : 'Could not load this Hermes conversation.')
+        if (requestId === sessionLoadRef.current) setError(reason instanceof Error ? reason.message : 'Could not load this Hermes conversation.')
       }
       finally {
-        const remaining = Math.max(0, 700 - (performance.now() - startedAt))
-        if (remaining) await new Promise(resolve => window.setTimeout(resolve, remaining))
-        if (requestId === sessionLoadRef.current && turnId === chatTurnGenerationRef.current) setConversationLoading(false)
+        if (!activeTurnsRef.current[safeSession.profile]) {
+          const remaining = Math.max(0, 400 - (performance.now() - startedAt))
+          if (remaining) await new Promise(resolve => window.setTimeout(resolve, remaining))
+        }
+        if (requestId === sessionLoadRef.current) setConversationLoading(false)
       }
     })()
   }, [])
@@ -263,9 +297,8 @@ export default function App() {
   const submit = useCallback(async (attachmentRefs: { name: string; refText: string }[] = [], rawText = ''): Promise<boolean> => {
     const turnSession = selectedRef.current
     if (!turnSession || sendingRef.current) return false
-    const turnId = ++chatTurnGenerationRef.current
-    const turnSessionRef = { id: turnSession.id, profile: turnSession.profile }
-    const isCurrentTurn = () => isActiveChatTurn(turnId, chatTurnGenerationRef.current, turnSessionRef, selectedRef.current)
+    const turnProfile = turnSession.profile
+    const turnSessionId = turnSession.id
     const text = rawText.trim()
     if (!text && !attachmentRefs.length) return false
     const prompt = buildAttachmentPrompt(text, attachmentRefs)
@@ -275,6 +308,19 @@ export default function App() {
     const priorSettled = settledSnapshot?.sessionId === turnSession.id && settledSnapshot.profile === turnSession.profile ? settledSnapshot : null
     const priorAssistantMessage = priorSettled ? { id: -(Date.now() + 1), role: 'assistant' as const, content: priorSettled.content, usage: priorSettled.usage } : null
     const localUserMessage = { id: -Date.now(), role: 'user' as const, content: attachmentSummary(text, attachmentRefs) }
+
+    const initialTurn: ActiveBotTurn = {
+      sessionId: turnSessionId,
+      profile: turnProfile,
+      status: 'thinking',
+      statusText: 'Thinking…',
+      streamingText: '',
+      toolActivities: [],
+      userMessage: localUserMessage,
+      startedAt: Date.now(),
+    }
+    setActiveTurns(prev => ({ ...prev, [turnProfile]: initialTurn }))
+
     setSettledAssistant(null)
     setError('')
     setSending(true)
@@ -282,43 +328,135 @@ export default function App() {
     setToolActivities([])
     setMessages(items => [...items, ...(priorAssistantMessage ? [priorAssistantMessage] : []), localUserMessage])
     try {
-      await connectAndSubmit(turnSession.id, turnSession.profile, prompt, (type, payload) => {
-        if (!isCurrentTurn()) return
+      await connectAndSubmit(turnSessionId, turnProfile, prompt, (type, payload) => {
         if (type === 'message.delta') {
           finalText += String(payload.text || '')
-          setStreaming(finalText)
+          setActiveTurns(prev => {
+            const current = prev[turnProfile]
+            if (!current) return prev
+            return {
+              ...prev,
+              [turnProfile]: {
+                ...current,
+                status: 'streaming',
+                statusText: 'Replying…',
+                streamingText: finalText,
+              },
+            }
+          })
+          if (selectedRef.current?.profile === turnProfile) {
+            setStreaming(finalText)
+          }
         }
         if (type === 'message.complete') {
           finalText = String(payload.text || finalText)
-          setStreaming(finalText)
           completionUsage = payload.usage && typeof payload.usage === 'object' ? payload.usage as LiveUsage : undefined
+          setActiveTurns(prev => {
+            const current = prev[turnProfile]
+            if (!current) return prev
+            return {
+              ...prev,
+              [turnProfile]: {
+                ...current,
+                streamingText: finalText,
+              },
+            }
+          })
+          if (selectedRef.current?.profile === turnProfile) {
+            setStreaming(finalText)
+          }
         }
-        if (type === 'tool.start') setToolActivities(items => {
-          const id = String(payload.tool_id || payload.name || `tool-${items.length}`)
-          return [...items.filter(item => item.id !== id), { id, name: String(payload.name || 'tool'), status: 'running', summary: typeof payload.context === 'string' ? payload.context : undefined }]
-        })
-        if (type === 'tool.complete') setToolActivities(items => {
-          const id = String(payload.tool_id || payload.name || `tool-${items.length}`)
-          return [...items.filter(item => item.id !== id), { id, name: String(payload.name || 'tool'), status: 'done', duration_s: typeof payload.duration_s === 'number' ? payload.duration_s : undefined, summary: typeof payload.summary === 'string' ? payload.summary : undefined }]
-        })
-        if (type === 'error') setError(String(payload.message || 'Hermes could not complete that request.'))
+        if (type === 'tool.start') {
+          const id = String(payload.tool_id || payload.name || `tool-${Date.now()}`)
+          const toolName = String(payload.name || 'tool')
+          setActiveTurns(prev => {
+            const current = prev[turnProfile]
+            if (!current) return prev
+            const nextTools = [
+              ...current.toolActivities.filter(t => t.id !== id),
+              { id, name: toolName, status: 'running' as const, summary: typeof payload.context === 'string' ? payload.context : undefined },
+            ]
+            const activeCount = nextTools.length
+            const statusText = activeCount > 1 ? `Using ${toolName} · ${activeCount} tool calls…` : `Using ${toolName}…`
+            return {
+              ...prev,
+              [turnProfile]: {
+                ...current,
+                status: 'tool',
+                statusText,
+                toolActivities: nextTools,
+              },
+            }
+          })
+          if (selectedRef.current?.profile === turnProfile) {
+            setToolActivities(items => [
+              ...items.filter(item => item.id !== id),
+              { id, name: toolName, status: 'running', summary: typeof payload.context === 'string' ? payload.context : undefined },
+            ])
+          }
+        }
+        if (type === 'tool.complete') {
+          const id = String(payload.tool_id || payload.name || `tool-${Date.now()}`)
+          const toolName = String(payload.name || 'tool')
+          setActiveTurns(prev => {
+            const current = prev[turnProfile]
+            if (!current) return prev
+            const nextTools = [
+              ...current.toolActivities.filter(t => t.id !== id),
+              { id, name: toolName, status: 'done' as const, duration_s: typeof payload.duration_s === 'number' ? payload.duration_s : undefined, summary: typeof payload.summary === 'string' ? payload.summary : undefined },
+            ]
+            return {
+              ...prev,
+              [turnProfile]: {
+                ...current,
+                toolActivities: nextTools,
+              },
+            }
+          })
+          if (selectedRef.current?.profile === turnProfile) {
+            setToolActivities(items => [
+              ...items.filter(item => item.id !== id),
+              { id, name: toolName, status: 'done', duration_s: typeof payload.duration_s === 'number' ? payload.duration_s : undefined, summary: typeof payload.summary === 'string' ? payload.summary : undefined },
+            ])
+          }
+        }
+        if (type === 'error') {
+          if (selectedRef.current?.profile === turnProfile) {
+            setError(String(payload.message || 'Hermes could not complete that request.'))
+          }
+        }
       })
-      if (!isCurrentTurn()) return false
-      const terminalAssistant = settleAssistantResponse(turnSession.id, turnSession.profile, finalText, completionUsage)
-      if (terminalAssistant) {
-        setSettledAssistant(terminalAssistant)
-        setSending(false)
-        setStreaming('')
-      } else {
-        await openSession(turnSession, completionUsage)
+      setActiveTurns(prev => {
+        const next = { ...prev }
+        delete next[turnProfile]
+        return next
+      })
+      const terminalAssistant = settleAssistantResponse(turnSessionId, turnProfile, finalText, completionUsage)
+      if (selectedRef.current?.profile === turnProfile) {
+        if (terminalAssistant) {
+          setSettledAssistant(terminalAssistant)
+          setSending(false)
+          setStreaming('')
+        } else {
+          await openSession(turnSession, completionUsage)
+        }
       }
       await refresh()
       return true
     } catch (reason) {
-      if (isCurrentTurn()) setError(reason instanceof Error ? reason.message : 'Could not send to Hermes.')
+      setActiveTurns(prev => {
+        const next = { ...prev }
+        delete next[turnProfile]
+        return next
+      })
+      if (selectedRef.current?.profile === turnProfile) {
+        setError(reason instanceof Error ? reason.message : 'Could not send to Hermes.')
+        setSending(false)
+        setStreaming('')
+      }
       return false
     } finally {
-      if (isCurrentTurn()) {
+      if (selectedRef.current?.profile === turnProfile) {
         setSending(false)
         setStreaming('')
       }
@@ -328,6 +466,12 @@ export default function App() {
   const stop = useCallback(async () => {
     const turnSession = selectedRef.current
     if (!turnSession || !sendingRef.current) return
+    setActiveTurns(prev => {
+      const next = { ...prev }
+      delete next[turnSession.profile]
+      return next
+    })
+    setSending(false)
     try { await interruptSession(turnSession.id) }
     catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not stop this Hermes turn.') }
   }, [])
@@ -466,7 +610,77 @@ export default function App() {
       <div className="roster-list-scroll" ref={rosterScrollRef} onTouchStart={rosterTouchStart} onTouchMove={rosterTouchMove} onTouchEnd={rosterTouchEnd}>
         {rosterPullActive && <div className="roster-pull-cue" style={{ height: `${rosterPullRefreshing ? 46 : rosterPullDistance}px` }}><RefreshCw size={15} className={rosterPullRefreshing ? 'pull-refresh-spinner' : ''}/><span>{rosterPullRefreshing ? 'Refreshing…' : rosterPullDistance >= 56 ? 'Release to refresh' : 'Pull to refresh'}</span></div>}
         {error && <Notice message={error} retry={() => void refresh()}/>}
-        {loading && !profiles.length ? <Skeleton/> : tab === 'bots' ? <section className="bot-list" key="bots-list">{rows.map(({ profile, session }, index) => <button className="bot-row enter" style={{ animationDelay: `${Math.min(index, 8) * 28}ms` }} key={profile.name} disabled={!session} onClick={() => session && void openSession(session)}><BotAvatar profile={profile} fallbackName={profile.name}/><span className="bot-copy"><b>{profile.display_name || titleize(profile.name)}</b><small>{session?.preview || profile.description || 'No messages yet'} </small></span><span className="meta">{ago(session?.last_active)}{session && <i className={session.unread ? 'unread' : ''}/>}</span></button>)}</section> : <section className="bot-list" key="sessions-list">{visibleSessions.map((session, index) => <button className="bot-row enter" style={{ animationDelay: `${Math.min(index, 8) * 28}ms` }} key={`${session.profile}:${session.id}`} onClick={() => void openSession(session)}><BotAvatar profile={profiles.find(profile => profile.name === session.profile)} fallbackName={session.profile} variant="session"/><span className="bot-copy"><b>{session.title || 'Untitled session'}</b><small>{titleize(session.profile || 'default')} · {session.preview}</small></span><span className="meta">{ago(session.last_active)}</span></button>)}</section>}
+        {loading && !profiles.length ? <Skeleton/> : tab === 'bots' ? (
+          <section className="bot-list" key="bots-list">
+            {rows.map(({ profile, session }, index) => {
+              const activeTurn = activeTurns[profile.name]
+              const isWorking = Boolean(activeTurn)
+              return (
+                <button
+                  className={`bot-row enter ${isWorking ? 'working' : ''}`}
+                  style={{ animationDelay: `${Math.min(index, 8) * 28}ms` }}
+                  key={profile.name}
+                  disabled={!session}
+                  onClick={() => session && void openSession(session)}
+                >
+                  <div className="bot-avatar-wrap">
+                    <BotAvatar profile={profile} fallbackName={profile.name}/>
+                    {isWorking && <span className="bot-status-pip" aria-hidden="true"/>}
+                  </div>
+                  <span className="bot-copy">
+                    <b>{profile.display_name || titleize(profile.name)}</b>
+                    {isWorking ? (
+                      <small className="bot-in-progress">
+                        <span className="live-wave" aria-hidden="true"><i/><i/><i/></span>
+                        <span className="live-status-text">{activeTurn.statusText}</span>
+                      </small>
+                    ) : (
+                      <small>{session?.preview || profile.description || 'No messages yet'} </small>
+                    )}
+                  </span>
+                  <span className="meta">
+                    {ago(session?.last_active)}
+                    {session && <i className={session.unread ? 'unread' : ''}/>}
+                  </span>
+                </button>
+              )
+            })}
+          </section>
+        ) : (
+          <section className="bot-list" key="sessions-list">
+            {visibleSessions.map((session, index) => {
+              const activeTurn = activeTurns[session.profile]
+              const isWorking = Boolean(activeTurn && activeTurn.sessionId === session.id)
+              return (
+                <button
+                  className={`bot-row enter ${isWorking ? 'working' : ''}`}
+                  style={{ animationDelay: `${Math.min(index, 8) * 28}ms` }}
+                  key={`${session.profile}:${session.id}`}
+                  onClick={() => void openSession(session)}
+                >
+                  <div className="bot-avatar-wrap">
+                    <BotAvatar profile={profiles.find(profile => profile.name === session.profile)} fallbackName={session.profile} variant="session"/>
+                    {isWorking && <span className="bot-status-pip" aria-hidden="true"/>}
+                  </div>
+                  <span className="bot-copy">
+                    <b>{session.title || 'Untitled session'}</b>
+                    {isWorking ? (
+                      <small className="bot-in-progress">
+                        <span className="live-wave" aria-hidden="true"><i/><i/><i/></span>
+                        <span className="live-status-text">{activeTurn.statusText}</span>
+                      </small>
+                    ) : (
+                      <small>{titleize(session.profile || 'default')} · {session.preview}</small>
+                    )}
+                  </span>
+                  <span className="meta">
+                    {ago(session.last_active)}
+                  </span>
+                </button>
+              )
+            })}
+          </section>
+        )}
       </div>
     )}
     <NavIsland tab={tab} setTab={setTab}/>

@@ -61,7 +61,38 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
   const settledStats = settledAssistant ? formatResponseStats({ id: -1, role: 'assistant', content: settledAssistant.content, usage: settledAssistant.usage }) : null
   const showActiveAssistant = sending || Boolean(settledAssistant)
   const showConversationLoading = conversationLoading
-  const showEmptyState = !conversationLoading && !messages.length && !showActiveAssistant && !streaming && !toolActivities.length && !visibleError
+  const showEmptyState = !conversationLoading && !messages.length && !showActiveAssistant && !streaming && !visibleError
+
+  const runningTool = toolActivities.slice().reverse().find(t => t.status === 'running')
+  const activeToolsCount = toolActivities.length
+
+  const [typingBubbleWidth, setTypingBubbleWidth] = useState<number | null>(null)
+  const typingMeasureRef = useRef<HTMLDivElement | null>(null)
+
+  let liveStatus = 'Thinking…'
+  if (runningTool) {
+    liveStatus = activeToolsCount > 1
+      ? `Using ${runningTool.name} · ${activeToolsCount} tool calls…`
+      : `Using ${runningTool.name}…`
+  } else if (activeToolsCount > 0 && !streaming) {
+    liveStatus = `${activeToolsCount} tool call${activeToolsCount > 1 ? 's' : ''} completed…`
+  }
+
+  useLayoutEffect(() => {
+    if (!sending || streaming) {
+      setTypingBubbleWidth(null)
+      return
+    }
+    const el = typingMeasureRef.current
+    if (!el) return
+    const update = () => {
+      setTypingBubbleWidth(Math.ceil(el.scrollWidth) + 34)
+    }
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [liveStatus, sending, streaming])
 
   const scrollToLatest = (behavior: ScrollBehavior = 'smooth') => {
     const thread = threadRef.current
@@ -182,8 +213,45 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
         {showConversationLoading && <section className="chat-empty-state conversation-loading" aria-live="polite" aria-label={`Loading ${botName} conversation`}><BotAvatar profile={botProfile} fallbackName={session.profile} variant="welcome"/><h1>{botName.toUpperCase()}</h1><p>{botName} · {modelLabel || 'Hermes Desktop'}</p><LoadingSpinner/></section>}
         {showEmptyState && <section className="chat-empty-state" aria-label={`Start a conversation with ${botName}`}><BotAvatar profile={botProfile} fallbackName={session.profile} variant="welcome"/><h1>{botName.toUpperCase()}</h1><p>Say something to get started.</p></section>}
         {messages.map(message => <MessageCard key={message.id} message={message} onEdit={editMessage} profile={botProfile} fallbackName={session.profile} revealTimestamp={message.role === 'assistant' && revealedTimestampId === message.id} onRevealTimestamp={() => setRevealedTimestampId(current => current === message.id ? null : message.id)}/>)}
-        {toolActivities.map(activity => <ToolActivityRow activity={activity} key={activity.id}/>)}
-        {showActiveAssistant && <article className="message-row assistant-row live-response"><div className="assistant-message-layout"><div className="assistant-bubble">{sending && !streaming && <div className="live-label"><span className="stream-pulse"/> Thinking</div>}{activeAssistantText && <MarkdownContent>{activeAssistantText}</MarkdownContent>}<div className={`response-stats ${settledStats ? '' : 'response-stats-placeholder'}`} aria-label={settledStats ? 'Response generation statistics' : undefined} aria-hidden={settledStats ? undefined : true}>{settledStats || '\u00a0'}</div></div></div></article>}
+        {showActiveAssistant && (
+          <article className="message-row assistant-row live-response">
+            <div className="assistant-message-layout">
+              <div
+                className={`assistant-bubble ${sending && !streaming ? 'live-typing' : ''}`}
+                style={typingBubbleWidth != null ? { width: `${typingBubbleWidth}px` } : undefined}
+              >
+                {sending && !streaming && (
+                  <div className="typing-indicator" ref={typingMeasureRef} aria-live="polite">
+                    <span className="typing-dots" aria-hidden="true">
+                      <span className="dot" />
+                      <span className="dot" />
+                      <span className="dot" />
+                    </span>
+                    <span className="typing-status" key={liveStatus}>{liveStatus}</span>
+                  </div>
+                )}
+                {activeAssistantText && (
+                  <>
+                    <MarkdownContent>{activeAssistantText}</MarkdownContent>
+                    {sending && (
+                      <div className="typing-inline" aria-hidden="true">
+                        <span className="typing-dots">
+                          <span className="dot" />
+                          <span className="dot" />
+                          <span className="dot" />
+                        </span>
+                        {runningTool && <span className="typing-status">{runningTool.name}…</span>}
+                      </div>
+                    )}
+                  </>
+                )}
+                {settledStats && (
+                  <div className="response-stats" aria-label="Response generation statistics">{settledStats}</div>
+                )}
+              </div>
+            </div>
+          </article>
+        )}
       </div>
     </div>
 
@@ -195,10 +263,4 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
 
 function LoadingSpinner() {
   return <span className="conversation-spinner" role="status" aria-label="Loading"><i/><i/><i/><i/><i/><i/><i/><i/><i/><i/><i/><i/></span>
-}
-
-function ToolActivityRow({ activity }: { activity: ToolActivity }) {
-  const running = activity.status === 'running'
-  const failed = activity.status === 'failed'
-  return <div className={`live-tool ${failed ? 'failed' : ''}`}><span className={running ? 'tool-spinner' : 'tool-state'}>{running ? '⋯' : failed ? '!' : '✓'}</span><span><b>{activity.name}</b><small>{running ? 'running…' : failed ? 'failed' : activity.summary || 'done'}</small></span>{activity.duration_s != null && <time>{activity.duration_s.toFixed(1)}s</time>}</div>
 }

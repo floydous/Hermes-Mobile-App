@@ -12,7 +12,7 @@ describe('response stats layout contract', () => {
   })
 
   it('keeps completed reply text aligned with its avatar by removing the stream label once text exists', () => {
-    expect(chatView).toContain('{sending && !streaming && <div className="live-label"><span className="stream-pulse"/> Thinking</div>}')
+    expect(chatView).toContain('{sending && !streaming &&')
     expect(chatView).not.toContain('live-label-placeholder')
   })
 })

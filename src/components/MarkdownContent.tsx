@@ -1,5 +1,5 @@
 import { memo, useState, type ReactNode } from 'react'
-import { Check, Copy, Lightbulb, Wrench } from 'lucide-react'
+import { Check, Copy } from 'lucide-react'
 import Markdown from 'react-markdown'
 import rehypeHighlight from 'rehype-highlight'
 import remarkGfm from 'remark-gfm'
@@ -47,13 +47,15 @@ type MessageCardProps = {
   onRevealTimestamp: () => void
 }
 
-export const MessageCard = memo(function MessageCard({ message, onEdit, profile, fallbackName, revealTimestamp, onRevealTimestamp }: MessageCardProps) {
+export const MessageCard = memo(function MessageCard({ message, onEdit, profile: _profile, fallbackName: _fallbackName, revealTimestamp, onRevealTimestamp }: MessageCardProps) {
   const [copied, setCopied] = useState(false)
   const [swipeStartX, setSwipeStartX] = useState<number | null>(null)
-  const reasoningSummary = message.reasoning?.split('\n')[0].replace(/^#{1,6}\s*/, '').replace(/[*_\x60~]/g, '').trim()
   const stats = formatResponseStats(message)
   const timestamp = formatMessageTime(message.timestamp)
   const textContent = typeof message.content === 'string' ? message.content : message.content == null ? '' : String(message.content)
+  const trimmed = textContent.trim()
+  if (message.role === 'system' || message.role === 'tool' || !trimmed) return null
+
   const copy = async () => {
     await navigator.clipboard.writeText(textContent)
     setCopied(true)
@@ -63,15 +65,11 @@ export const MessageCard = memo(function MessageCard({ message, onEdit, profile,
     if (swipeStartX != null && swipeStartX - x > 42) onRevealTimestamp()
     setSwipeStartX(null)
   }
-
-  if (message.role === 'system') return null
-  if (message.role === 'tool') return <div className="tool-card"><span className="tool-icon"><Wrench size={14}/></span><span><b>{message.tool_name || 'Tool activity'}</b><small>Completed</small></span><Check size={15} className="tool-check"/></div>
   if (message.role === 'user') return <article className="message-row user-row"><div className="user-bubble"><MarkdownContent>{textContent}</MarkdownContent></div><div className="message-actions"><button onClick={() => void copy()}>{copied ? <Check size={13}/> : <Copy size={13}/>}<span>{copied ? 'Copied' : 'Copy'}</span></button><button onClick={() => onEdit(textContent)}>Edit</button></div></article>
 
   return <article className={`message-row assistant-row ${revealTimestamp ? 'timestamp-visible' : ''}`} onPointerDown={event => setSwipeStartX(event.clientX)} onPointerUp={event => finishSwipe(event.clientX)} onPointerCancel={() => setSwipeStartX(null)}>
     <div className="assistant-message-layout">
       <div className="assistant-bubble">
-        {message.reasoning && <details className="thinking-card"><summary><span className="thinking-title"><Lightbulb size={14}/><b>Thinking</b><em>{reasoningSummary}</em></span><span className="disclosure">⌄</span></summary><div className="thinking-copy"><MarkdownContent>{message.reasoning}</MarkdownContent></div></details>}
         {textContent && <MarkdownContent>{textContent}</MarkdownContent>}
         {stats && <div className="response-stats" aria-label="Response generation statistics">{stats}</div>}
       </div>
