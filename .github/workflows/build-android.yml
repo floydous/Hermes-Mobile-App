@@ -1,0 +1,159 @@
+name: Build Android APK
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build variant'
+        required: true
+        default: 'debug'
+        type: choice
+        options:
+          - debug
+          - release
+      target_arch:
+        description: 'Target Architecture'
+        required: true
+        default: 'aarch64'
+        type: choice
+        options:
+          - aarch64
+          - armv7
+          - x86_64
+          - universal
+
+jobs:
+  build-apk:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Setup Android NDK
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+          NDK_VERSION=$(ls -1 "$ANDROID_HOME/ndk" | sort -V | tail -n 1)
+          if [ -z "$NDK_VERSION" ]; then
+            echo "Installing NDK r27..."
+            $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;27.0.12077973"
+            NDK_VERSION="27.0.12077973"
+          fi
+          echo "Using Android NDK: $NDK_VERSION"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> $GITHUB_ENV
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android, armv7-linux-androideabi, i686-linux-android, x86_64-linux-android
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Setup Release Keystore (if provided)
+        id: keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.HERMES_MOBILE_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.HERMES_MOBILE_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.HERMES_MOBILE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.HERMES_MOBILE_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ] && [ -n "$STORE_PASSWORD" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASSWORD" ]; then
+            echo "Keystore secret detected. Configuring release signing..."
+            KEYSTORE_PATH="$RUNNER_TEMP/release.jks"
+            echo "$KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
+            echo "HERMES_MOBILE_KEYSTORE=$KEYSTORE_PATH" >> $GITHUB_ENV
+            echo "HERMES_MOBILE_STORE_PASSWORD=$STORE_PASSWORD" >> $GITHUB_ENV
+            echo "HERMES_MOBILE_KEY_ALIAS=$KEY_ALIAS" >> $GITHUB_ENV
+            echo "HERMES_MOBILE_KEY_PASSWORD=$KEY_PASSWORD" >> $GITHUB_ENV
+            echo "has_keystore=true" >> $GITHUB_OUTPUT
+          else
+            echo "No keystore secrets configured. Building with debug signing..."
+            echo "has_keystore=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build Android APK
+        env:
+          BUILD_TYPE: ${{ inputs.build_type || 'debug' }}
+          TARGET_ARCH: ${{ inputs.target_arch || 'aarch64' }}
+        run: |
+          TARGET_FLAG="--target $TARGET_ARCH"
+          if [ "$TARGET_ARCH" = "universal" ]; then
+            TARGET_FLAG=""
+          fi
+
+          if [ "$BUILD_TYPE" = "release" ] && [ "${{ steps.keystore.outputs.has_keystore }}" = "true" ]; then
+            echo "Building signed Release APK..."
+            pnpm tauri android build --apk $TARGET_FLAG
+          else
+            echo "Building Debug APK..."
+            pnpm tauri android build --apk --debug $TARGET_FLAG
+          fi
+
+      - name: Upload APK to Actions Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: hermes-mobile-apk
+          path: src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish APK to GitHub Release (Direct Phone Download)
+        if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest-apk
+          name: "Hermes Mobile (Latest APK)"
+          body: |
+            ### 📱 Hermes Mobile Android APK
+            - **Commit**: `${{ github.sha }}`
+            - **Built from**: `${{ github.ref_name }}`
+
+            #### 📥 Direct Installation:
+            Tap the `.apk` file below on your phone to download and install directly!
+          prerelease: true
+          make_latest: true
+          files: |
+            src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -84,7 +84,7 @@
 .tasks-list-heading > span,
 .task-section-head > span {
   color: var(--muted);
-  font-family: GeistMono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: 'Geist Mono', GeistMono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 10px;
   font-weight: 400;
   letter-spacing: 1px;
@@ -92,7 +92,7 @@
 }
 .tasks-overview-stats b {
   color: var(--text);
-  font-family: GeistMono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: 'Geist Mono', GeistMono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 21px;
   font-weight: 400;
   line-height: 1;
@@ -128,7 +128,7 @@
 .tasks-filters button span {
   min-width: 17px;
   color: inherit;
-  font-family: GeistMono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: 'Geist Mono', GeistMono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 10px;
   opacity: .72;
   text-align: center;
@@ -153,7 +153,7 @@
   border-radius: 9999px;
   background: transparent;
   color: var(--muted);
-  font-family: GeistMono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: 'Geist Mono', GeistMono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 10px;
 }
 .task-card {

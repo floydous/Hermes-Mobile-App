@@ -490,15 +490,20 @@ function NavIsland({ tab, setTab }: { tab: Tab; setTab: (tab: Tab) => void }) {
 
   useLayoutEffect(() => {
     const el = itemRefs.current[tab]
-    if (el) {
+    if (!el) return
+    const update = () => {
       setIndicatorStyle({
         left: el.offsetLeft,
         width: el.offsetWidth,
       })
-      if (!hasAnimated) {
-        requestAnimationFrame(() => setHasAnimated(true))
-      }
     }
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    if (!hasAnimated) {
+      requestAnimationFrame(() => setHasAnimated(true))
+    }
+    return () => ro.disconnect()
   }, [tab, hasAnimated])
 
   useEffect(() => {
@@ -535,8 +540,8 @@ function NavIsland({ tab, setTab }: { tab: Tab; setTab: (tab: Tab) => void }) {
           className={`nav-island-item ${tab === id ? 'active' : ''}`}
           onClick={() => setTab(id)}
         >
-          <Icon size={13} strokeWidth={1.6} />
-          <span>{label}</span>
+          <Icon size={14} strokeWidth={1.75} />
+          <span className="nav-island-label">{label}</span>
         </button>
       ))}
     </nav>
