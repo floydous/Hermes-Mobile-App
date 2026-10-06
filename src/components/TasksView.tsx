@@ -120,21 +120,66 @@ export function TasksView({ back, profiles }: Props) {
   const showOther = attention.length > 0
   const pullActive = pullDistance > 8 || pullRefreshing
   return <main className="app tasks-sheet" ref={scrollRef} onTouchStart={event => { if (scrollRef.current?.scrollTop === 0) pullStartRef.current = event.touches[0].clientY }} onTouchMove={event => { if (pullStartRef.current == null || scrollRef.current?.scrollTop !== 0) return; const distance = Math.min(76, Math.max(0, event.touches[0].clientY - pullStartRef.current)); if (distance > 0) event.preventDefault(); setPullDistance(distance) }} onTouchEnd={() => { const shouldRefresh = pullDistance >= 56; pullStartRef.current = null; setPullDistance(0); if (shouldRefresh) void pullRefresh() }}>
-    <header className="tasks-head"><button className="back-button" onClick={back} aria-label="Back to Bots"><ArrowLeft size={18}/></button><b>Tasks</b><button className="icon-button" onClick={() => setCreateOpen(true)} aria-label="New task"><Plus size={18}/></button></header>
+    <header className="tasks-head">
+      <button className="back-button" onClick={back} aria-label="Back to Bots"><ArrowLeft size={18}/></button>
+      <div className="tasks-head-title">
+        <span className="tasks-eyebrow">AUTOMATION</span>
+        <b>Scheduled Tasks</b>
+      </div>
+      <button className="icon-button" onClick={() => setCreateOpen(true)} aria-label="New task"><Plus size={18}/></button>
+    </header>
     {pullActive && <div className="pull-refresh-cue" style={{ height: `${pullRefreshing ? 46 : pullDistance}px` }}><RefreshCw size={15} className={pullRefreshing ? 'pull-refresh-spinner' : ''}/><span>{pullRefreshing ? 'Refreshing…' : pullDistance >= 56 ? 'Release to refresh' : 'Pull to refresh'}</span></div>}
-    <button className="tasks-running" onClick={() => document.getElementById('running-tasks')?.scrollIntoView({ behavior: 'smooth' })}><Zap size={17}/><span>Running now</span><b>{running.length}</b><ChevronRight size={16}/></button>
-    <button className="tasks-stat tasks-scheduled" onClick={() => { setFilter('scheduled'); document.getElementById('scheduled-tasks')?.scrollIntoView({ behavior: 'smooth' }) }}><CalendarClock size={17}/><span>Scheduled</span><b>{scheduled.length}</b><ChevronRight size={16}/></button>
+    
+    <div className="tasks-stats-row">
+      <button className="task-stat-card" onClick={() => document.getElementById('running-tasks')?.scrollIntoView({ behavior: 'smooth' })}>
+        <div className="task-stat-header">
+          <span className="task-stat-label"><Zap size={14}/> RUNNING</span>
+          <b className="task-stat-count">{running.length}</b>
+        </div>
+        <small className="task-stat-hint">Active jobs</small>
+      </button>
+
+      <button className="task-stat-card" onClick={() => { setFilter('scheduled'); document.getElementById('scheduled-tasks')?.scrollIntoView({ behavior: 'smooth' }) }}>
+        <div className="task-stat-header">
+          <span className="task-stat-label"><CalendarClock size={14}/> SCHEDULED</span>
+          <b className="task-stat-count">{scheduled.length}</b>
+        </div>
+        <small className="task-stat-hint">Queued timers</small>
+      </button>
+    </div>
+
     {error && <p className="management-error">{error}</p>}
-    {loading && !jobs.length ? <p className="management-empty">Loading scheduled tasks…</p> : !jobs.length ? <section className="tasks-empty"><CalendarClock size={28}/><b>No scheduled tasks</b><p>Scheduled jobs created in Hermes Desktop will appear here.</p></section> : <>{showRunning && <TaskSection id="running-tasks" label="Running" jobs={running} busy={busy} onOpen={openTask} onToggle={toggle} onTrigger={trigger} onDelete={setDeleteCandidate}/>} {showScheduled && <TaskSection id="scheduled-tasks" label="Scheduled jobs" jobs={scheduled} busy={busy} onOpen={openTask} onToggle={toggle} onTrigger={trigger} onDelete={setDeleteCandidate}/>} {showOther && <TaskSection label="Paused / attention" jobs={attention} busy={busy} onOpen={openTask} onToggle={toggle} onTrigger={trigger} onDelete={setDeleteCandidate}/>}</>}
+    {!jobs.length && loading ? (
+      <div className="tasks-loading-skeleton">
+        <div className="task-card-skeleton" />
+        <div className="task-card-skeleton" />
+        <div className="task-card-skeleton" />
+      </div>
+    ) : !jobs.length ? (
+      <section className="tasks-empty">
+        <CalendarClock size={28}/>
+        <b>No scheduled tasks</b>
+        <p>Scheduled jobs created in Hermes Desktop will appear here.</p>
+        <button className="task-outline-pill" onClick={() => setCreateOpen(true)}>
+          <Plus size={14}/> Create first task
+        </button>
+      </section>
+    ) : (
+      <div className="tasks-list-container">
+        {showRunning && <TaskSection id="running-tasks" label="RUNNING NOW" jobs={running} busy={busy} onOpen={openTask} onToggle={toggle} onTrigger={trigger} onDelete={setDeleteCandidate}/>}
+        {showScheduled && <TaskSection id="scheduled-tasks" label="SCHEDULED JOBS" jobs={scheduled} busy={busy} onOpen={openTask} onToggle={toggle} onTrigger={trigger} onDelete={setDeleteCandidate}/>}
+        {showOther && <TaskSection label="ATTENTION & PAUSED" jobs={attention} busy={busy} onOpen={openTask} onToggle={toggle} onTrigger={trigger} onDelete={setDeleteCandidate}/>}
+      </div>
+    )}
     {deleteCandidate && <DeleteTaskModal job={deleteCandidate} deleting={busy === `${deleteCandidate.job_id}:remove`} onCancel={() => setDeleteCandidate(null)} onConfirm={() => void remove(deleteCandidate)}/>}
   </main>
 }
 
 function TaskSection({ id, label, jobs, busy, onOpen, onToggle, onTrigger, onDelete }: { id?: string; label: string; jobs: CronJob[]; busy: string; onOpen: (job: CronJob) => void; onToggle: (job: CronJob) => void; onTrigger: (job: CronJob) => void; onDelete: (job: CronJob) => void }) {
   if (!jobs.length) return null
-  return <section className="task-section" id={id}><div className="task-section-head">{label}<small>{jobs.length}</small></div>{jobs.map(job => <TaskCard busy={busy} job={job} key={job.job_id} onOpen={onOpen} onToggle={onToggle} onTrigger={onTrigger} onDelete={onDelete}/>)}</section>
+  return <section className="task-section" id={id}><div className="task-section-head"><span>{label}</span><small>{jobs.length}</small></div>{jobs.map((job, index) => <TaskCard index={index} busy={busy} job={job} key={job.job_id} onOpen={onOpen} onToggle={onToggle} onTrigger={onTrigger} onDelete={onDelete}/>)}</section>
 }
-function TaskCard({ busy, job, onOpen, onToggle, onTrigger, onDelete }: { busy: string; job: CronJob; onOpen: (job: CronJob) => void; onToggle: (job: CronJob) => void; onTrigger: (job: CronJob) => void; onDelete: (job: CronJob) => void }) { const state = stateOf(job); const paused = state === 'paused'; return <article className="task-card"><button className="task-card-summary" onClick={() => onOpen(job)} aria-label={`Open ${jobTitle(job)} details`}><div className="task-title"><span><i className={state}/><b>{jobTitle(job)}</b></span><em className={state}>{state}</em></div><p>{job.prompt_preview || job.prompt || 'Scheduled Hermes automation'}</p><TaskMetadata job={job}/></button><div className="task-card-actions"><button className="task-toggle" disabled={busy === `${job.job_id}:toggle`} onClick={() => void onToggle(job)}>{paused ? <><Play size={14}/> Resume</> : <><Pause size={14}/> Pause</>}</button><button className="task-trigger task-trigger-card" disabled={paused || busy === `${job.job_id}:trigger`} onClick={() => void onTrigger(job)}><Zap size={14}/>{busy === `${job.job_id}:trigger` ? 'Running…' : 'Trigger now'}</button><button className="task-delete-icon" disabled={Boolean(busy)} onClick={() => onDelete(job)} aria-label={`Delete ${jobTitle(job)}`} title="Delete task"><Trash2 size={17}/></button></div></article> }
+function TaskCard({ index, busy, job, onOpen, onToggle, onTrigger, onDelete }: { index: number; busy: string; job: CronJob; onOpen: (job: CronJob) => void; onToggle: (job: CronJob) => void; onTrigger: (job: CronJob) => void; onDelete: (job: CronJob) => void }) { const state = stateOf(job); const paused = state === 'paused'; return <article className="task-card" style={{ animationDelay: `${Math.min(index, 8) * 35}ms` }}><button className="task-card-summary" onClick={() => onOpen(job)} aria-label={`Open ${jobTitle(job)} details`}><div className="task-title"><span><i className={state}/><b className="task-title-text">{jobTitle(job)}</b></span><span className={`task-status-pill ${state}`}>{state}</span></div><p>{job.prompt_preview || job.prompt || 'Scheduled Hermes automation'}</p><TaskMetadata job={job}/></button><div className="task-card-actions"><button className="task-pill-action" disabled={busy === `${job.job_id}:toggle`} onClick={() => void onToggle(job)}>{paused ? <><Play size={13}/> Resume</> : <><Pause size={13}/> Pause</>}</button><button className="task-pill-action task-trigger-pill" disabled={paused || busy === `${job.job_id}:trigger`} onClick={() => void onTrigger(job)}><Zap size={13}/>{busy === `${job.job_id}:trigger` ? 'Running…' : 'Trigger now'}</button><button className="task-delete-icon" disabled={Boolean(busy)} onClick={() => onDelete(job)} aria-label={`Delete ${jobTitle(job)}`} title="Delete task"><Trash2 size={15}/></button></div></article> }
 function TaskMetadata({ job }: { job: CronJob }) { const paused = stateOf(job) === 'paused'; return <dl><div><dt>Schedule</dt><dd>{job.schedule || '—'}</dd></div><div><dt>Next</dt><dd>{paused ? 'Paused' : dateLabel(job.next_run_at)}</dd></div><div><dt>Last</dt><dd>{dateLabel(job.last_run_at)}</dd></div>{job.deliver && <div><dt>Deliver</dt><dd>{job.deliver}</dd></div>}{job.model && <div><dt>Model</dt><dd>{job.model}</dd></div>}</dl> }
 function DeleteTaskModal({ job, deleting, onCancel, onConfirm }: { job: CronJob; deleting: boolean; onCancel: () => void; onConfirm: () => void }) {
   return <div className="task-modal-backdrop" role="presentation" onMouseDown={event => { if (!deleting && event.target === event.currentTarget) onCancel() }}><section className="task-delete-modal" role="alertdialog" aria-modal="true" aria-labelledby="delete-task-title" aria-describedby="delete-task-message"><Trash2 size={22}/><h2 id="delete-task-title">Delete scheduled task?</h2><p id="delete-task-message">Delete “{jobTitle(job)}”? This will remove its schedule and prevent future runs.</p><footer><button disabled={deleting} onClick={onCancel}>Keep task</button><button className="delete" disabled={deleting} onClick={onConfirm}><Trash2 size={15}/>{deleting ? 'Deleting…' : 'Delete task'}</button></footer></section></div>

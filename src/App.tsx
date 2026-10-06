@@ -466,7 +466,7 @@ function NavIsland({ tab, setTab }: { tab: Tab; setTab: (tab: Tab) => void }) {
         className={`nav-island-item ${tab === 'bots' ? 'active' : ''}`}
         onClick={() => setTab('bots')}
       >
-        <Bot size={16} />
+        <Bot size={13} strokeWidth={1.6} />
         <span>Bots</span>
       </button>
       <button
@@ -474,7 +474,7 @@ function NavIsland({ tab, setTab }: { tab: Tab; setTab: (tab: Tab) => void }) {
         className={`nav-island-item ${tab === 'sessions' ? 'active' : ''}`}
         onClick={() => setTab('sessions')}
       >
-        <MessageSquare size={16} />
+        <MessageSquare size={13} strokeWidth={1.6} />
         <span>Sessions</span>
       </button>
       <button
@@ -482,7 +482,7 @@ function NavIsland({ tab, setTab }: { tab: Tab; setTab: (tab: Tab) => void }) {
         className={`nav-island-item ${tab === 'tasks' ? 'active' : ''}`}
         onClick={() => setTab('tasks')}
       >
-        <ListTodo size={16} />
+        <ListTodo size={13} strokeWidth={1.6} />
         <span>Tasks</span>
       </button>
     </nav>
