@@ -3,8 +3,10 @@ use rand::random;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
+    collections::HashMap,
     io::{Read, Write},
     net::{IpAddr, TcpListener},
+    sync::{LazyLock, Mutex},
     thread,
     time::{Duration, Instant},
 };
@@ -12,6 +14,9 @@ use tauri::AppHandle;
 use tauri_plugin_keyring_store::KeyringExt;
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_store::StoreExt;
+
+static TOKEN_CACHE: LazyLock<Mutex<HashMap<String, Tokens>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 const CONNECTION_STORE: &str = "hermes-mobile-connection.json";
 const ENDPOINT_KEY: &str = "endpoint";
@@ -47,7 +52,7 @@ pub fn load_endpoint(app: &AppHandle) -> Result<Option<String>, String> {
     Ok(Some(endpoint.to_string()))
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tokens {
     pub access_token: String,
     pub refresh_token: String,
@@ -64,6 +69,11 @@ fn account(origin: &str) -> String {
 }
 
 pub fn load(app: &AppHandle, origin: &str) -> Result<Tokens, String> {
+    if let Ok(cache) = TOKEN_CACHE.lock() {
+        if let Some(tokens) = cache.get(origin) {
+            return Ok(tokens.clone());
+        }
+    }
     let raw = app
         .keyring()
         .store
@@ -72,8 +82,12 @@ pub fn load(app: &AppHandle, origin: &str) -> Result<Tokens, String> {
         .ok_or_else(|| {
             "This Hermes gateway needs sign-in. Tap Continue to secure sign-in.".to_string()
         })?;
-    serde_json::from_str(&raw)
-        .map_err(|_| "Saved gateway credential is invalid. Sign in again.".to_string())
+    let tokens: Tokens = serde_json::from_str(&raw)
+        .map_err(|_| "Saved gateway credential is invalid. Sign in again.".to_string())?;
+    if let Ok(mut cache) = TOKEN_CACHE.lock() {
+        cache.insert(origin.to_string(), tokens.clone());
+    }
+    Ok(tokens)
 }
 
 fn persist_tokens_without_endpoint(
@@ -83,6 +97,9 @@ fn persist_tokens_without_endpoint(
 ) -> Result<(), String> {
     if tokens.access_token.is_empty() {
         return Err("Hermes returned no access token.".to_string());
+    }
+    if let Ok(mut cache) = TOKEN_CACHE.lock() {
+        cache.insert(origin.to_string(), tokens.clone());
     }
     app.keyring()
         .store

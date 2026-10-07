@@ -143,11 +143,27 @@ export async function createProfile(input: { name: string; description: string; 
   }
 }
 
-export async function createSession(profile = 'default', title = 'New chat', baseUrl = activeHermes): Promise<LiveSession> {
-  const client = gateway(baseUrl)
+export type CreateSessionOptions = {
+  hidden?: boolean
+  canonical?: boolean
+}
+
+export async function createSession(
+  profile = 'default',
+  title = 'New chat',
+  optionsOrBaseUrl?: CreateSessionOptions | string,
+  baseUrl?: string
+): Promise<LiveSession> {
+  const options = typeof optionsOrBaseUrl === 'object' && optionsOrBaseUrl !== null ? optionsOrBaseUrl : undefined
+  const effectiveBaseUrl = typeof optionsOrBaseUrl === 'string' ? optionsOrBaseUrl : baseUrl || activeHermes
+  const isCanonical = options?.canonical || title === 'Bot Chat'
+  const isHidden = options?.hidden ?? isCanonical
+  const sessionTitle = isCanonical ? 'Bot Chat' : title
+  const client = gateway(effectiveBaseUrl)
   const created = await client.call<{ session_id?: string; stored_session_id?: string; id?: string }>('session.create', {
     profile,
-    title,
+    title: sessionTitle,
+    hidden: isHidden,
     follow_profile_config: true,
   })
   const canonicalId = created.stored_session_id || created.session_id || created.id || ''
@@ -155,12 +171,12 @@ export async function createSession(profile = 'default', title = 'New chat', bas
     throw new Error('Failed to create session: gateway returned no session id')
   }
   if (created.session_id) {
-    resolvedSessions.set(`${baseUrl}:${canonicalId}`, created.session_id)
-    resolvedSessions.set(`${baseUrl}:${created.session_id}`, created.session_id)
+    resolvedSessions.set(`${effectiveBaseUrl}:${canonicalId}`, created.session_id)
+    resolvedSessions.set(`${effectiveBaseUrl}:${created.session_id}`, created.session_id)
   }
   return {
     id: canonicalId,
-    title,
+    title: sessionTitle,
     preview: '',
     profile,
     last_active: Date.now(),
@@ -384,7 +400,17 @@ export async function interruptSession(sessionId: string, baseUrl = activeHermes
   await gateway(baseUrl).interruptSession(resolvedSessions.get(`${baseUrl}:${sessionId}`) || sessionId)
 }
 
-export async function clearSession(sessionId: string, profile = 'default', baseUrl = activeHermes): Promise<LiveSession> {
+export type ClearSessionOptions = {
+  canonical?: boolean
+  title?: string
+}
+
+export async function clearSession(
+  sessionId: string,
+  profile = 'default',
+  options?: ClearSessionOptions,
+  baseUrl = activeHermes
+): Promise<LiveSession> {
   const client = gateway(baseUrl)
   const resolved = resolvedSessions.get(`${baseUrl}:${sessionId}`) || sessionId
 
@@ -403,5 +429,11 @@ export async function clearSession(sessionId: string, profile = 'default', baseU
   resolvedSessions.delete(`${baseUrl}:${sessionId}`)
   resolvedSessions.delete(`${baseUrl}:${resolved}`)
 
-  return createSession(profile, 'New chat', baseUrl)
+  const isCanonical = options?.canonical ?? true
+  return createSession(
+    profile,
+    isCanonical ? 'Bot Chat' : (options?.title || 'New chat'),
+    { canonical: isCanonical, hidden: isCanonical },
+    baseUrl
+  )
 }

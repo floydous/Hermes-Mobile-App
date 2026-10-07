@@ -8,10 +8,11 @@ import { BotProfileSheet } from './components/BotProfileSheet'
 import { TasksView } from './components/TasksView'
 import { ConnectionSettings } from './components/ConnectionSettings'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import HermesHostIcon from './assets/hermes-agent-icon-transparent.svg'
 import { onBackButtonPress } from '@tauri-apps/api/app'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { buildAttachmentPrompt, attachmentSummary } from './attachment-routing'
-import { buildBotRows, resolveCanonicalSessionId } from './live-model'
+import { buildBotRows, resolveCanonicalSessionId, type RosterProfile } from './live-model'
 import { settleAssistantResponse, type SettledAssistantResponse as SettledAssistantState } from './settled-assistant'
 import { isActiveChatTurn } from './chat-turn'
 import { errorMessage, RequestEpoch, selectRestoredEndpoint } from './connection-state'
@@ -183,6 +184,21 @@ export default function App() {
       setError('')
       lastConnectionErrorRef.current = ''
       setConnectionStatus('connected')
+
+      // Warm up message cache in background so opening any bot or recent session is instant (0ms)
+      window.setTimeout(() => {
+        const candidates = [
+          ...data.profiles.map(p => p.canonical_session ? { id: resolveCanonicalSessionId(p.canonical_session), profile: p.name } : null).filter((item): item is { id: string; profile: string } => Boolean(item?.id)),
+          ...data.sessions.slice(0, 6).map(s => ({ id: s.id, profile: s.profile })),
+        ]
+        for (const candidate of candidates) {
+          if (!candidate?.id || messageCacheRef.current.has(candidate.id)) continue
+          void loadMessages(candidate.id, candidate.profile, endpoint).then(msgs => {
+            messageCacheRef.current.set(candidate.id, msgs)
+          }).catch(() => {})
+        }
+      }, 50)
+
       return data
     } catch (reason) {
       if (refreshEpochRef.current.isCurrent(epoch)) {
@@ -544,14 +560,45 @@ export default function App() {
     messageCacheRef.current.delete(session.id)
 
     try {
-      const fresh = await clearSession(session.id, session.profile)
-      setSelected(fresh)
+      const botProfile = profiles.find(p => p.name === session.profile)
+      const isCanonical = botProfile && (
+        !botProfile.canonical_session ||
+        session.id === resolveCanonicalSessionId(botProfile.canonical_session) ||
+        session.id === botProfile.canonical_session.id ||
+        session.title === 'Bot Chat' ||
+        session.title === (botProfile.display_name || titleize(botProfile.name))
+      )
+      const fresh = await clearSession(session.id, session.profile, {
+        canonical: Boolean(isCanonical),
+        title: isCanonical ? 'Bot Chat' : session.title,
+      })
+      setSelected({
+        ...fresh,
+        title: isCanonical && botProfile ? (botProfile.display_name || titleize(botProfile.name)) : fresh.title,
+      })
       messageCacheRef.current.set(fresh.id, [])
       void refresh()
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not clear chat history.')
     }
-  }, [refresh])
+  }, [profiles, refresh])
+
+  const openBot = useCallback(async (profile: RosterProfile, existingSession: LiveSession | null) => {
+    if (existingSession) {
+      await openSession(existingSession)
+      return
+    }
+    try {
+      const fresh = await createSession(profile.name, 'Bot Chat', { canonical: true, hidden: true })
+      await openSession({
+        ...fresh,
+        title: profile.display_name || titleize(profile.name),
+      })
+      void refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not open bot chat')
+    }
+  }, [openSession, refresh])
 
   const finishCreate = async () => {
     setCreating(true)
@@ -673,9 +720,26 @@ export default function App() {
     <div className="roster-pinned">
       <header className="roster-head">
         <div className="roster-status">
-          <span className={`connection ${connectionStatus === 'disconnected' ? 'offline' : connectionStatus === 'connected' ? 'online' : 'checking'}`} title={connectionStatus === 'disconnected' ? 'No Hermes detected. Start Hermes Desktop, then retry.' : connectionStatus === 'connected' ? 'Connected to Hermes Desktop' : 'Checking for Hermes Desktop…'} aria-label={connectionStatus === 'disconnected' ? 'Hermes Desktop unavailable' : connectionStatus === 'connected' ? 'Connected to Hermes Desktop' : 'Checking for Hermes Desktop'}>
-            <i className="connection-dot"/>
-          </span>
+          <button
+            type="button"
+            className="host-node-btn"
+            onClick={() => setSettings(true)}
+            aria-label={`Hermes host settings (${connectionStatus === 'connected' ? 'connected' : connectionStatus === 'disconnected' ? 'offline' : 'checking'})`}
+            title={
+              connectionStatus === 'connected'
+                ? `Connected to Hermes host${activeEndpoint ? ` (${activeEndpoint.replace(/^https?:\/\//, '')})` : ''}. Tap to open settings.`
+                : connectionStatus === 'disconnected'
+                ? 'Hermes host disconnected. Tap to open connection settings.'
+                : 'Checking Hermes host connection…'
+            }
+          >
+            <div className="host-avatar-wrap">
+              <div className="host-avatar-inner">
+                <img src={HermesHostIcon} alt="Hermes Host" className="host-avatar-img"/>
+              </div>
+              <span className={`host-status-pip ${connectionStatus === 'disconnected' ? 'offline' : connectionStatus === 'connected' ? 'online' : 'checking'}`} aria-hidden="true"/>
+            </div>
+          </button>
         </div>
         <div className="header-actions">
           <button className="icon-button" aria-label="Search" onClick={() => setSearching(value => !value)}><Search size={18}/></button>
@@ -814,8 +878,7 @@ export default function App() {
                   className={`bot-row enter ${isWorking ? 'working' : ''}`}
                   style={{ animationDelay: `${Math.min(index, 8) * 28}ms` }}
                   key={profile.name}
-                  disabled={!session}
-                  onClick={() => session && void openSession(session)}
+                  onClick={() => void openBot(profile, session)}
                 >
                   <div className="bot-avatar-wrap">
                     <BotAvatar profile={profile} fallbackName={profile.name}/>

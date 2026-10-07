@@ -1,8 +1,30 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, CalendarClock, ChevronRight, Pause, Pencil, Play, Plus, RefreshCw, Trash2, Zap } from 'lucide-react'
+import {
+  CalendarClock,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Copy,
+  Pause,
+  Pencil,
+  Play,
+  Plus,
+  RefreshCw,
+  Trash2,
+  X,
+  Zap,
+} from 'lucide-react'
 
 import { NewTaskSheet } from './NewTaskSheet'
-import { loadCronJob, loadCronJobs, loadCronRuns, triggerCronJob, updateCronPrompt, updateCronJob, type CronJob, type CronRun, type LiveProfile } from '../hermes'
+import {
+  loadCronJob,
+  loadCronJobs,
+  triggerCronJob,
+  updateCronPrompt,
+  updateCronJob,
+  type CronJob,
+  type LiveProfile,
+} from '../hermes'
 import { useEdgeSwipeBack } from '../edge-swipe'
 
 type Props = { profiles: LiveProfile[]; back?: () => void; createOpen?: boolean; setCreateOpen?: (open: boolean) => void; query?: string }
@@ -138,7 +160,7 @@ export function TasksView({ back, profiles, createOpen: propCreateOpen, setCreat
     try { setSelected(await loadCronJob(job.job_id, job.profile)) }
     catch { /* Keep the list payload visible; the full prompt remains available when the gateway supports the detail route. */ }
   }
-  if (selected) return <TaskDetail job={selected} busy={busy} back={() => setSelected(null)} onRefresh={refresh} onToggle={toggle} onTrigger={trigger}/>
+  if (selected) return <TaskDetail job={selected} busy={busy} back={() => setSelected(null)} onRefresh={refresh} onToggle={toggle} onTrigger={trigger} onDelete={() => setDeleteCandidate(selected)}/>
   if (isCreateOpen) return <NewTaskSheet profiles={profiles} onClose={() => setIsCreateOpen(false)} onCreated={refresh}/>
   const showRunning = running.length > 0
   const showScheduled = scheduled.length > 0
@@ -240,19 +262,291 @@ function TaskMetadata({ job }: { job: CronJob }) { const paused = stateOf(job) =
 function DeleteTaskModal({ job, deleting, onCancel, onConfirm }: { job: CronJob; deleting: boolean; onCancel: () => void; onConfirm: () => void }) {
   return <div className="task-modal-backdrop" role="presentation" onMouseDown={event => { if (!deleting && event.target === event.currentTarget) onCancel() }}><section className="task-delete-modal" role="alertdialog" aria-modal="true" aria-labelledby="delete-task-title" aria-describedby="delete-task-message"><Trash2 size={22}/><h2 id="delete-task-title">Delete scheduled task?</h2><p id="delete-task-message">Delete “{jobTitle(job)}”? This will remove its schedule and prevent future runs.</p><footer><button disabled={deleting} onClick={onCancel}>Keep task</button><button className="delete" disabled={deleting} onClick={onConfirm}><Trash2 size={15}/>{deleting ? 'Deleting…' : 'Delete task'}</button></footer></section></div>
 }
-function TaskDetail({ job, busy, back, onRefresh, onToggle, onTrigger }: { job: CronJob; busy: string; back: () => void; onRefresh: () => Promise<void>; onToggle: (job: CronJob) => Promise<void>; onTrigger: (job: CronJob) => Promise<void> }) {
+function TaskDetail({
+  job,
+  busy,
+  back,
+  onRefresh,
+  onToggle,
+  onTrigger,
+  onDelete,
+}: {
+  job: CronJob
+  busy: string
+  back: () => void
+  onRefresh: () => Promise<void>
+  onToggle: (job: CronJob) => Promise<void>
+  onTrigger: (job: CronJob) => Promise<void>
+  onDelete: () => void
+}) {
   const shellRef = useRef<HTMLElement>(null)
   useEdgeSwipeBack(shellRef, back)
-  const [runs, setRuns] = useState<CronRun[] | null>(null)
   const [error, setError] = useState('')
+  const [copied, setCopied] = useState(false)
   const [editPromptOpen, setEditPromptOpen] = useState(false)
   const [promptDraft, setPromptDraft] = useState(job.prompt || job.prompt_preview || '')
   const [savingPrompt, setSavingPrompt] = useState(false)
-  const state = stateOf(job); const paused = state === 'paused'; const triggering = busy === `${job.job_id}:trigger`
-  useEffect(() => { setPromptDraft(job.prompt || job.prompt_preview || '') }, [job.job_id, job.prompt, job.prompt_preview])
-  useEffect(() => { let active = true; void loadCronRuns(job.job_id, job.profile).then(value => { if (active) setRuns(value) }).catch(reason => { if (active) setError(reason instanceof Error ? reason.message : 'Could not load run history.') }); return () => { active = false } }, [job.job_id, job.profile])
-  const savePrompt = async () => { if (promptDraft === (job.prompt || job.prompt_preview || '')) { setEditPromptOpen(false); return }; setSavingPrompt(true); setError(''); try { await updateCronPrompt(job.job_id, promptDraft, job.profile); setEditPromptOpen(false); await onRefresh() } catch (reason) { setError(reason instanceof Error ? reason.message : 'Hermes could not save this prompt.') } finally { setSavingPrompt(false) } }
-  const trigger = async () => { setError(''); try { await onTrigger(job); setRuns(await loadCronRuns(job.job_id, job.profile)) } catch (reason) { setError(reason instanceof Error ? reason.message : 'Hermes could not trigger this task.') } }
-  const toggle = async () => { setError(''); try { await onToggle(job) } catch (reason) { setError(reason instanceof Error ? reason.message : 'Hermes could not update this task.') } }
-  return <main ref={shellRef} className="app task-detail"><header className="tasks-head"><button className="round-control" onClick={back} aria-label="Back to Tasks"><ArrowLeft size={18}/></button><b>Task details</b><button className="round-control" onClick={() => void onRefresh()} aria-label="Refresh task"><RefreshCw size={17}/></button></header><section className="task-detail-title"><div><i className={state}/><h1>{jobTitle(job)}</h1><em className={state}>{state}</em></div><div className="task-detail-actions"><button className="task-toggle" disabled={busy === `${job.job_id}:toggle`} onClick={() => void toggle()}>{paused ? <><Play size={14}/> Resume</> : <><Pause size={14}/> Pause</>}</button><button className="task-trigger" disabled={triggering} onClick={() => void trigger()}><Zap size={15}/>{triggering ? 'Running…' : 'Trigger now'}</button></div></section>{error && <p className="management-error">{error}</p>}<section className="task-detail-section"><b>Schedule</b><TaskMetadata job={job}/></section><section className="task-detail-section"><div className="task-detail-section-head"><b>Prompt</b><button className="prompt-edit-button" disabled={!job.prompt || savingPrompt} onClick={() => setEditPromptOpen(true)} aria-label={job.prompt ? 'Edit prompt' : 'Loading full prompt'}><Pencil size={14}/></button></div><pre>{job.prompt || job.prompt_preview || 'No prompt was provided.'}</pre></section><section className="task-detail-section"><b>Run history {runs ? `· ${runs.length}` : ''}</b>{runs === null ? <p>Loading run history…</p> : runs.length ? <div className="task-runs">{runs.map(run => <div key={run.id}><span>{run.title || run.preview || run.id}</span><small>{dateLabel(run.last_active || run.started_at)}</small></div>)}</div> : <p>No completed runs yet.</p>}</section>{editPromptOpen && <div className="task-modal-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setEditPromptOpen(false) }}><section className="task-prompt-modal" role="dialog" aria-modal="true" aria-label="Edit task prompt"><header><b>Edit prompt</b><button onClick={() => setEditPromptOpen(false)} aria-label="Close prompt editor">×</button></header><textarea autoFocus value={promptDraft} onChange={event => setPromptDraft(event.target.value)} /><footer><button onClick={() => { setPromptDraft(job.prompt || job.prompt_preview || ''); setEditPromptOpen(false) }}>Cancel</button><button className="save" disabled={savingPrompt || !promptDraft.trim()} onClick={() => void savePrompt()}>{savingPrompt ? 'Saving…' : 'Save prompt'}</button></footer></section></div>}</main>
+
+  const state = stateOf(job)
+  const paused = state === 'paused'
+  const isRunning = state === 'running'
+  const triggering = busy === `${job.job_id}:trigger`
+  const toggling = busy === `${job.job_id}:toggle`
+
+  useEffect(() => {
+    setPromptDraft(job.prompt || job.prompt_preview || '')
+  }, [job.job_id, job.prompt, job.prompt_preview])
+
+  const savePrompt = async () => {
+    if (promptDraft === (job.prompt || job.prompt_preview || '')) {
+      setEditPromptOpen(false)
+      return
+    }
+    setSavingPrompt(true)
+    setError('')
+    try {
+      await updateCronPrompt(job.job_id, promptDraft, job.profile)
+      setEditPromptOpen(false)
+      await onRefresh()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Hermes could not save this prompt.')
+    } finally {
+      setSavingPrompt(false)
+    }
+  }
+
+  const trigger = async () => {
+    setError('')
+    try {
+      await onTrigger(job)
+      await onRefresh()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Hermes could not trigger this task.')
+    }
+  }
+
+  const toggle = async () => {
+    setError('')
+    try {
+      await onToggle(job)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Hermes could not update this task.')
+    }
+  }
+
+  const copyPrompt = async () => {
+    const text = job.prompt || job.prompt_preview || ''
+    if (!text) return
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1600)
+    } catch {
+      // fallback
+    }
+  }
+
+  const nextRun = paused
+    ? 'Paused'
+    : isRunning
+    ? 'In progress'
+    : job.next_run_at
+    ? dateLabel(job.next_run_at)
+    : 'None'
+
+  const lastTriggered = job.last_run_at ? dateLabel(job.last_run_at) : 'Never'
+
+  return (
+    <main ref={shellRef} className="app task-detail">
+      {/* iOS Top Nav Header */}
+      <header className="ios-task-header">
+        <button className="ios-back-button" onClick={back} aria-label="Back to Tasks">
+          <ChevronLeft size={21} />
+          <span>Tasks</span>
+        </button>
+        <span className="ios-nav-title">Task Details</span>
+        <button className="ios-nav-action" onClick={() => void onRefresh()} aria-label="Refresh task">
+          <RefreshCw size={17} />
+        </button>
+      </header>
+
+      {/* iOS Clean Title Header */}
+      <section className="ios-task-hero">
+        <h1 className="ios-task-title">{jobTitle(job)}</h1>
+        <div className="ios-task-meta-line">
+          <span className={`ios-status-pill ${state}`}>
+            <span className="ios-status-dot" />
+            <span>{state.charAt(0).toUpperCase() + state.slice(1)}</span>
+          </span>
+          {job.profile && <span className="ios-task-bot-label">Bot: {job.profile}</span>}
+        </div>
+      </section>
+
+      {/* iOS Dual Action Buttons */}
+      <section className="ios-task-actions">
+        <button
+          type="button"
+          className="ios-action-primary"
+          disabled={triggering}
+          onClick={() => void trigger()}
+        >
+          <Zap size={16} />
+          <span>{triggering ? 'Running…' : 'Trigger now'}</span>
+        </button>
+        <button
+          type="button"
+          className="ios-action-secondary"
+          disabled={toggling}
+          onClick={() => void toggle()}
+        >
+          {paused ? (
+            <>
+              <Play size={15} />
+              <span>Resume</span>
+            </>
+          ) : (
+            <>
+              <Pause size={15} />
+              <span>Pause</span>
+            </>
+          )}
+        </button>
+      </section>
+
+      {error && <p className="management-error">{error}</p>}
+
+      {/* Inset Group: Timing */}
+      <section className="ios-inset-group">
+        <div className="ios-group-header">TIMING</div>
+        <div className="ios-group-card">
+          <div className="ios-group-row">
+            <span className="ios-row-label">Schedule</span>
+            <span className="ios-row-value monospace">{job.schedule || 'None'}</span>
+          </div>
+          <div className="ios-group-row">
+            <span className="ios-row-label">Next Run</span>
+            <span className="ios-row-value">{nextRun}</span>
+          </div>
+          <div className="ios-group-row">
+            <span className="ios-row-label">Last Triggered</span>
+            <span className="ios-row-value">{lastTriggered}</span>
+          </div>
+        </div>
+      </section>
+
+      {/* Inset Group: Configuration */}
+      {(job.profile || job.model || job.deliver) && (
+        <section className="ios-inset-group">
+          <div className="ios-group-header">CONFIGURATION</div>
+          <div className="ios-group-card">
+            {job.profile && (
+              <div className="ios-group-row">
+                <span className="ios-row-label">Target Bot</span>
+                <span className="ios-row-value">{job.profile}</span>
+              </div>
+            )}
+            {job.model && (
+              <div className="ios-group-row">
+                <span className="ios-row-label">Model</span>
+                <span className="ios-row-value monospace">{job.model}</span>
+              </div>
+            )}
+            {job.deliver && (
+              <div className="ios-group-row">
+                <span className="ios-row-label">Delivery</span>
+                <span className="ios-row-value">{job.deliver}</span>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* Inset Group: Instructions / Prompt */}
+      <section className="ios-inset-group">
+        <div className="ios-group-header-with-actions">
+          <span className="ios-group-header">INSTRUCTIONS</span>
+          <div className="ios-prompt-actions">
+            <button
+              type="button"
+              className="ios-prompt-btn"
+              onClick={copyPrompt}
+              disabled={!job.prompt && !job.prompt_preview}
+            >
+              {copied ? <Check size={12} /> : <Copy size={12} />}
+              <span>{copied ? 'Copied' : 'Copy'}</span>
+            </button>
+            <button
+              type="button"
+              className="ios-prompt-btn"
+              disabled={!job.prompt || savingPrompt}
+              onClick={() => setEditPromptOpen(true)}
+            >
+              <Pencil size={12} />
+              <span>Edit</span>
+            </button>
+          </div>
+        </div>
+        <div className="ios-group-card ios-prompt-card">
+          <pre className="ios-prompt-text">
+            {job.prompt || job.prompt_preview || 'No prompt provided.'}
+          </pre>
+        </div>
+      </section>
+
+      {/* Inset Group: Delete Task */}
+      <section className="ios-inset-group ios-danger-group">
+        <div className="ios-group-card">
+          <button
+            type="button"
+            className="ios-delete-button"
+            onClick={onDelete}
+          >
+            <span>Delete Task</span>
+          </button>
+        </div>
+      </section>
+
+      {/* Prompt Edit Modal */}
+      {editPromptOpen && (
+        <div
+          className="task-modal-backdrop"
+          role="presentation"
+          onMouseDown={event => {
+            if (event.target === event.currentTarget) setEditPromptOpen(false)
+          }}
+        >
+          <section className="task-prompt-modal" role="dialog" aria-modal="true" aria-label="Edit task prompt">
+            <header>
+              <b>Edit prompt</b>
+              <button onClick={() => setEditPromptOpen(false)} aria-label="Close prompt editor">
+                <X size={18} />
+              </button>
+            </header>
+            <textarea
+              autoFocus
+              value={promptDraft}
+              onChange={event => setPromptDraft(event.target.value)}
+            />
+            <footer>
+              <button
+                onClick={() => {
+                  setPromptDraft(job.prompt || job.prompt_preview || '')
+                  setEditPromptOpen(false)
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className="save"
+                disabled={savingPrompt || !promptDraft.trim()}
+                onClick={() => void savePrompt()}
+              >
+                {savingPrompt ? 'Saving…' : 'Save prompt'}
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
+    </main>
+  )
 }

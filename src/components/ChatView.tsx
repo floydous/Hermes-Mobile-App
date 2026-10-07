@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { ArrowDown, LoaderCircle, Paperclip, RotateCw, Trash2, X } from 'lucide-react'
+import { ArrowDown, Eraser, LoaderCircle, Paperclip, RotateCw, X } from 'lucide-react'
 import type { DragEvent } from 'react'
 
 import { BotAvatar } from './BotAvatar'
@@ -253,7 +253,7 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
             title="Clear chat & reset agent memory"
             disabled={clearing}
           >
-            <Trash2 size={16}/>
+            <Eraser size={16}/>
           </button>
         )}
         <button
@@ -335,15 +335,15 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
           aria-labelledby="clear-chat-title"
           aria-describedby="clear-chat-message"
         >
-          <Trash2 size={22}/>
+          <Eraser size={22}/>
           <h2 id="clear-chat-title">Clear conversation?</h2>
           <p id="clear-chat-message">
-            This will reset {botName}’s memory and delete all chat history in this session.
+            This will reset {botName}’s memory and erase all messages in this session. The bot profile remains intact.
           </p>
           <footer>
             <button disabled={clearing} onClick={closeConfirmClear}>Keep chat</button>
             <button className="delete" disabled={clearing} onClick={() => void handleConfirmClear()}>
-              {clearing ? <LoaderCircle size={15} className="connection-sync-spinner"/> : <Trash2 size={15}/>}
+              {clearing ? <LoaderCircle size={15} className="connection-sync-spinner"/> : <Eraser size={15}/>}
               {clearing ? 'Clearing…' : 'Clear chat'}
             </button>
           </footer>

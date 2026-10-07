@@ -279,10 +279,10 @@
   outline-offset: 3px;
 }
 [data-theme='light'] .tasks-sheet {
-  --tasks-ok: #167b58;
-  --tasks-running: #255bc2;
-  --tasks-paused: #865c17;
-  --tasks-error: #b4232d;
+  --tasks-ok: #059669;
+  --tasks-running: #2563eb;
+  --tasks-paused: #d97706;
+  --tasks-error: #ef4444;
 }
 @media (min-width: 560px) {
   .tasks-sheet { padding-right: 28px; padding-left: 28px; }

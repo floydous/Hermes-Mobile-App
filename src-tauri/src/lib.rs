@@ -1,9 +1,20 @@
 mod remote_auth;
 
+use std::sync::LazyLock;
 use std::time::Duration;
 #[cfg(desktop)]
 use tauri::Manager;
 use tauri_plugin_opener::OpenerExt;
+
+static HTTP_CLIENT: LazyLock<reqwest::blocking::Client> = LazyLock::new(|| {
+    reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .pool_idle_timeout(Duration::from_secs(90))
+        .pool_max_idle_per_host(8)
+        .tcp_nodelay(true)
+        .build()
+        .expect("Failed to initialize Hermes HTTP client")
+});
 
 fn server_origin(base_url: &str) -> String {
     base_url.trim_end_matches('/').to_string()
@@ -36,14 +47,11 @@ fn is_loopback(origin: &str) -> bool {
 }
 
 fn authenticated_get(app: &tauri::AppHandle, origin: &str, path: &str) -> Result<String, String> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(20))
-        .build()
-        .map_err(|error| error.to_string())?;
+    let client = &*HTTP_CLIENT;
     let request = client.get(format!("{origin}{path}"));
     if is_loopback(origin) {
         request
-            .header("X-Hermes-Session-Token", session_token(&client, origin)?)
+            .header("X-Hermes-Session-Token", session_token(client, origin)?)
             .send()
             .map_err(|error| format!("Hermes request failed: {error}"))?
             .error_for_status()

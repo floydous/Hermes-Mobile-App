@@ -2,10 +2,27 @@ import { memo, useState, type ReactNode } from 'react'
 import { Check, Copy } from 'lucide-react'
 import Markdown from 'react-markdown'
 import rehypeHighlight from 'rehype-highlight'
+import rehypeKatex from 'rehype-katex'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import 'katex/dist/katex.min.css'
 
 import type { LiveMessage, LiveProfile } from '../hermes'
 import { formatMessageTime, formatResponseStats } from '../message-stats'
+
+function normalizeLatex(text: string): string {
+  // Normalize LaTeX delimiters \[ ... \] to $$ ... $$ and \( ... \) to $ ... $ outside of code fences
+  const parts = text.split(/(```[\s\S]*?```|`[^`\n]*`)/g)
+  return parts
+    .map((part, index) => {
+      if (index % 2 === 1) return part
+      return part
+        .replace(/\\\[([\s\S]*?)\\\]/g, (_, math) => `\n\n$$\n${math.trim()}\n$$\n\n`)
+        .replace(/\\\(([\s\S]*?)\\\)/g, (_, math) => `$${math.trim()}$`)
+        .replace(/(^|\n)\$\$([^\n$]+)\$\$(\n|$)/g, (_, before, math, after) => `${before}\n\n$$\n${math.trim()}\n$$\n\n${after}`)
+    })
+    .join('')
+}
 
 function CodeBlock({ className, children }: { className?: string; children: ReactNode }) {
   const [copied, setCopied] = useState(false)
@@ -23,7 +40,8 @@ export const MarkdownContent = memo(function MarkdownContent({ children }: { chi
   const text = typeof children === 'string' ? children : children == null ? '' : String(children)
   if (!text.trim()) return null
   const withMentionLinks = text.replace(/(^|\s)(@[a-zA-Z0-9][\w-]*)\b/g, '$1[$2](hermes-mention:$2)')
-  return <div className="markdown-body"><Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={{
+  const normalized = normalizeLatex(withMentionLinks)
+  return <div className="markdown-body"><Markdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeHighlight, rehypeKatex]} components={{
     a: ({ children: content, href, ...props }) => href?.startsWith('hermes-mention:')
       ? <span className="mention-link" {...props}>{content}</span>
       : <a {...props} href={href} target="_blank" rel="noreferrer">{content}</a>,
@@ -35,7 +53,7 @@ export const MarkdownContent = memo(function MarkdownContent({ children }: { chi
     },
     pre: ({ children: content }) => <>{content}</>,
     table: ({ children: content }) => <div className="table-scroll"><table>{content}</table></div>,
-  }}>{withMentionLinks}</Markdown></div>
+  }}>{normalized}</Markdown></div>
 })
 
 type MessageCardProps = {

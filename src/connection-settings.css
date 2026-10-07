@@ -233,28 +233,31 @@
 }
 [data-theme='light'] .appearance-theme-list,
 [data-theme='light'] .appearance-scale-card {
-  background: #e4eaf2;
-  border-color: #c4cfdd;
+  background: #ffffff;
+  border-color: rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
 }
 [data-theme='light'] .scale-range-slider {
-  background: #cbd5e1;
-  border-color: #94a3b8;
+  background: #e4e4e7;
+  border-color: transparent;
+  accent-color: #09090b;
 }
 [data-theme='light'] .scale-preset-pill {
-  background: #f1f5f9;
-  border-color: #cbd5e1;
-  color: #334155;
+  background: #f4f4f5;
+  border-color: rgba(0, 0, 0, 0.06);
+  color: #52525b;
 }
 [data-theme='light'] .scale-preset-pill.active {
-  background: #1e293b;
-  color: #fff;
-  border-color: #1e293b;
+  background: #09090b;
+  color: #ffffff;
+  border-color: #09090b;
 }
 [data-theme='light'] .scale-preview-card {
-  background: rgba(0, 0, 0, 0.02);
-  border-color: #c4cfdd;
+  background: #f4f4f5;
+  border-color: rgba(0, 0, 0, 0.06);
 }
 [data-theme='light'] .scale-preview-bubble {
-  background: #f1f5f9;
-  border-color: #cbd5e1;
+  background: #ffffff;
+  border-color: rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
 }

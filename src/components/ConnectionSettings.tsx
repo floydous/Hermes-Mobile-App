@@ -2,12 +2,12 @@ import { invoke } from '@tauri-apps/api/core'
 import { useEffect, useRef, useState } from 'react'
 import { ArrowLeft, Check, CheckCircle2, Copy, ExternalLink, GitBranch, Globe2, Heart, LoaderCircle, LockKeyhole, RotateCcw, ShieldCheck, Smartphone, Wifi } from 'lucide-react'
 
-import HermesMobileAboutMark from '../assets/HermesMobileAboutMark.png'
+import HermesAgentAppIcon from '../assets/hermes-agent-app-icon.png'
 import { errorMessage, supportsBasicAuth } from '../connection-state'
 import { useEdgeSwipeBack } from '../edge-swipe'
 import { nativeSignIn, passwordSignIn, probeHermesGateway } from '../hermes'
 
-const HermesMobileLogo = HermesMobileAboutMark
+const HermesMobileLogo = HermesAgentAppIcon
 
 type Theme = 'dark' | 'light' | 'grey' | 'aurora'
 type Page = 'root' | 'pairing' | 'about' | 'appearance'
@@ -331,7 +331,7 @@ export function ConnectionSettings({ profiles, sessions, connected, endpoint, th
     <section className="menu-list">
       <button>Notifications <span>›</span></button>
       <button onClick={() => setPage('appearance')}>
-        Appearance <span>{themes.find(item => item.id === theme)?.label || 'OLED dark'} ›</span>
+        Appearance <span>›</span>
       </button>
       <button onClick={() => setPage('pairing')}>Security & pairing <span className={connected ? '' : 'connection-attention'}>{connected ? 'Connected ›' : 'Disconnected ›'}</span></button>
       <button onClick={() => setPage('about')}>About Hermes Mobile <span>0.1.1 ›</span></button>
