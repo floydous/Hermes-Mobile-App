@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, CheckCircle2, Copy, ExternalLink, GitBranch, Globe2, Heart, LoaderCircle, LockKeyhole, ShieldCheck, Smartphone, Wifi } from 'lucide-react'
+import { ArrowLeft, Check, CheckCircle2, Copy, ExternalLink, GitBranch, Globe2, Heart, LoaderCircle, LockKeyhole, RotateCcw, ShieldCheck, Smartphone, Wifi } from 'lucide-react'
 
 import HermesMobileAboutMark from '../assets/HermesMobileAboutMark.png'
 import { errorMessage, supportsBasicAuth } from '../connection-state'
@@ -10,7 +10,7 @@ import { nativeSignIn, passwordSignIn, probeHermesGateway } from '../hermes'
 const HermesMobileLogo = HermesMobileAboutMark
 
 type Theme = 'dark' | 'light' | 'grey' | 'aurora'
-type Page = 'root' | 'pairing' | 'about'
+type Page = 'root' | 'pairing' | 'about' | 'appearance'
 
 type Props = {
   profiles: number
@@ -19,6 +19,8 @@ type Props = {
   endpoint?: string
   theme: Theme
   setTheme: (theme: Theme) => void
+  uiScale?: number
+  setUiScale?: (scale: number) => void
   close: () => void
   refresh: () => Promise<unknown>
   onPairingBusy: (busy: boolean) => void
@@ -164,11 +166,124 @@ function PairingSettings({ back, onPaired, onPairingBusy, initialEndpoint }: { b
   </main>
 }
 
-export function ConnectionSettings({ profiles, sessions, connected, endpoint, theme, setTheme, close, refresh, onPairingBusy, onPaired }: Props) {
+function AppearanceSettings({
+  back,
+  theme,
+  setTheme,
+  uiScale,
+  setUiScale,
+}: {
+  back: () => void
+  theme: Theme
+  setTheme: (theme: Theme) => void
+  uiScale: number
+  setUiScale: (scale: number) => void
+}) {
+  const shellRef = useRef<HTMLElement>(null)
+  useEdgeSwipeBack(shellRef, back)
+
+  const scalePercent = Math.round(uiScale * 100)
+  const isDefault = scalePercent === 100
+
+  return (
+    <main ref={shellRef} className="app panel appearance-screen">
+      <Header title="Appearance" subtitle="Theme & Text Size" back={back}/>
+
+      <section className="appearance-group">
+        <p className="appearance-group-label">THEME</p>
+        <div className="appearance-theme-list">
+          {themes.map(item => {
+            const isSelected = item.id === theme
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={`appearance-theme-row ${isSelected ? 'selected' : ''}`}
+                onClick={() => setTheme(item.id)}
+              >
+                <span className={`theme-swatch theme-${item.id}`}/>
+                <div className="appearance-theme-meta">
+                  <b>{item.label}</b>
+                  <small>{item.description}</small>
+                </div>
+                {isSelected && <Check size={18} className="appearance-theme-check"/>}
+              </button>
+            )
+          })}
+        </div>
+      </section>
+
+      <section className="appearance-group">
+        <div className="appearance-group-header">
+          <p className="appearance-group-label">TEXT & DISPLAY SIZE</p>
+          <span className="appearance-scale-badge">{scalePercent}%{isDefault ? ' · Default' : ''}</span>
+        </div>
+
+        <div className="appearance-scale-card">
+          <div className="scale-slider-row">
+            <span className="scale-glyph small" aria-hidden="true">A</span>
+            <input
+              type="range"
+              min="0.85"
+              max="1.25"
+              step="0.05"
+              value={uiScale}
+              onChange={e => setUiScale(parseFloat(e.target.value))}
+              aria-label="Text and interface size slider"
+              className="scale-range-slider"
+            />
+            <span className="scale-glyph large" aria-hidden="true">A</span>
+          </div>
+
+          <div className="scale-quick-presets">
+            {[
+              { label: 'Compact', val: 0.85 },
+              { label: 'Normal', val: 1.0 },
+              { label: 'Large', val: 1.15 },
+              { label: 'X-Large', val: 1.25 },
+            ].map(preset => (
+              <button
+                key={preset.label}
+                type="button"
+                className={`scale-preset-pill ${Math.abs(uiScale - preset.val) < 0.02 ? 'active' : ''}`}
+                onClick={() => setUiScale(preset.val)}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+
+          {!isDefault && (
+            <button
+              type="button"
+              className="scale-reset-button"
+              onClick={() => setUiScale(1.0)}
+            >
+              <RotateCcw size={13}/> Reset to default size
+            </button>
+          )}
+        </div>
+
+        <div className="scale-preview-card" aria-hidden="true">
+          <span className="scale-preview-tag">LIVE PREVIEW</span>
+          <div className="scale-preview-bubble">
+            <span className="scale-preview-sender">Hermes Agent</span>
+            <p>Text and interface elements scale smoothly across chats, tabs, and tasks.</p>
+          </div>
+        </div>
+
+        <p className="appearance-footnote">
+          UI scaling adjusts messages, tabs, and controls together. Use compact mode for more density, or larger text for enhanced readability.
+        </p>
+      </section>
+    </main>
+  )
+}
+
+export function ConnectionSettings({ profiles, sessions, connected, endpoint, theme, setTheme, uiScale, setUiScale, close, refresh, onPairingBusy, onPaired }: Props) {
   const shellRef = useRef<HTMLElement>(null)
   useEdgeSwipeBack(shellRef, close, true)
   const [page, setPage] = useState<Page>('root')
-  const [showThemes, setShowThemes] = useState(false)
   const [syncState, setSyncState] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle')
   useEffect(() => {
     const onMobileBack = (event: Event) => {
@@ -189,6 +304,17 @@ export function ConnectionSettings({ profiles, sessions, connected, endpoint, th
       setSyncState('error')
     }
   }
+  if (page === 'appearance') {
+    return (
+      <AppearanceSettings
+        back={() => setPage('root')}
+        theme={theme}
+        setTheme={setTheme}
+        uiScale={uiScale ?? 1}
+        setUiScale={setUiScale ?? (() => {})}
+      />
+    )
+  }
   if (page === 'about') return <AboutHermesMobile back={() => setPage('root')}/>
   if (page === 'pairing') return <PairingSettings back={() => setPage('root')} onPaired={onPaired} onPairingBusy={onPairingBusy} initialEndpoint={endpoint}/>
   const displayEndpoint = endpoint?.replace(/^https?:\/\//, '')
@@ -202,7 +328,14 @@ export function ConnectionSettings({ profiles, sessions, connected, endpoint, th
       <button className={`primary wide connection-sync-button ${syncState}`} disabled={connected && syncState === 'syncing'} aria-busy={connected && syncState === 'syncing'} onClick={connected ? () => void syncNow() : endpoint ? () => void refresh() : () => setPage('pairing')}>{connected ? syncState === 'syncing' ? <><LoaderCircle className="connection-sync-spinner" size={17}/> Syncing…</> : syncState === 'success' ? <><CheckCircle2 size={17}/> Synced</> : 'Sync now' : endpoint ? 'Retry saved connection' : 'Set up security & pairing'}</button>
       {connected && syncState !== 'idle' && <p className={`connection-sync-result ${syncState}`} role="status">{syncState === 'syncing' ? 'Refreshing live Hermes data…' : syncState === 'success' ? 'Synced with Hermes Desktop just now.' : 'Sync could not complete. Check the host connection and try again.'}</p>}
     </section>
-    <section className="menu-list"><button>Notifications <span>›</span></button><button onClick={() => setShowThemes(value => !value)}>Appearance <span>{themes.find(item => item.id === theme)?.label} ›</span></button>{showThemes && <div className="theme-picker">{themes.map(item => <button className={item.id === theme ? 'selected' : ''} onClick={() => setTheme(item.id)} key={item.id}><span className={`theme-swatch theme-${item.id}`}/><span><b>{item.label}</b><small>{item.description}</small></span><i>{item.id === theme ? '✓' : ''}</i></button>)}</div>}<button onClick={() => setPage('pairing')}>Security & pairing <span className={connected ? '' : 'connection-attention'}>{connected ? 'Connected ›' : 'Disconnected ›'}</span></button><button onClick={() => setPage('about')}>About Hermes Mobile <span>0.1.1 ›</span></button></section>
+    <section className="menu-list">
+      <button>Notifications <span>›</span></button>
+      <button onClick={() => setPage('appearance')}>
+        Appearance <span>{themes.find(item => item.id === theme)?.label || 'OLED dark'} ›</span>
+      </button>
+      <button onClick={() => setPage('pairing')}>Security & pairing <span className={connected ? '' : 'connection-attention'}>{connected ? 'Connected ›' : 'Disconnected ›'}</span></button>
+      <button onClick={() => setPage('about')}>About Hermes Mobile <span>0.1.1 ›</span></button>
+    </section>
     <p className="fine">The host owns models, credentials, tools, memory, skills, and approvals. This client is the control surface.</p>
   </main>
 }

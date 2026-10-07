@@ -143,15 +143,49 @@ export async function createProfile(input: { name: string; description: string; 
   }
 }
 
+export async function createSession(profile = 'default', title = 'New chat', baseUrl = activeHermes): Promise<LiveSession> {
+  const client = gateway(baseUrl)
+  const created = await client.call<{ session_id?: string; stored_session_id?: string; id?: string }>('session.create', {
+    profile,
+    title,
+    follow_profile_config: true,
+  })
+  const canonicalId = created.stored_session_id || created.session_id || created.id || ''
+  if (!canonicalId) {
+    throw new Error('Failed to create session: gateway returned no session id')
+  }
+  if (created.session_id) {
+    resolvedSessions.set(`${baseUrl}:${canonicalId}`, created.session_id)
+    resolvedSessions.set(`${baseUrl}:${created.session_id}`, created.session_id)
+  }
+  return {
+    id: canonicalId,
+    title,
+    preview: '',
+    profile,
+    last_active: Date.now(),
+  }
+}
+
 export async function loadMessages(sessionId: string, profile: string, baseUrl = activeHermes): Promise<LiveMessage[]> {
   const safeProfile = profile || 'default'
-  const raw = await invoke<string>('hermes_session_messages', { baseUrl, sessionId, profile: safeProfile })
-  const parsed = JSON.parse(raw) as { messages?: LiveMessage[] }
-  const messages = Array.isArray(parsed?.messages) ? parsed.messages : []
-  return messages.map(msg => ({
-    ...msg,
-    content: typeof msg.content === 'string' ? msg.content : msg.content == null ? '' : String(msg.content),
-  }))
+  try {
+    const raw = await invoke<string>('hermes_session_messages', { baseUrl, sessionId, profile: safeProfile })
+    const parsed = JSON.parse(raw) as { messages?: LiveMessage[] }
+    const messages = Array.isArray(parsed?.messages) ? parsed.messages : []
+    return messages.map(msg => ({
+      ...msg,
+      content: typeof msg.content === 'string' ? msg.content : msg.content == null ? '' : String(msg.content),
+    }))
+  } catch (err) {
+    // Fresh unprompted drafts have no persisted transcript in state.db yet.
+    // Treat 404 / session not found as an empty conversation rather than an error.
+    const message = String(err)
+    if (/404|not found|not_found/i.test(message)) {
+      return []
+    }
+    throw err
+  }
 }
 
 export async function transcribeAudio(profile: string, dataUrl: string, mimeType: string, baseUrl = activeHermes): Promise<string> {
@@ -341,11 +375,33 @@ export async function connectAndSubmit(
   baseUrl = activeHermes,
 ): Promise<void> {
   const client = gateway(baseUrl)
-  const resolvedSessionId = await client.resumeSession(sessionId, profile)
+  const resolvedSessionId = resolvedSessions.get(`${baseUrl}:${sessionId}`) || await client.resumeSession(sessionId, profile)
   resolvedSessions.set(`${baseUrl}:${sessionId}`, resolvedSessionId)
   await client.submitPrompt(resolvedSessionId, text, event => onEvent(event.type, event.payload, event))
 }
 
 export async function interruptSession(sessionId: string, baseUrl = activeHermes): Promise<void> {
   await gateway(baseUrl).interruptSession(resolvedSessions.get(`${baseUrl}:${sessionId}`) || sessionId)
+}
+
+export async function clearSession(sessionId: string, profile = 'default', baseUrl = activeHermes): Promise<LiveSession> {
+  const client = gateway(baseUrl)
+  const resolved = resolvedSessions.get(`${baseUrl}:${sessionId}`) || sessionId
+
+  try {
+    await client.interruptSession(resolved)
+  } catch {}
+
+  try {
+    await client.call('session.close', { session_id: resolved })
+  } catch {}
+
+  try {
+    await client.call('session.delete', { session_id: sessionId, profile })
+  } catch {}
+
+  resolvedSessions.delete(`${baseUrl}:${sessionId}`)
+  resolvedSessions.delete(`${baseUrl}:${resolved}`)
+
+  return createSession(profile, 'New chat', baseUrl)
 }

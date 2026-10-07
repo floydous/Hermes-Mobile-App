@@ -26,6 +26,17 @@ import './connection-settings.css'
 import './edge-swipe.css'
 import './transitions.css'
 
+try {
+  const savedScale = localStorage.getItem('hermes-mobile-ui-scale')
+  if (savedScale) {
+    const parsed = parseFloat(savedScale)
+    if (!isNaN(parsed) && parsed >= 0.75 && parsed <= 1.5) {
+      document.documentElement.style.zoom = String(parsed)
+      document.documentElement.style.setProperty('--ui-scale', String(parsed))
+    }
+  }
+} catch {}
+
 const rootElement = document.getElementById('root')
 if (rootElement) {
   const root = createRoot(rootElement)

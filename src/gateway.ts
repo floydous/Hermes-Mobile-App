@@ -242,6 +242,18 @@ export class HermesGatewayClient {
     return result
   }
 
+  async deleteSession(sessionId: string, profile?: string): Promise<boolean> {
+    try {
+      await this.call('session.close', { session_id: sessionId })
+    } catch {}
+    try {
+      await this.call('session.delete', { session_id: sessionId, ...(profile ? { profile } : {}) })
+      return true
+    } catch {
+      return false
+    }
+  }
+
   setSessionModel(sessionId: string, provider: string, model: string) {
     const providerFlag = provider && provider !== 'custom' ? ` --provider ${provider}` : ''
     return this.call('config.set', {

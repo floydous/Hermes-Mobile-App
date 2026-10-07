@@ -38,10 +38,13 @@ export function deriveTaskSections(jobs: CronJob[], filter: TaskFilter) {
   }
 }
 
+let cachedTaskJobs: CronJob[] = []
+let hasLoadedTaskJobsOnce = false
+
 export function TasksView({ back, profiles, createOpen: propCreateOpen, setCreateOpen: propSetCreateOpen, query = '' }: Props) {
-  const [jobs, setJobs] = useState<CronJob[]>([])
+  const [jobs, setJobs] = useState<CronJob[]>(() => cachedTaskJobs)
   const [selected, setSelected] = useState<CronJob | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(() => !hasLoadedTaskJobsOnce)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState('')
   const [filter, setFilter] = useState<TaskFilter>('all')
@@ -56,8 +59,9 @@ export function TasksView({ back, profiles, createOpen: propCreateOpen, setCreat
   useEdgeSwipeBack(scrollRef, back || (() => {}), Boolean(back) && !selected && !isCreateOpen)
   const optimisticJobsRef = useRef(new Map<string, CronJob>())
   const scopeKey = profiles.map(profile => profile.name).sort().join('|')
-  const refresh = async () => {
-    setLoading(true); setError('')
+  const refresh = async (silent = cachedTaskJobs.length > 0) => {
+    if (!silent) setLoading(true)
+    setError('')
     const scopes = profiles.map(profile => profile.name)
     const results = await Promise.allSettled((scopes.length ? scopes : [undefined]).map(scope => loadCronJobs(scope)))
     const successful = results.filter((result): result is PromiseFulfilledResult<CronJob[]> => result.status === 'fulfilled')
@@ -66,6 +70,8 @@ export function TasksView({ back, profiles, createOpen: propCreateOpen, setCreat
       const serverJobs = successful.flatMap(result => result.value)
       const reconciled = reconcileTaskJobs(serverJobs, optimisticJobsRef.current)
       optimisticJobsRef.current = reconciled.pending
+      cachedTaskJobs = reconciled.jobs
+      hasLoadedTaskJobsOnce = true
       setJobs(reconciled.jobs)
       setSelected(current => current ? (reconciled.jobs.find(job => job.job_id === current.job_id) || current) : null)
       if (failures.length) setError('Some Bot task lists could not refresh; showing the last confirmed state for those tasks.')
@@ -76,7 +82,7 @@ export function TasksView({ back, profiles, createOpen: propCreateOpen, setCreat
   }
   const pullRefresh = async () => {
     setPullRefreshing(true)
-    try { await refresh() } finally { setPullRefreshing(false) }
+    try { await refresh(false) } finally { setPullRefreshing(false) }
   }
   useEffect(() => {
     const onMobileBack = (event: Event) => {
@@ -87,7 +93,11 @@ export function TasksView({ back, profiles, createOpen: propCreateOpen, setCreat
     window.addEventListener('hermes-mobile-back', onMobileBack)
     return () => window.removeEventListener('hermes-mobile-back', onMobileBack)
   }, [selected, isCreateOpen, back])
-  useEffect(() => { void refresh(); const timer = window.setInterval(() => void refresh(), 20_000); return () => window.clearInterval(timer) }, [scopeKey])
+  useEffect(() => {
+    void refresh(cachedTaskJobs.length > 0)
+    const timer = window.setInterval(() => void refresh(true), 20_000)
+    return () => window.clearInterval(timer)
+  }, [scopeKey])
   const filteredJobs = useMemo(() => {
     if (!query.trim()) return jobs
     const q = query.trim().toLowerCase()

@@ -10,13 +10,12 @@ import { ConnectionSettings } from './components/ConnectionSettings'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { onBackButtonPress } from '@tauri-apps/api/app'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { flushSync } from 'react-dom'
 import { buildAttachmentPrompt, attachmentSummary } from './attachment-routing'
 import { buildBotRows, resolveCanonicalSessionId } from './live-model'
 import { settleAssistantResponse, type SettledAssistantResponse as SettledAssistantState } from './settled-assistant'
 import { isActiveChatTurn } from './chat-turn'
 import { errorMessage, RequestEpoch, selectRestoredEndpoint } from './connection-state'
-import { connectAndSubmit, createProfile, interruptSession, loadMessages, loadSnapshot, savedHermesEndpoint, setActiveHermesEndpoint, type LiveMessage, type LiveProfile, type LiveSession, type LiveUsage } from './hermes'
+import { clearSession, connectAndSubmit, createProfile, createSession, interruptSession, loadMessages, loadSnapshot, savedHermesEndpoint, setActiveHermesEndpoint, type LiveMessage, type LiveProfile, type LiveSession, type LiveUsage } from './hermes'
 
 type Tab = 'bots' | 'sessions' | 'tasks'
 type DraftBot = { role: string; name: string; description: string; soul: string; model: string; provider: string; shape: string }
@@ -56,6 +55,18 @@ export type ActiveBotTurn = {
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('bots')
+  const [slideDirection, setSlideDirection] = useState<'forward' | 'backward'>('forward')
+
+  const switchTab = useCallback((newTab: Tab) => {
+    setTab(current => {
+      if (newTab === current) return current
+      const tabOrder: Tab[] = ['bots', 'sessions', 'tasks']
+      const currentIdx = tabOrder.indexOf(current)
+      const newIdx = tabOrder.indexOf(newTab)
+      setSlideDirection(newIdx >= currentIdx ? 'forward' : 'backward')
+      return newTab
+    })
+  }, [])
   const [profiles, setProfiles] = useState<LiveProfile[]>([])
   const [sessions, setSessions] = useState<LiveSession[]>([])
   const [selected, setSelected] = useState<LiveSession | null>(null)
@@ -102,6 +113,17 @@ export default function App() {
     model: '', provider: '', shape: 'blobatar',
   })
   const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem('hermes-mobile-theme') as Theme | null) || 'dark')
+  const [uiScale, setUiScale] = useState<number>(() => {
+    const saved = localStorage.getItem('hermes-mobile-ui-scale')
+    const parsed = saved ? parseFloat(saved) : 1
+    return !isNaN(parsed) && parsed >= 0.75 && parsed <= 1.5 ? parsed : 1
+  })
+
+  useEffect(() => {
+    document.documentElement.style.zoom = String(uiScale)
+    document.documentElement.style.setProperty('--ui-scale', String(uiScale))
+    localStorage.setItem('hermes-mobile-ui-scale', String(uiScale))
+  }, [uiScale])
   const [rosterPullDistance, setRosterPullDistance] = useState(0)
   const [rosterPullRefreshing, setRosterPullRefreshing] = useState(false)
   const rosterScrollRef = useRef<HTMLDivElement | null>(null)
@@ -123,7 +145,7 @@ export default function App() {
       if (navigation.selected) { setSelected(null); return true }
       if (navigation.settings) { setSettings(false); return true }
       if (navigation.createOpen) { setCreateOpen(false); return true }
-      if (navigation.tab !== 'bots') { setTab('bots'); return true }
+      if (navigation.tab !== 'bots') { switchTab('bots'); return true }
       return false
     }
     void getCurrentWindow().onCloseRequested(async event => {
@@ -235,6 +257,8 @@ export default function App() {
 
   const visibleSessions = useMemo(() => sessions.filter(session => `${session.title} ${session.profile} ${session.preview}`.toLowerCase().includes(query.toLowerCase())), [sessions, query])
 
+  const messageCacheRef = useRef<Map<string, LiveMessage[]>>(new Map())
+
   const openSession = useCallback((session: LiveSession, latestUsage?: LiveUsage): Promise<void> => {
     const safeSession: LiveSession = {
       ...session,
@@ -244,34 +268,43 @@ export default function App() {
     }
     const requestId = ++sessionLoadRef.current
     const activeTurn = activeTurnsRef.current[safeSession.profile]
-    const startedAt = performance.now()
-    flushSync(() => {
-      setSelected(safeSession)
-      setProfileSheet(false)
-      setSettledAssistant(null)
-      setError('')
-      if (activeTurn) {
-        setSending(true)
-        setStreaming(activeTurn.streamingText)
-        setToolActivities(activeTurn.toolActivities)
-        setConversationLoading(false)
-        if (activeTurn.userMessage) {
-          setMessages([activeTurn.userMessage])
-        }
-      } else {
-        setMessages([])
-        setSending(false)
-        setStreaming('')
-        setToolActivities([])
-        setConversationLoading(true)
+    const cached = messageCacheRef.current.get(safeSession.id)
+
+    setSelected(safeSession)
+    setProfileSheet(false)
+    setSettledAssistant(null)
+    setError('')
+
+    if (activeTurn) {
+      setSending(true)
+      setStreaming(activeTurn.streamingText)
+      setToolActivities(activeTurn.toolActivities)
+      setConversationLoading(false)
+      if (activeTurn.userMessage) {
+        setMessages(cached ? [...cached, activeTurn.userMessage] : [activeTurn.userMessage])
       }
-    })
+    } else if (cached && cached.length > 0) {
+      setMessages(cached)
+      setSending(false)
+      setStreaming('')
+      setToolActivities([])
+      setConversationLoading(false)
+    } else {
+      setMessages([])
+      setSending(false)
+      setStreaming('')
+      setToolActivities([])
+      setConversationLoading(true)
+    }
+
     return (async () => {
       try {
         const loaded = await loadMessages(safeSession.id, safeSession.profile)
         if (requestId !== sessionLoadRef.current) return
         const latestAssistant = latestUsage ? [...loaded].reverse().findIndex(message => message.role === 'assistant') : -1
         const resolvedLoaded = latestAssistant >= 0 ? loaded.map((message, index) => index === loaded.length - latestAssistant - 1 ? { ...message, usage: latestUsage } : message) : loaded
+
+        messageCacheRef.current.set(safeSession.id, resolvedLoaded)
 
         const currentActive = activeTurnsRef.current[safeSession.profile]
         if (currentActive?.userMessage) {
@@ -285,14 +318,28 @@ export default function App() {
         if (requestId === sessionLoadRef.current) setError(reason instanceof Error ? reason.message : 'Could not load this Hermes conversation.')
       }
       finally {
-        if (!activeTurnsRef.current[safeSession.profile]) {
-          const remaining = Math.max(0, 400 - (performance.now() - startedAt))
-          if (remaining) await new Promise(resolve => window.setTimeout(resolve, remaining))
-        }
         if (requestId === sessionLoadRef.current) setConversationLoading(false)
       }
     })()
   }, [])
+
+  const [creatingSession, setCreatingSession] = useState(false)
+
+  const handleNewSession = useCallback(async (profileName?: string) => {
+    if (creatingSession) return
+    const targetProfile = profileName || (profiles[0]?.name ?? 'default')
+    setCreatingSession(true)
+    setError('')
+    try {
+      const newSession = await createSession(targetProfile, 'New chat', activeEndpointRef.current)
+      setSessions(prev => [newSession, ...prev.filter(s => s.id !== newSession.id)])
+      void openSession(newSession)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Could not create new session.')
+    } finally {
+      setCreatingSession(false)
+    }
+  }, [creatingSession, profiles, openSession])
 
   const submit = useCallback(async (attachmentRefs: { name: string; refText: string }[] = [], rawText = ''): Promise<boolean> => {
     const turnSession = selectedRef.current
@@ -482,6 +529,30 @@ export default function App() {
     setSelected(current => current ? { ...current, model } : current)
   }, [])
 
+  const handleClearChat = useCallback(async (session: LiveSession): Promise<void> => {
+    setActiveTurns(prev => {
+      const next = { ...prev }
+      delete next[session.profile]
+      return next
+    })
+    setMessages([])
+    setSending(false)
+    setStreaming('')
+    setToolActivities([])
+    setSettledAssistant(null)
+    setError('')
+    messageCacheRef.current.delete(session.id)
+
+    try {
+      const fresh = await clearSession(session.id, session.profile)
+      setSelected(fresh)
+      messageCacheRef.current.set(fresh.id, [])
+      void refresh()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Could not clear chat history.')
+    }
+  }, [refresh])
+
   const finishCreate = async () => {
     setCreating(true)
     setError('')
@@ -527,12 +598,78 @@ export default function App() {
     if (shouldRefresh) void pullRefreshRoster()
   }
 
-  if (createOpen) return <CreateWizard step={createStep} setStep={setCreateStep} draft={botDraft} setDraft={setBotDraft} creating={creating} error={error} close={() => { setCreateOpen(false); setCreateStep(0); setError('') }} finish={() => void finishCreate()}/>
-  if (settings) return <ConnectionSettings profiles={profiles.length} sessions={sessions.length} connected={connectionStatus === 'connected'} endpoint={activeEndpoint !== 'http://127.0.0.1:9119' ? activeEndpoint : undefined} theme={theme} setTheme={setTheme} close={() => setSettings(false)} refresh={() => refresh()} onPairingBusy={setPairingBusyState} onPaired={async endpoint => { const normalized = activateEndpoint(endpoint); const data = await refresh(normalized, true); if (!data) throw new Error(lastConnectionErrorRef.current || 'Signed in, but authenticated Hermes REST or live WebSocket verification failed.'); localStorage.setItem('hermes-mobile-active-endpoint', normalized) }}/>
-  if (selected && profileSheet) return <BotProfileSheet profile={profiles.find(profile => profile.name === selected.profile)} session={selected} onClose={() => setProfileSheet(false)} onUpdated={() => void refresh()}/>
-  if (selected) return <ErrorBoundary onReset={() => setSelected(null)}><ChatView session={selected} conversationLoading={conversationLoading} messages={messages} settledAssistant={settledAssistant?.sessionId === selected.id && settledAssistant.profile === selected.profile ? settledAssistant : null} profiles={profiles} streaming={streaming} sending={sending} toolActivities={toolActivities} error={error} back={() => setSelected(null)} refresh={() => void openSession(selected)} openProfile={() => setProfileSheet(true)} onSessionModelChange={handleSessionModelChange} submit={submit} submitVoice={submitVoice} stop={stop}/></ErrorBoundary>
+  const swipeStartXRef = useRef<number | null>(null)
+  const swipeStartYRef = useRef<number | null>(null)
+  const swipeTrackingRef = useRef(false)
+  const lastSwipeTimeRef = useRef(0)
 
-  return <main className="app roster-shell">
+  const handleRosterTouchStart = (event: React.TouchEvent<HTMLElement>) => {
+    if (event.touches.length !== 1) return
+    const target = event.target as HTMLElement | null
+    if (target?.closest('input, textarea, select, [type="range"], .task-detail, .task-create-sheet, .task-modal-backdrop, .nav-island')) return
+    swipeStartXRef.current = event.touches[0].clientX
+    swipeStartYRef.current = event.touches[0].clientY
+    swipeTrackingRef.current = true
+  }
+
+  const handleRosterTouchEnd = (event: React.TouchEvent<HTMLElement>) => {
+    if (!swipeTrackingRef.current || swipeStartXRef.current == null || swipeStartYRef.current == null) {
+      swipeTrackingRef.current = false
+      return
+    }
+    const endX = event.changedTouches[0]?.clientX ?? swipeStartXRef.current
+    const endY = event.changedTouches[0]?.clientY ?? swipeStartYRef.current
+    const deltaX = endX - swipeStartXRef.current
+    const deltaY = endY - swipeStartYRef.current
+    swipeTrackingRef.current = false
+    swipeStartXRef.current = null
+    swipeStartYRef.current = null
+
+    // Require predominantly horizontal movement with at least 44px delta
+    if (Math.abs(deltaX) >= 44 && Math.abs(deltaX) > Math.abs(deltaY) * 1.25) {
+      const tabOrder: Tab[] = ['bots', 'sessions', 'tasks']
+      const currentIndex = tabOrder.indexOf(tab)
+      if (deltaX < 0) {
+        // Swipe Left -> next panel
+        if (currentIndex < tabOrder.length - 1) {
+          lastSwipeTimeRef.current = Date.now()
+          switchTab(tabOrder[currentIndex + 1])
+        }
+      } else {
+        // Swipe Right -> previous panel
+        if (currentIndex > 0) {
+          lastSwipeTimeRef.current = Date.now()
+          switchTab(tabOrder[currentIndex - 1])
+        }
+      }
+    }
+  }
+
+  const handleRosterTouchCancel = () => {
+    swipeTrackingRef.current = false
+    swipeStartXRef.current = null
+    swipeStartYRef.current = null
+  }
+
+  const handleRosterClickCapture = (event: React.MouseEvent) => {
+    if (Date.now() - lastSwipeTimeRef.current < 250) {
+      event.stopPropagation()
+      event.preventDefault()
+    }
+  }
+
+  if (createOpen) return <CreateWizard step={createStep} setStep={setCreateStep} draft={botDraft} setDraft={setBotDraft} creating={creating} error={error} close={() => { setCreateOpen(false); setCreateStep(0); setError('') }} finish={() => void finishCreate()}/>
+  if (settings) return <ConnectionSettings profiles={profiles.length} sessions={sessions.length} connected={connectionStatus === 'connected'} endpoint={activeEndpoint !== 'http://127.0.0.1:9119' ? activeEndpoint : undefined} theme={theme} setTheme={setTheme} uiScale={uiScale} setUiScale={setUiScale} close={() => setSettings(false)} refresh={() => refresh()} onPairingBusy={setPairingBusyState} onPaired={async endpoint => { const normalized = activateEndpoint(endpoint); const data = await refresh(normalized, true); if (!data) throw new Error(lastConnectionErrorRef.current || 'Signed in, but authenticated Hermes REST or live WebSocket verification failed.'); localStorage.setItem('hermes-mobile-active-endpoint', normalized) }}/>
+  if (selected && profileSheet) return <BotProfileSheet profile={profiles.find(profile => profile.name === selected.profile)} session={selected} onClose={() => setProfileSheet(false)} onUpdated={() => void refresh()}/>
+  if (selected) return <ErrorBoundary onReset={() => setSelected(null)}><ChatView session={selected} conversationLoading={conversationLoading} messages={messages} settledAssistant={settledAssistant?.sessionId === selected.id && settledAssistant.profile === selected.profile ? settledAssistant : null} profiles={profiles} streaming={streaming} sending={sending} toolActivities={toolActivities} error={error} back={() => setSelected(null)} refresh={() => void openSession(selected)} clearChat={() => handleClearChat(selected)} openProfile={() => setProfileSheet(true)} onSessionModelChange={handleSessionModelChange} submit={submit} submitVoice={submitVoice} stop={stop}/></ErrorBoundary>
+
+  return <main
+    className={`app roster-shell tab-slide-${slideDirection}`}
+    onTouchStart={handleRosterTouchStart}
+    onTouchEnd={handleRosterTouchEnd}
+    onTouchCancel={handleRosterTouchCancel}
+    onClickCapture={handleRosterClickCapture}
+  >
     <div className="roster-pinned">
       <header className="roster-head">
         <div className="roster-status">
@@ -543,71 +680,128 @@ export default function App() {
         <div className="header-actions">
           <button className="icon-button" aria-label="Search" onClick={() => setSearching(value => !value)}><Search size={18}/></button>
           <button className="icon-button" aria-label="Settings" onClick={() => setSettings(true)}><SettingsIcon size={18}/></button>
-          <div className="header-action-group">
-            <button
-              type="button"
-              className={`header-action-btn primary action-group-trigger ${actionMenuOpen ? 'open' : ''}`}
-              aria-haspopup="menu"
-              aria-expanded={actionMenuOpen}
-              aria-label={tab === 'tasks' ? 'New task or bot' : 'New bot or group'}
-              onClick={() => setActionMenuOpen(open => !open)}
-            >
-              <Plus size={16}/>
-              <span>New</span>
-            </button>
-            {actionMenuOpen && <>
+          {tab === 'sessions' ? (
+            <div className="header-action-group">
               <button
                 type="button"
-                className="action-group-scrim"
-                aria-label="Close menu"
-                onClick={() => setActionMenuOpen(false)}
-              />
-              <div className="action-group-menu" role="menu">
+                className={`header-action-btn primary action-group-trigger ${actionMenuOpen ? 'open' : ''}`}
+                aria-haspopup={profiles.length > 1 ? 'menu' : undefined}
+                aria-expanded={profiles.length > 1 ? actionMenuOpen : undefined}
+                aria-label="New chat session"
+                disabled={creatingSession}
+                onClick={() => {
+                  if (profiles.length > 1) {
+                    setActionMenuOpen(open => !open)
+                  } else {
+                    void handleNewSession()
+                  }
+                }}
+              >
+                <Plus size={16}/>
+                <span>{creatingSession ? 'Creating…' : 'New'}</span>
+              </button>
+              {actionMenuOpen && profiles.length > 1 && <>
                 <button
                   type="button"
-                  role="menuitem"
-                  className="action-group-item"
-                  onClick={() => { setActionMenuOpen(false); if (tab === 'tasks') setCreateTaskOpen(true); else setCreateOpen(true); }}
-                >
-                  {tab === 'tasks' ? <CalendarClock size={15}/> : <Bot size={15}/>}
-                  <span>{tab === 'tasks' ? 'New task' : 'New Bot'}</span>
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="action-group-item"
-                  onClick={() => { setActionMenuOpen(false); if (tab === 'tasks') setCreateOpen(true); else setCreateTaskOpen(true); }}
-                >
-                  {tab === 'tasks' ? <Bot size={15}/> : <CalendarClock size={15}/>}
-                  <span>{tab === 'tasks' ? 'New Bot' : 'New task'}</span>
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="action-group-item"
-                  disabled
-                  title="Group-room transport is not yet enabled"
+                  className="action-group-scrim"
+                  aria-label="Close menu"
                   onClick={() => setActionMenuOpen(false)}
-                >
-                  <Users size={15}/>
-                  <span>New group</span>
-                </button>
-              </div>
-            </>}
-          </div>
+                />
+                <div className="action-group-menu" role="menu">
+                  <div className="action-group-header">New chat with</div>
+                  {profiles.map(p => (
+                    <button
+                      key={p.name}
+                      type="button"
+                      role="menuitem"
+                      className="action-group-item"
+                      onClick={() => {
+                        setActionMenuOpen(false)
+                        void handleNewSession(p.name)
+                      }}
+                    >
+                      <BotAvatar profile={p} fallbackName={p.name} variant="session"/>
+                      <span>{p.display_name || titleize(p.name)}</span>
+                    </button>
+                  ))}
+                </div>
+              </>}
+            </div>
+          ) : (
+            <div className="header-action-group">
+              <button
+                type="button"
+                className={`header-action-btn primary action-group-trigger ${actionMenuOpen ? 'open' : ''}`}
+                aria-haspopup="menu"
+                aria-expanded={actionMenuOpen}
+                aria-label={tab === 'tasks' ? 'New task or bot' : 'New bot or group'}
+                onClick={() => setActionMenuOpen(open => !open)}
+              >
+                <Plus size={16}/>
+                <span>New</span>
+              </button>
+              {actionMenuOpen && <>
+                <button
+                  type="button"
+                  className="action-group-scrim"
+                  aria-label="Close menu"
+                  onClick={() => setActionMenuOpen(false)}
+                />
+                <div className="action-group-menu" role="menu">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="action-group-item"
+                    onClick={() => { setActionMenuOpen(false); if (tab === 'tasks') setCreateTaskOpen(true); else setCreateOpen(true); }}
+                  >
+                    {tab === 'tasks' ? <CalendarClock size={15}/> : <Bot size={15}/>}
+                    <span>{tab === 'tasks' ? 'New task' : 'New Bot'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="action-group-item"
+                    onClick={() => { setActionMenuOpen(false); if (tab === 'tasks') setCreateOpen(true); else setCreateTaskOpen(true); }}
+                  >
+                    {tab === 'tasks' ? <Bot size={15}/> : <CalendarClock size={15}/>}
+                    <span>{tab === 'tasks' ? 'New Bot' : 'New task'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="action-group-item"
+                    disabled
+                    title="Group-room transport is not yet enabled"
+                    onClick={() => setActionMenuOpen(false)}
+                  >
+                    <Users size={15}/>
+                    <span>New group</span>
+                  </button>
+                </div>
+              </>}
+            </div>
+          )}
         </div>
       </header>
       {searching && <div className="search"><Search size={16}/><input autoFocus value={query} onChange={event => setQuery(event.target.value)} placeholder={tab === 'bots' ? 'Search bots and group chats…' : tab === 'sessions' ? 'Search sessions…' : 'Search tasks…'}/><button onClick={() => { setQuery(''); setSearching(false) }}><X size={16}/></button></div>}
     </div>
     {tab === 'tasks' ? (
       <TasksView
+        key="tasks-view"
         profiles={profiles}
         query={searching ? query : ''}
         createOpen={createTaskOpen}
         setCreateOpen={setCreateTaskOpen}
       />
     ) : (
-      <div className="roster-list-scroll" ref={rosterScrollRef} onTouchStart={rosterTouchStart} onTouchMove={rosterTouchMove} onTouchEnd={rosterTouchEnd}>
+      <div
+        className="roster-list-scroll"
+        key="roster-scroll"
+        ref={rosterScrollRef}
+        onTouchStart={rosterTouchStart}
+        onTouchMove={rosterTouchMove}
+        onTouchEnd={rosterTouchEnd}
+      >
         {rosterPullActive && <div className="roster-pull-cue" style={{ height: `${rosterPullRefreshing ? 46 : rosterPullDistance}px` }}><RefreshCw size={15} className={rosterPullRefreshing ? 'pull-refresh-spinner' : ''}/><span>{rosterPullRefreshing ? 'Refreshing…' : rosterPullDistance >= 56 ? 'Release to refresh' : 'Pull to refresh'}</span></div>}
         {error && <Notice message={error} retry={() => void refresh()}/>}
         {loading && !profiles.length ? <Skeleton/> : tab === 'bots' ? (
@@ -683,7 +877,7 @@ export default function App() {
         )}
       </div>
     )}
-    <NavIsland tab={tab} setTab={setTab}/>
+    <NavIsland tab={tab} setTab={switchTab}/>
   </main>
 }
 

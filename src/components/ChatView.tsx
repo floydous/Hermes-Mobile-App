@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { ArrowDown, Paperclip, RotateCw, X } from 'lucide-react'
+import { ArrowDown, LoaderCircle, Paperclip, RotateCw, Trash2, X } from 'lucide-react'
 import type { DragEvent } from 'react'
 
 import { BotAvatar } from './BotAvatar'
@@ -25,6 +25,7 @@ type Props = {
   error: string
   back: () => void
   refresh: () => void
+  clearChat?: () => Promise<void>
   openProfile: () => void
   onSessionModelChange: (model: string) => void
   submit: (attachments: { name: string; refText: string }[], text: string) => Promise<boolean>
@@ -34,9 +35,8 @@ type Props = {
 
 const titleize = (value?: string | null) => (value || '').split(/[-_]+/).filter(Boolean).map(part => (part[0] ? part[0].toUpperCase() + part.slice(1) : '')).join(' ') || 'Bot'
 
-export function ChatView({ session, conversationLoading, messages, settledAssistant, profiles, streaming, sending, toolActivities, error, back, refresh, openProfile, onSessionModelChange, submit, submitVoice, stop }: Props) {
+export function ChatView({ session, conversationLoading, messages, settledAssistant, profiles, streaming, sending, toolActivities, error, back, refresh, clearChat, openProfile, onSessionModelChange, submit, submitVoice, stop }: Props) {
   const shellRef = useRef<HTMLElement>(null)
-  useEdgeSwipeBack(shellRef, back)
   const threadRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const initializedRef = useRef(false)
@@ -47,6 +47,48 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
   const [revealedTimestampId, setRevealedTimestampId] = useState<number | null>(null)
   const [controlError, setControlError] = useState('')
   const [draggingFiles, setDraggingFiles] = useState(false)
+  const [confirmClearOpen, setConfirmClearOpen] = useState(false)
+  const [confirmClearExiting, setConfirmClearExiting] = useState(false)
+  const [clearing, setClearing] = useState(false)
+
+  useEdgeSwipeBack(shellRef, back, !confirmClearOpen)
+
+  const closeConfirmClear = () => {
+    if (clearing || confirmClearExiting) return
+    setConfirmClearExiting(true)
+    window.setTimeout(() => {
+      setConfirmClearOpen(false)
+      setConfirmClearExiting(false)
+    }, 180)
+  }
+
+  const handleConfirmClear = async () => {
+    if (!clearChat || clearing) return
+    setClearing(true)
+    try {
+      await clearChat()
+      setConfirmClearExiting(true)
+      window.setTimeout(() => {
+        setConfirmClearOpen(false)
+        setConfirmClearExiting(false)
+      }, 180)
+    } catch (err) {
+      setControlError(err instanceof Error ? err.message : 'Could not clear chat')
+    } finally {
+      setClearing(false)
+    }
+  }
+
+  useEffect(() => {
+    const onMobileBack = (event: Event) => {
+      if (confirmClearOpen) {
+        event.preventDefault()
+        closeConfirmClear()
+      }
+    }
+    window.addEventListener('hermes-mobile-back', onMobileBack)
+    return () => window.removeEventListener('hermes-mobile-back', onMobileBack)
+  }, [confirmClearOpen, clearing, confirmClearExiting])
   const [pullDistance, setPullDistance] = useState(0)
   const [pullRefreshing, setPullRefreshing] = useState(false)
   const pullStartRef = useRef<number | null>(null)
@@ -60,7 +102,7 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
   const activeAssistantText = settledAssistant?.content || streaming
   const settledStats = settledAssistant ? formatResponseStats({ id: -1, role: 'assistant', content: settledAssistant.content, usage: settledAssistant.usage }) : null
   const showActiveAssistant = sending || Boolean(settledAssistant)
-  const showConversationLoading = conversationLoading
+  const showConversationLoading = conversationLoading && !messages.length
   const showEmptyState = !conversationLoading && !messages.length && !showActiveAssistant && !streaming && !visibleError
 
   const runningTool = toolActivities.slice().reverse().find(t => t.status === 'running')
@@ -202,7 +244,28 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
     <header className="chat-header">
       <button className="round-control" onClick={back} aria-label="Back"><ArrowDown size={18} className="back-chevron"/></button>
       <div className="chat-title"><button className="chat-identity-button" onClick={openProfile} aria-label={`Open ${botName} settings`}><BotAvatar profile={botProfile} fallbackName={session.profile} variant="header"/><span><b>{botName}</b><small>{botName} · {sending ? 'Working' : modelLabel || 'Hermes default'}</small></span></button></div>
-      <button className="round-control" onClick={refresh} aria-label="Refresh conversation"><RotateCw size={16}/></button>
+      <div className="chat-header-actions">
+        {clearChat && (
+          <button
+            className="round-control clear-chat-btn"
+            onClick={() => setConfirmClearOpen(true)}
+            aria-label="Clear chat"
+            title="Clear chat & reset agent memory"
+            disabled={clearing}
+          >
+            <Trash2 size={16}/>
+          </button>
+        )}
+        <button
+          className="round-control"
+          onClick={refresh}
+          aria-label="Refresh conversation"
+          title="Refresh conversation"
+          disabled={clearing}
+        >
+          <RotateCw size={16}/>
+        </button>
+      </div>
     </header>
 
     {visibleError && <div className="chat-error"><span>{visibleError}</span><button onClick={() => setControlError('')}><X size={14}/></button></div>}
@@ -258,6 +321,35 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
     {!following && <button className="latest-button" onClick={() => scrollToLatest()}><ArrowDown size={15}/><span>Latest{unreadBelow ? ` · ${unreadBelow}` : ''}</span></button>}
 
     <Composer session={session} profiles={profiles} sending={sending} draggingFiles={draggingFiles} editRequest={editRequest} dropFilesRef={dropFilesRef} onControlError={setControlError} onModelLabel={setModelLabel} onSessionModelChange={onSessionModelChange} submit={submit} submitVoice={submitVoice} stop={stop}/>
+
+    {confirmClearOpen && (
+      <div
+        className={`task-modal-backdrop ${confirmClearExiting ? 'exiting' : ''}`}
+        role="presentation"
+        onMouseDown={event => { if (!clearing && event.target === event.currentTarget) closeConfirmClear() }}
+      >
+        <section
+          className="task-delete-modal clear-chat-modal"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="clear-chat-title"
+          aria-describedby="clear-chat-message"
+        >
+          <Trash2 size={22}/>
+          <h2 id="clear-chat-title">Clear conversation?</h2>
+          <p id="clear-chat-message">
+            This will reset {botName}’s memory and delete all chat history in this session.
+          </p>
+          <footer>
+            <button disabled={clearing} onClick={closeConfirmClear}>Keep chat</button>
+            <button className="delete" disabled={clearing} onClick={() => void handleConfirmClear()}>
+              {clearing ? <LoaderCircle size={15} className="connection-sync-spinner"/> : <Trash2 size={15}/>}
+              {clearing ? 'Clearing…' : 'Clear chat'}
+            </button>
+          </footer>
+        </section>
+      </div>
+    )}
   </main>
 }
 

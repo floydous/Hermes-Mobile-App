@@ -1,7 +1,7 @@
 :root {
   --ease-out-smooth: cubic-bezier(0.16, 1, 0.3, 1);
   --duration-page: 0.26s;
-  --duration-tab: 0.2s;
+  --duration-tab: 0.22s;
 }
 
 /* Base page smooth entrance */
@@ -63,16 +63,49 @@
   animation: none !important;
 }
 
-/* Roster tab switch (Bots <-> Sessions) */
-.bot-list {
+/* Roster tab switch (Bots <-> Sessions <-> Tasks) */
+.bot-list,
+.roster-shell .tasks-sheet {
   animation: app-tab-enter var(--duration-tab) var(--ease-out-smooth) backwards;
   will-change: opacity, transform;
+}
+
+.roster-shell.tab-slide-forward .bot-list,
+.roster-shell.tab-slide-forward .tasks-sheet {
+  animation: app-tab-enter-forward var(--duration-tab) var(--ease-out-smooth) backwards;
+}
+
+.roster-shell.tab-slide-backward .bot-list,
+.roster-shell.tab-slide-backward .tasks-sheet {
+  animation: app-tab-enter-backward var(--duration-tab) var(--ease-out-smooth) backwards;
 }
 
 @keyframes app-tab-enter {
   0% {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes app-tab-enter-forward {
+  0% {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes app-tab-enter-backward {
+  0% {
+    opacity: 0;
+    transform: translateX(-18px);
   }
   100% {
     opacity: 1;
