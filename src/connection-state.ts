@@ -8,7 +8,7 @@ export function errorMessage(reason: unknown, fallback: string): string {
   return fallback
 }
 
-export function selectRestoredEndpoint(nativeEndpoint: string | null | undefined, legacyEndpoint: string | null | undefined, localEndpoint: string): string {
+export function selectRestoredEndpoint(nativeEndpoint?: string | null, legacyEndpoint?: string | null, localEndpoint = 'http://127.0.0.1:9119'): string {
   return (nativeEndpoint || legacyEndpoint || localEndpoint).replace(/\/$/, '')
 }
 

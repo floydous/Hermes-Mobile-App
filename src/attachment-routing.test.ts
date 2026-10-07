@@ -14,6 +14,10 @@ describe('attachment routing', () => {
     expect(attachmentSummary('', [attachment])).toBe('Attached: notes.pdf')
   })
 
+  it('includes attachments alongside user prompt text', () => {
+    expect(attachmentSummary('Please summarize this.', [attachment])).toBe('Please summarize this.\n\nAttached: notes.pdf')
+  })
+
   it('does not create blank separators for empty refs', () => {
     expect(buildAttachmentPrompt('Read it.', [{ name: 'bad', refText: ' ' }])).toBe('Read it.')
   })

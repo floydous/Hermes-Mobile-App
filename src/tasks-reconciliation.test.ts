@@ -47,6 +47,46 @@ describe('live Tasks reconciliation', () => {
     expect(detail).toMatchObject({ job_id: '62ecc535b0f1', schedule: 'every day at 10am', prompt: 'Full watchdog prompt.', profile: 'gaetan' })
   })
 
+  it('normalizes REST jobs with id, null job_id, and structured schedule', () => {
+    const rawRestJob = {
+      id: '5595cb883d87',
+      job_id: null,
+      name: 'agentic-news-digest',
+      enabled: true,
+      state: 'scheduled',
+      profile: 'default',
+      schedule: { kind: 'cron', expr: '0 23 * * *', display: '0 23 * * *' },
+    }
+    const normalized = normalizeCronJob(rawRestJob)
+    expect(normalized).toMatchObject({
+      job_id: '5595cb883d87',
+      name: 'agentic-news-digest',
+      enabled: true,
+      state: 'scheduled',
+      schedule: '0 23 * * *',
+      profile: 'default',
+    })
+  })
+
+  it('normalizes WebSocket cron.manage jobs with job_id and string schedule', () => {
+    const rawWsJob = {
+      job_id: 'f904f7562ed9',
+      name: 'check-openrouter-free-models',
+      enabled: true,
+      state: 'scheduled',
+      schedule: 'every 1440m',
+    }
+    const normalized = normalizeCronJob(rawWsJob, 'default')
+    expect(normalized).toMatchObject({
+      job_id: 'f904f7562ed9',
+      name: 'check-openrouter-free-models',
+      enabled: true,
+      state: 'scheduled',
+      schedule: 'every 1440m',
+      profile: 'default',
+    })
+  })
+
   it('rejects a malformed Dashboard detail without an identifier', () => {
     expect(() => normalizeCronJob({ prompt: 'Broken' }, 'airlocator')).toThrow('without a job ID')
   })

@@ -1,11 +1,15 @@
 import { useEffect, type RefObject } from 'react'
 
-export const EDGE_SWIPE_START_RATIO = .5
-export const EDGE_SWIPE_COMMIT_PX = 88
+export const EDGE_SWIPE_START_RATIO = .9
+export const EDGE_SWIPE_COMMIT_PX = 42
 export const EDGE_SWIPE_MAX_OFFSET_PX = 140
 
-export function shouldCommitEdgeSwipe(deltaX: number, deltaY: number): boolean {
-  return deltaX >= EDGE_SWIPE_COMMIT_PX && deltaX > Math.abs(deltaY) * 1.2
+export function shouldCommitEdgeSwipe(deltaX: number, deltaY: number, durationMs = 300): boolean {
+  if (deltaX < 24) return false
+  const isHorizontal = deltaX > Math.abs(deltaY) * 1.2
+  if (!isHorizontal) return false
+  const isQuickFlick = deltaX >= 30 && durationMs < 280
+  return deltaX >= EDGE_SWIPE_COMMIT_PX || isQuickFlick
 }
 
 export function useEdgeSwipeBack<T extends HTMLElement>(ref: RefObject<T | null>, onBack: () => void, enabled = true) {
@@ -14,6 +18,7 @@ export function useEdgeSwipeBack<T extends HTMLElement>(ref: RefObject<T | null>
     if (!element || !enabled) return
     let startX = 0
     let startY = 0
+    let startTime = 0
     let tracking = false
     let committed = false
     let resetTimer: number | undefined
@@ -31,6 +36,7 @@ export function useEdgeSwipeBack<T extends HTMLElement>(ref: RefObject<T | null>
       window.clearTimeout(resetTimer)
       startX = event.touches[0].clientX
       startY = event.touches[0].clientY
+      startTime = Date.now()
       tracking = true
       committed = false
     }
@@ -38,22 +44,26 @@ export function useEdgeSwipeBack<T extends HTMLElement>(ref: RefObject<T | null>
       if (!tracking || event.touches.length !== 1) return
       const deltaX = event.touches[0].clientX - startX
       const deltaY = event.touches[0].clientY - startY
-      if (deltaX < 0 || Math.abs(deltaY) > Math.abs(deltaX) * 1.2) {
+      // If moving backwards or distinctly vertical, stop tracking
+      if (deltaX < -20 || (Math.abs(deltaY) > 20 && Math.abs(deltaY) > Math.abs(deltaX) * 1.5)) {
         tracking = false
+        clearMotion()
         return
       }
-      event.preventDefault()
+      if (deltaX <= 0) return
+      const durationMs = Date.now() - startTime
       const offset = Math.min(EDGE_SWIPE_MAX_OFFSET_PX, Math.max(0, deltaX * .55))
       element.classList.add('edge-swipe-active')
       element.style.setProperty('--edge-swipe-offset', `${offset}px`)
-      committed = shouldCommitEdgeSwipe(deltaX, deltaY)
+      committed = shouldCommitEdgeSwipe(deltaX, deltaY, durationMs)
     }
     const onTouchEnd = (event: TouchEvent) => {
       if (!tracking) return
       const deltaX = (event.changedTouches[0]?.clientX || startX) - startX
       const deltaY = (event.changedTouches[0]?.clientY || startY) - startY
+      const durationMs = Date.now() - startTime
       tracking = false
-      if (committed || shouldCommitEdgeSwipe(deltaX, deltaY)) {
+      if (committed || shouldCommitEdgeSwipe(deltaX, deltaY, durationMs)) {
         element.classList.add('edge-swipe-committed')
         element.style.setProperty('--edge-swipe-offset', '100vw')
         resetTimer = window.setTimeout(() => { clearMotion(); onBack() }, 170)

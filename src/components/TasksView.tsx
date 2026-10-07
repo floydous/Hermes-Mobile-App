@@ -17,6 +17,7 @@ import {
 
 import { NewTaskSheet } from './NewTaskSheet'
 import {
+  getActiveHermesEndpoint,
   loadCronJob,
   loadCronJobs,
   triggerCronJob,
@@ -27,7 +28,7 @@ import {
 } from '../hermes'
 import { useEdgeSwipeBack } from '../edge-swipe'
 
-type Props = { profiles: LiveProfile[]; back?: () => void; createOpen?: boolean; setCreateOpen?: (open: boolean) => void; query?: string }
+type Props = { profiles: LiveProfile[]; back?: () => void; createOpen?: boolean; setCreateOpen?: (open: boolean) => void; query?: string; baseUrl?: string }
 const jobTitle = (job: CronJob) => (job.name || 'Untitled task').replace(/^\[bot:[^\]]+\]\s*/i, '')
 const stateOf = (job: CronJob) => job.state === 'paused' || job.enabled === false ? 'paused' : job.state === 'running' ? 'running' : job.last_error ? 'error' : 'scheduled'
 const dateLabel = (value?: number | string) => { if (!value) return '—'; const date = new Date(typeof value === 'number' ? value * 1000 : value); return Number.isNaN(date.valueOf()) ? String(value) : date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) }
@@ -63,7 +64,8 @@ export function deriveTaskSections(jobs: CronJob[], filter: TaskFilter) {
 let cachedTaskJobs: CronJob[] = []
 let hasLoadedTaskJobsOnce = false
 
-export function TasksView({ back, profiles, createOpen: propCreateOpen, setCreateOpen: propSetCreateOpen, query = '' }: Props) {
+export function TasksView({ back, profiles, createOpen: propCreateOpen, setCreateOpen: propSetCreateOpen, query = '', baseUrl }: Props) {
+  const effectiveBaseUrl = baseUrl || getActiveHermesEndpoint()
   const [jobs, setJobs] = useState<CronJob[]>(() => cachedTaskJobs)
   const [selected, setSelected] = useState<CronJob | null>(null)
   const [loading, setLoading] = useState(() => !hasLoadedTaskJobsOnce)
@@ -84,23 +86,45 @@ export function TasksView({ back, profiles, createOpen: propCreateOpen, setCreat
   const refresh = async (silent = cachedTaskJobs.length > 0) => {
     if (!silent) setLoading(true)
     setError('')
-    const scopes = profiles.map(profile => profile.name)
-    const results = await Promise.allSettled((scopes.length ? scopes : [undefined]).map(scope => loadCronJobs(scope)))
-    const successful = results.filter((result): result is PromiseFulfilledResult<CronJob[]> => result.status === 'fulfilled')
-    const failures = results.filter(result => result.status === 'rejected')
-    if (successful.length) {
-      const serverJobs = successful.flatMap(result => result.value)
+    try {
+      // 1. Load all system / cross-profile jobs
+      const systemJobs = await loadCronJobs(undefined, effectiveBaseUrl)
+
+      // 2. Also query any active profile scopes in case the gateway isolates per-bot stores
+      const scopes = profiles.map(profile => profile.name).filter(Boolean)
+      const scopeResults = scopes.length
+        ? await Promise.allSettled(scopes.map(scope => loadCronJobs(scope, effectiveBaseUrl)))
+        : []
+
+      const additionalJobs = scopeResults
+        .filter((result): result is PromiseFulfilledResult<CronJob[]> => result.status === 'fulfilled')
+        .flatMap(result => result.value)
+
+      // De-duplicate by job_id
+      const jobMap = new Map<string, CronJob>()
+      for (const job of systemJobs) {
+        jobMap.set(job.job_id, job)
+      }
+      for (const job of additionalJobs) {
+        if (!jobMap.has(job.job_id)) {
+          jobMap.set(job.job_id, job)
+        }
+      }
+
+      const serverJobs = Array.from(jobMap.values())
       const reconciled = reconcileTaskJobs(serverJobs, optimisticJobsRef.current)
       optimisticJobsRef.current = reconciled.pending
       cachedTaskJobs = reconciled.jobs
       hasLoadedTaskJobsOnce = true
       setJobs(reconciled.jobs)
       setSelected(current => current ? (reconciled.jobs.find(job => job.job_id === current.job_id) || current) : null)
-      if (failures.length) setError('Some Bot task lists could not refresh; showing the last confirmed state for those tasks.')
-    } else if (!jobs.length && failures.length) {
-      setError('Could not load Hermes scheduled tasks.')
+    } catch {
+      if (!jobs.length && !cachedTaskJobs.length) {
+        setError('Could not load Hermes scheduled tasks.')
+      }
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
   const pullRefresh = async () => {
     setPullRefreshing(true)
@@ -137,15 +161,15 @@ export function TasksView({ back, profiles, createOpen: propCreateOpen, setCreat
     setJobs(current => current.map(item => item.job_id === job.job_id ? desired : item))
     setSelected(current => current?.job_id === job.job_id ? desired : current)
     setBusy(`${job.job_id}:toggle`); setError('')
-    try { await updateCronJob(job.job_id, action, job.profile); await refresh() }
+    try { await updateCronJob(job.job_id, action, job.profile, effectiveBaseUrl); await refresh() }
     catch (reason) { optimisticJobsRef.current.delete(job.job_id); setJobs(current => current.map(item => item.job_id === job.job_id ? job : item)); setSelected(current => current?.job_id === job.job_id ? job : current); setError(reason instanceof Error ? reason.message : `Could not ${action} this task.`) }
     finally { setBusy('') }
   }
-  const trigger = async (job: CronJob) => { setBusy(`${job.job_id}:trigger`); setError(''); try { await triggerCronJob(job.job_id, job.profile); await refresh() } catch (reason) { setError(reason instanceof Error ? reason.message : 'Hermes could not trigger this task.') } finally { setBusy('') } }
+  const trigger = async (job: CronJob) => { setBusy(`${job.job_id}:trigger`); setError(''); try { await triggerCronJob(job.job_id, job.profile, effectiveBaseUrl); await refresh() } catch (reason) { setError(reason instanceof Error ? reason.message : 'Hermes could not trigger this task.') } finally { setBusy('') } }
   const remove = async (job: CronJob) => {
     setBusy(`${job.job_id}:remove`); setError('')
     try {
-      await updateCronJob(job.job_id, 'remove', job.profile)
+      await updateCronJob(job.job_id, 'remove', job.profile, effectiveBaseUrl)
       optimisticJobsRef.current.delete(job.job_id)
       setJobs(current => current.filter(item => item.job_id !== job.job_id))
       setSelected(current => current?.job_id === job.job_id ? null : current)
@@ -157,11 +181,11 @@ export function TasksView({ back, profiles, createOpen: propCreateOpen, setCreat
   }
   const openTask = async (job: CronJob) => {
     setSelected(job)
-    try { setSelected(await loadCronJob(job.job_id, job.profile)) }
+    try { setSelected(await loadCronJob(job.job_id, job.profile, effectiveBaseUrl)) }
     catch { /* Keep the list payload visible; the full prompt remains available when the gateway supports the detail route. */ }
   }
-  if (selected) return <TaskDetail job={selected} busy={busy} back={() => setSelected(null)} onRefresh={refresh} onToggle={toggle} onTrigger={trigger} onDelete={() => setDeleteCandidate(selected)}/>
-  if (isCreateOpen) return <NewTaskSheet profiles={profiles} onClose={() => setIsCreateOpen(false)} onCreated={refresh}/>
+  if (selected) return <TaskDetail job={selected} busy={busy} back={() => setSelected(null)} onRefresh={refresh} onToggle={toggle} onTrigger={trigger} onDelete={() => setDeleteCandidate(selected)} baseUrl={effectiveBaseUrl}/>
+  if (isCreateOpen) return <NewTaskSheet profiles={profiles} baseUrl={effectiveBaseUrl} onClose={() => setIsCreateOpen(false)} onCreated={refresh}/>
   const showRunning = running.length > 0
   const showScheduled = scheduled.length > 0
   const showOther = attention.length > 0
@@ -270,6 +294,7 @@ function TaskDetail({
   onToggle,
   onTrigger,
   onDelete,
+  baseUrl,
 }: {
   job: CronJob
   busy: string
@@ -278,6 +303,7 @@ function TaskDetail({
   onToggle: (job: CronJob) => Promise<void>
   onTrigger: (job: CronJob) => Promise<void>
   onDelete: () => void
+  baseUrl?: string
 }) {
   const shellRef = useRef<HTMLElement>(null)
   useEdgeSwipeBack(shellRef, back)
@@ -305,7 +331,7 @@ function TaskDetail({
     setSavingPrompt(true)
     setError('')
     try {
-      await updateCronPrompt(job.job_id, promptDraft, job.profile)
+      await updateCronPrompt(job.job_id, promptDraft, job.profile, baseUrl)
       setEditPromptOpen(false)
       await onRefresh()
     } catch (reason) {
@@ -360,10 +386,6 @@ function TaskDetail({
     <main ref={shellRef} className="app task-detail">
       {/* iOS Top Nav Header */}
       <header className="ios-task-header">
-        <button className="ios-back-button" onClick={back} aria-label="Back to Tasks">
-          <ChevronLeft size={21} />
-          <span>Tasks</span>
-        </button>
         <span className="ios-nav-title">Task Details</span>
         <button className="ios-nav-action" onClick={() => void onRefresh()} aria-label="Refresh task">
           <RefreshCw size={17} />
@@ -478,18 +500,24 @@ function TaskDetail({
             <button
               type="button"
               className="ios-prompt-btn"
-              disabled={!job.prompt || savingPrompt}
+              disabled={savingPrompt}
               onClick={() => setEditPromptOpen(true)}
             >
               <Pencil size={12} />
-              <span>Edit</span>
+              <span>{job.prompt || job.prompt_preview ? 'Edit' : 'Add'}</span>
             </button>
           </div>
         </div>
         <div className="ios-group-card ios-prompt-card">
-          <pre className="ios-prompt-text">
-            {job.prompt || job.prompt_preview || 'No prompt provided.'}
-          </pre>
+          {job.prompt || job.prompt_preview ? (
+            <pre className="ios-prompt-text">
+              {job.prompt || job.prompt_preview}
+            </pre>
+          ) : (
+            <div className="ios-prompt-empty">
+              <span>No custom instructions configured. This task executes its configured script or automated delivery target.</span>
+            </div>
+          )}
         </div>
       </section>
 

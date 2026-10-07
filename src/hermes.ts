@@ -56,8 +56,9 @@ export function buildCanonicalSessionParams(profile: string): Record<string, unk
 }
 
 export const localHermes = 'http://127.0.0.1:9119'
-let activeHermes = localHermes
+let activeHermes = (typeof localStorage !== 'undefined' && localStorage.getItem('hermes-mobile-active-endpoint')) || localHermes
 export function setActiveHermesEndpoint(endpoint: string) { activeHermes = endpoint.replace(/\/$/, '') }
+export function getActiveHermesEndpoint(): string { return activeHermes }
 
 const gateways = new Map<string, HermesGatewayClient>()
 const resolvedSessions = new Map<string, string>()
@@ -71,7 +72,13 @@ function gateway(baseUrl = activeHermes) {
   return client
 }
 
-async function rpcCall<T>(method: string, params: Record<string, unknown>, baseUrl = activeHermes): Promise<T> {
+export function onGatewayGlobalEvent(listener?: (event: GatewayEvent) => void, baseUrl = activeHermes): () => void {
+  const client = gateway(baseUrl)
+  client.setEventListener(listener)
+  return () => client.setEventListener(undefined)
+}
+
+export async function rpcCall<T>(method: string, params: Record<string, unknown> = {}, baseUrl = activeHermes): Promise<T> {
   return gateway(baseUrl).call<T>(method, params)
 }
 
@@ -92,6 +99,26 @@ export async function passwordSignIn(baseUrl: string, username: string, password
 export async function nativeSignIn(baseUrl: string): Promise<void> {
   await invoke('hermes_native_sign_in', { baseUrl })
   setActiveHermesEndpoint(baseUrl)
+}
+
+export type LiveActiveSession = {
+  id: string
+  session_key?: string
+  status: string
+  title?: string
+  preview?: string
+  model?: string
+  last_active?: number
+  started_at?: number
+}
+
+export async function loadActiveSessions(baseUrl = activeHermes): Promise<LiveActiveSession[] | null> {
+  try {
+    const res = await rpcCall<{ sessions: LiveActiveSession[] }>('session.active_list', {}, baseUrl)
+    return res.sessions || []
+  } catch {
+    return null
+  }
 }
 
 export async function loadSnapshot(baseUrl = activeHermes): Promise<{ profiles: LiveProfile[]; sessions: LiveSession[] }> {
@@ -210,6 +237,43 @@ export async function transcribeAudio(profile: string, dataUrl: string, mimeType
   return result.text || result.transcript || ''
 }
 
+export async function fetchRemoteMedia(path: string, baseUrl = activeHermes): Promise<string> {
+  const normBase = (baseUrl || activeHermes).replace(/\/$/, '')
+  try {
+    if (typeof window !== 'undefined' && (window as unknown as { __TAURI_INTERNALS__?: { invoke?: unknown } }).__TAURI_INTERNALS__?.invoke) {
+      return await invoke<string>('hermes_fetch_media', { baseUrl: normBase, path })
+    }
+  } catch {}
+
+  try {
+    const res = await fetch(`${normBase}/api/media?path=${encodeURIComponent(path)}`, {
+      credentials: 'include',
+    })
+    if (res.ok) {
+      const data = await res.json() as { data_url?: string }
+      if (data.data_url) return data.data_url
+    }
+  } catch {}
+
+  try {
+    const res2 = await fetch(`${normBase}/api/fs/read-data-url?path=${encodeURIComponent(path)}`, {
+      credentials: 'include',
+    })
+    if (res2.ok) {
+      const data2 = await res2.json() as { dataUrl?: string; data_url?: string }
+      if (data2.dataUrl || data2.data_url) return data2.dataUrl || data2.data_url!
+    }
+  } catch {}
+
+  throw new Error(`Could not load media: ${path}`)
+}
+
+export async function updateSessionTitle(sessionId: string, title: string, baseUrl = activeHermes): Promise<void> {
+  const normBase = (baseUrl || activeHermes).replace(/\/$/, '')
+  const resolved = resolvedSessions.get(`${normBase}:${sessionId}`) || sessionId
+  await gateway(normBase).call('session.title', { session_id: resolved, title })
+}
+
 export async function loadModelOptions(profile: string, baseUrl = activeHermes): Promise<ModelOptions> {
   const raw = await invoke<string>('hermes_model_options', { baseUrl, profile })
   return JSON.parse(raw) as ModelOptions
@@ -308,8 +372,31 @@ export function normalizeCronJob(job: Partial<CronJob> | Record<string, unknown>
 }
 
 export async function loadCronJobs(profile?: string, baseUrl = activeHermes): Promise<CronJob[]> {
-  const result = await rpcCall<CronList>('cron.manage', { action: 'list', include_disabled: true, ...(profile ? { profile } : {}) }, baseUrl)
-  return Array.isArray(result.jobs) ? result.jobs.map(job => normalizeCronJob(job, result.scoped || profile || job.profile || '')) : []
+  const targetBaseUrl = baseUrl || activeHermes
+  // 1. Try native authenticated REST endpoint first (/api/cron/jobs?profile=...)
+  try {
+    const raw = await invoke<string>('hermes_cron_jobs', { baseUrl: targetBaseUrl, profile: profile || 'all' })
+    const parsed = JSON.parse(raw) as unknown
+    const rawJobs = Array.isArray(parsed)
+      ? parsed
+      : (parsed && typeof parsed === 'object' && Array.isArray((parsed as { jobs?: unknown[] }).jobs))
+        ? (parsed as { jobs: unknown[] }).jobs
+        : []
+    return (rawJobs as unknown[])
+      .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object' && ((item as Record<string, unknown>).job_id || (item as Record<string, unknown>).id)))
+      .map(job => normalizeCronJob(job, profile || ''))
+  } catch {
+    // 2. Fall back to WebSocket RPC (cron.manage)
+    try {
+      const result = await rpcCall<CronList>('cron.manage', { action: 'list', include_disabled: true, ...(profile && profile !== 'all' ? { profile } : {}) }, targetBaseUrl)
+      const rawJobs = Array.isArray(result.jobs) ? result.jobs : []
+      return (rawJobs as unknown[])
+        .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object' && ((item as Record<string, unknown>).job_id || (item as Record<string, unknown>).id)))
+        .map(job => normalizeCronJob(job, (typeof result.scoped === 'string' ? result.scoped : '') || profile || ''))
+    } catch {
+      return []
+    }
+  }
 }
 
 export async function loadCronJob(jobId: string, profile = '', baseUrl = activeHermes): Promise<CronJob> {
@@ -389,15 +476,41 @@ export async function connectAndSubmit(
   text: string,
   onEvent: (type: string, payload: Record<string, unknown>, event?: GatewayEvent) => void,
   baseUrl = activeHermes,
-): Promise<void> {
-  const client = gateway(baseUrl)
-  const resolvedSessionId = resolvedSessions.get(`${baseUrl}:${sessionId}`) || await client.resumeSession(sessionId, profile)
-  resolvedSessions.set(`${baseUrl}:${sessionId}`, resolvedSessionId)
-  await client.submitPrompt(resolvedSessionId, text, event => onEvent(event.type, event.payload, event))
+  options?: { truncateMessageId?: number },
+): Promise<{ sessionId: string }> {
+  const normBase = (baseUrl || activeHermes).replace(/\/$/, '')
+  const client = gateway(normBase)
+  let resolvedSessionId = resolvedSessions.get(`${normBase}:${sessionId}`)
+
+  if (!resolvedSessionId) {
+    if (sessionId.startsWith('draft:')) {
+      const fresh = await createSession(profile, 'Bot Chat', { canonical: true, hidden: true }, normBase)
+      resolvedSessionId = resolvedSessions.get(`${normBase}:${fresh.id}`) || fresh.id
+    } else {
+      try {
+        resolvedSessionId = await client.resumeSession(sessionId, profile)
+      } catch (err) {
+        const msg = String(err)
+        if (/4007|not found|not_found/i.test(msg)) {
+          // If the session was deleted or unpersisted in DB, auto-recover by minting a fresh session
+          const fresh = await createSession(profile, 'Bot Chat', { canonical: true, hidden: true }, normBase)
+          resolvedSessionId = resolvedSessions.get(`${normBase}:${fresh.id}`) || fresh.id
+        } else {
+          throw err
+        }
+      }
+    }
+  }
+
+  resolvedSessions.set(`${normBase}:${sessionId}`, resolvedSessionId)
+  resolvedSessions.set(`${normBase}:${resolvedSessionId}`, resolvedSessionId)
+  await client.submitPrompt(resolvedSessionId, text, event => onEvent(event.type, event.payload, event), options)
+  return { sessionId: resolvedSessionId }
 }
 
 export async function interruptSession(sessionId: string, baseUrl = activeHermes): Promise<void> {
-  await gateway(baseUrl).interruptSession(resolvedSessions.get(`${baseUrl}:${sessionId}`) || sessionId)
+  const normBase = (baseUrl || activeHermes).replace(/\/$/, '')
+  await gateway(normBase).interruptSession(resolvedSessions.get(`${normBase}:${sessionId}`) || sessionId)
 }
 
 export type ClearSessionOptions = {
@@ -411,8 +524,9 @@ export async function clearSession(
   options?: ClearSessionOptions,
   baseUrl = activeHermes
 ): Promise<LiveSession> {
-  const client = gateway(baseUrl)
-  const resolved = resolvedSessions.get(`${baseUrl}:${sessionId}`) || sessionId
+  const normBase = (baseUrl || activeHermes).replace(/\/$/, '')
+  const client = gateway(normBase)
+  const resolved = resolvedSessions.get(`${normBase}:${sessionId}`) || sessionId
 
   try {
     await client.interruptSession(resolved)
@@ -426,14 +540,14 @@ export async function clearSession(
     await client.call('session.delete', { session_id: sessionId, profile })
   } catch {}
 
-  resolvedSessions.delete(`${baseUrl}:${sessionId}`)
-  resolvedSessions.delete(`${baseUrl}:${resolved}`)
+  resolvedSessions.delete(`${normBase}:${sessionId}`)
+  resolvedSessions.delete(`${normBase}:${resolved}`)
 
   const isCanonical = options?.canonical ?? true
   return createSession(
     profile,
     isCanonical ? 'Bot Chat' : (options?.title || 'New chat'),
     { canonical: isCanonical, hidden: isCanonical },
-    baseUrl
+    normBase
   )
 }

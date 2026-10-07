@@ -9,6 +9,8 @@ export function buildAttachmentPrompt(text: string, attachments: AttachmentRefer
 
 export function attachmentSummary(text: string, attachments: AttachmentReference[]): string {
   const cleanText = text.trim()
+  const attachmentLines = attachments.map(item => `Attached: ${item.name}`).join('\n')
+  if (cleanText && attachmentLines) return `${cleanText}\n\n${attachmentLines}`
   if (cleanText) return cleanText
-  return attachments.map(item => `Attached: ${item.name}`).join('\n')
+  return attachmentLines
 }

@@ -28,7 +28,7 @@ type Props = {
   clearChat?: () => Promise<void>
   openProfile: () => void
   onSessionModelChange: (model: string) => void
-  submit: (attachments: { name: string; refText: string }[], text: string) => Promise<boolean>
+  submit: (attachments: { name: string; refText: string }[], text: string, options?: { editMessageId?: number }) => Promise<boolean>
   submitVoice: (text: string) => Promise<boolean>
   stop: () => void
 }
@@ -101,7 +101,14 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
   const visibleError = error || controlError
   const activeAssistantText = settledAssistant?.content || streaming
   const settledStats = settledAssistant ? formatResponseStats({ id: -1, role: 'assistant', content: settledAssistant.content, usage: settledAssistant.usage }) : null
-  const showActiveAssistant = sending || Boolean(settledAssistant)
+  const lastMessage = messages[messages.length - 1]
+  const isLastMessageAssistant = Boolean(
+    !sending &&
+    lastMessage?.role === 'assistant' &&
+    activeAssistantText &&
+    lastMessage.content === activeAssistantText
+  )
+  const showActiveAssistant = (sending || Boolean(settledAssistant)) && !isLastMessageAssistant
   const showConversationLoading = conversationLoading && !messages.length
   const showEmptyState = !conversationLoading && !messages.length && !showActiveAssistant && !streaming && !visibleError
 
@@ -237,7 +244,7 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
     setDraggingFiles(false)
     dropFilesRef.current?.(Array.from(event.dataTransfer.files))
   }
-  const editMessage = (text: string) => { setEditRequest({ text, nonce: Date.now() }) }
+  const editMessage = (text: string, id?: number) => { setEditRequest({ text, messageId: id, nonce: Date.now() }) }
 
   return <main ref={shellRef} className="app chat-shell" onDragOver={onDragOver} onDrop={onDrop} onDragLeave={() => setDraggingFiles(false)}>
     {draggingFiles && <div className="file-drop-overlay" aria-live="polite"><div><Paperclip size={24}/><b>Drop files to upload to Hermes</b><span>Documents stay on the host for Hermes to read</span></div></div>}
@@ -273,7 +280,21 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
     <div className="thread-scroll" ref={threadRef} onScroll={onScroll} onTouchStart={onThreadTouchStart} onTouchMove={onThreadTouchMove} onTouchEnd={onThreadTouchEnd}>
       <div className="thread-content" ref={contentRef}>
         {(pullDistance > 8 || pullRefreshing) && <div className="chat-pull-cue" style={{ height: `${pullRefreshing ? 34 : pullDistance}px` }}><RotateCw size={14} className={pullRefreshing ? 'pull-refresh-spinner' : ''}/><span>{pullRefreshing ? 'Refreshing…' : pullDistance >= 48 ? 'Release to refresh' : 'Pull to refresh'}</span></div>}
-        {showConversationLoading && <section className="chat-empty-state conversation-loading" aria-live="polite" aria-label={`Loading ${botName} conversation`}><BotAvatar profile={botProfile} fallbackName={session.profile} variant="welcome"/><h1>{botName.toUpperCase()}</h1><p>{botName} · {modelLabel || 'Hermes Desktop'}</p><LoadingSpinner/></section>}
+        {showConversationLoading && (
+          <section className="chat-empty-state conversation-loading" aria-live="polite" aria-label={`Loading ${botName} conversation`}>
+            <BotAvatar profile={botProfile} fallbackName={session.profile} variant="welcome"/>
+            <h1>{botName.toUpperCase()}</h1>
+            <div className="conversation-loading-pill">
+              <span className="live-wave" aria-hidden="true"><i/><i/><i/></span>
+              <span>Loading conversation…</span>
+            </div>
+            <div className="chat-skeleton-stream" aria-hidden="true">
+              <div className="chat-skeleton-bubble assistant" />
+              <div className="chat-skeleton-bubble user" />
+              <div className="chat-skeleton-bubble assistant short" />
+            </div>
+          </section>
+        )}
         {showEmptyState && <section className="chat-empty-state" aria-label={`Start a conversation with ${botName}`}><BotAvatar profile={botProfile} fallbackName={session.profile} variant="welcome"/><h1>{botName.toUpperCase()}</h1><p>Say something to get started.</p></section>}
         {messages.map(message => <MessageCard key={message.id} message={message} onEdit={editMessage} profile={botProfile} fallbackName={session.profile} revealTimestamp={message.role === 'assistant' && revealedTimestampId === message.id} onRevealTimestamp={() => setRevealedTimestampId(current => current === message.id ? null : message.id)}/>)}
         {showActiveAssistant && (
@@ -320,7 +341,7 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
 
     {!following && <button className="latest-button" onClick={() => scrollToLatest()}><ArrowDown size={15}/><span>Latest{unreadBelow ? ` · ${unreadBelow}` : ''}</span></button>}
 
-    <Composer session={session} profiles={profiles} sending={sending} draggingFiles={draggingFiles} editRequest={editRequest} dropFilesRef={dropFilesRef} onControlError={setControlError} onModelLabel={setModelLabel} onSessionModelChange={onSessionModelChange} submit={submit} submitVoice={submitVoice} stop={stop}/>
+    <Composer session={session} profiles={profiles} sending={sending} draggingFiles={draggingFiles} editRequest={editRequest} cancelEdit={() => setEditRequest(null)} dropFilesRef={dropFilesRef} onControlError={setControlError} onModelLabel={setModelLabel} onSessionModelChange={onSessionModelChange} submit={submit} submitVoice={submitVoice} stop={stop}/>
 
     {confirmClearOpen && (
       <div

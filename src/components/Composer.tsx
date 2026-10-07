@@ -1,14 +1,30 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, BrainCircuit, Check, ChevronDown, FileText, LoaderCircle, Mic, Paperclip, Search, Sparkles, Square, Trash2, X } from 'lucide-react'
+import {
+  ArrowUp,
+  BrainCircuit,
+  Check,
+  ChevronDown,
+  FileText,
+  LoaderCircle,
+  Mic,
+  Paperclip,
+  Pencil,
+  Search,
+  Sparkles,
+  Square,
+  Trash2,
+  X,
+} from 'lucide-react'
 import type { ChangeEvent, KeyboardEvent } from 'react'
 
 import { onError as onSttError, onResult as onSttResult, onStateChange as onSttStateChange, isAvailable as sttIsAvailable, requestPermission as requestSttPermission, startListening as startSttListening, stopListening as stopSttListening } from 'tauri-plugin-stt-api'
 import { attachFile, completeSlash, loadModelOptions, setSessionModel, setSessionReasoning, type LiveProfile, type LiveSession, type ModelOptions, type SlashCompletion } from '../hermes'
+import { cacheImageDataUrl, isImagePath } from './MarkdownContent'
 import { BotAvatar } from './BotAvatar'
 import { applySlashCompletion } from '../slash-routing'
 import { isExpectedVoiceCleanupError, VOICE_AUTOSEND_HOLD_MS } from '../voice-input'
 
-export type ComposerEditRequest = { text: string; nonce: number }
+export type ComposerEditRequest = { text: string; messageId?: number; nonce: number }
 export type ComposerDropFilesRef = { current: ((files: File[]) => void) | null }
 type PendingAttachment = {
   id: string
@@ -24,11 +40,12 @@ export type ComposerProps = {
   sending: boolean
   draggingFiles: boolean
   editRequest: ComposerEditRequest | null
+  cancelEdit?: () => void
   dropFilesRef: ComposerDropFilesRef
   onControlError: (message: string) => void
   onModelLabel: (model: string) => void
   onSessionModelChange: (model: string) => void
-  submit: (attachments: { name: string; refText: string }[], text: string) => Promise<boolean>
+  submit: (attachments: { name: string; refText: string }[], text: string, options?: { editMessageId?: number }) => Promise<boolean>
   submitVoice: (text: string) => Promise<boolean>
   stop: () => void
 }
@@ -48,7 +65,7 @@ const attachmentId = (file: File) => `${file.name}:${file.size}:${file.lastModif
 const formatFileSize = (size: number) => size < 1024 * 1024 ? `${Math.max(1, Math.round(size / 1024))} KB` : `${(size / (1024 * 1024)).toFixed(1)} MB`
 const maxAttachmentBytes = 50 * 1024 * 1024
 
-export const Composer = memo(function Composer({ session, profiles, sending, draggingFiles, editRequest, dropFilesRef, onControlError, onModelLabel, onSessionModelChange, submit, submitVoice, stop }: ComposerProps) {
+export const Composer = memo(function Composer({ session, profiles, sending, draggingFiles, editRequest, cancelEdit, dropFilesRef, onControlError, onModelLabel, onSessionModelChange, submit, submitVoice, stop }: ComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [draft, setDraft] = useState('')
@@ -284,7 +301,13 @@ export const Composer = memo(function Composer({ session, profiles, sending, dra
     try {
       if (file.size > maxAttachmentBytes) throw new Error(`Files must be 50 MB or smaller (${file.name} is ${formatFileSize(file.size)}).`)
       const dataUrl = await toDataUrl(file)
+      if (isImagePath(file.name) || file.type.startsWith('image/')) {
+        cacheImageDataUrl(file.name, dataUrl)
+      }
       const uploaded = await attachFile(session.id, session.profile, { name: file.name, dataUrl })
+      if (isImagePath(uploaded.name) || isImagePath(file.name)) {
+        cacheImageDataUrl(uploaded.name, dataUrl)
+      }
       setAttachments(items => items.map(item => item.id === id ? { ...item, name: uploaded.name, status: 'ready', refText: uploaded.refText, error: undefined } : item))
     } catch (reason) {
       setAttachments(items => items.map(item => item.id === id ? { ...item, status: 'error', error: reason instanceof Error ? reason.message : 'Hermes could not upload this file.' } : item))
@@ -309,8 +332,12 @@ export const Composer = memo(function Composer({ session, profiles, sending, dra
     const ready = attachments.filter((item): item is PendingAttachment & { refText: string } => item.status === 'ready' && Boolean(item.refText))
     const text = draft
     if (!text.trim() && !ready.length) return
+    const editMessageId = editRequest?.messageId
     setDraft('')
-    if (await submit(ready.map(item => ({ name: item.name, refText: item.refText })), text)) { setAttachments([]); setVoiceReview('') }
+    setAttachments([])
+    setVoiceReview('')
+    cancelEdit?.()
+    void submit(ready.map(item => ({ name: item.name, refText: item.refText })), text, editMessageId != null ? { editMessageId } : undefined)
   }
 
   const chooseModel = async (nextProvider: string, nextModel: string) => {
@@ -348,6 +375,26 @@ export const Composer = memo(function Composer({ session, profiles, sending, dra
     <footer className="chat-dock">
       {voiceState !== 'idle' ? <div className={`recording-composer ${voiceAutoSend ? 'voice-autosend' : ''}`}><button onClick={() => void finishVoice(true)} aria-label="Cancel voice input"><X size={18}/></button>{voiceAutoSend && <small className="voice-autosend-label">Auto-send</small>}<span><i/>0:{String(recordSeconds).padStart(2, '0')}</span><div className="voice-bars">{voiceState === 'processing' ? 'Transcribing your voice…' : voiceInterim || (voiceAutoSend ? 'Release to send' : 'Listening…')}</div><button className="composer-send" onClick={() => void finishVoice()} aria-label="Finish voice input"><ArrowUp size={16}/></button></div> : <div className={`ai-composer ${draggingFiles ? 'file-drop-active' : ''}`}>
         {draggingFiles && <div className="file-drop-hint"><Paperclip size={15}/><span>Drop files to send to Hermes</span></div>}
+        {editRequest && (
+          <div className="composer-edit-banner" role="status" aria-label="Editing message">
+            <div className="edit-banner-info">
+              <Pencil size={13} />
+              <span>Editing message</span>
+            </div>
+            <button
+              type="button"
+              className="cancel-edit-btn"
+              onClick={() => {
+                setDraft('')
+                cancelEdit?.()
+              }}
+              aria-label="Cancel editing"
+            >
+              <X size={14} />
+              <span>Cancel</span>
+            </button>
+          </div>
+        )}
         {!!attachments.length && <div className="attachment-list" aria-label="Attached files">{attachments.map(item => <div className={`attachment-chip ${item.status}`} key={item.id}><FileText size={15}/><span><b>{item.name}</b><small>{item.error || (item.status === 'uploading' ? 'Uploading to Hermes…' : formatFileSize(item.size))}</small></span>{item.status === 'uploading' ? <LoaderCircle className="attachment-spinner" size={14}/> : item.status === 'ready' ? <Check size={14}/> : <span className="attachment-failed">!</span>}<button type="button" onClick={() => setAttachments(items => items.filter(current => current.id !== item.id))} aria-label={`Remove ${item.name}`}><Trash2 size={13}/></button></div>)}</div>}
         {voiceReview && <div className="voice-review" aria-label="Voice transcription ready to edit"><Mic size={15}/><span><b>Voice transcription</b><small>Edit before sending</small></span><button type="button" onClick={() => { setVoiceReview(''); setDraft('') }} aria-label="Discard voice transcription"><X size={14}/></button></div>}
         <textarea ref={textareaRef} value={draft} disabled={sending || voiceState !== 'idle'} rows={1} placeholder="Ask anything…  /commands" onChange={event => setDraft(event.target.value)} onKeyDown={handleComposerKeyDown}/>

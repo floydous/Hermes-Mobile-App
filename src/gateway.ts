@@ -195,7 +195,12 @@ export class HermesGatewayClient {
     return result.session_id || sessionId
   }
 
-  async submitPrompt(sessionId: string, text: string, listener: (event: GatewayEvent) => void): Promise<void> {
+  async submitPrompt(
+    sessionId: string,
+    text: string,
+    listener: (event: GatewayEvent) => void,
+    options?: { truncateMessageId?: number },
+  ): Promise<void> {
     await this.connect()
     const listeners = this.sessionListeners.get(sessionId) ?? new Set()
     this.sessionListeners.set(sessionId, listeners)
@@ -215,7 +220,12 @@ export class HermesGatewayClient {
     try {
       // An acknowledgement is not completion. Keep listening until a terminal
       // event is received, and never auto-resubmit after an ambiguous failure.
-      await this.call('prompt.submit', { session_id: sessionId, text }, 30_000)
+      const payload: Record<string, unknown> = { session_id: sessionId, text }
+      if (options?.truncateMessageId != null) {
+        payload.truncate_before_message_id = options.truncateMessageId
+        payload.confirm_truncate = true
+      }
+      await this.call('prompt.submit', payload, 30_000)
       await Promise.race([
         terminal,
         new Promise<never>((_, reject) => window.setTimeout(() => reject(new GatewayRpcError('prompt.submit', 'Hermes turn timed out')), 10 * 60_000)),

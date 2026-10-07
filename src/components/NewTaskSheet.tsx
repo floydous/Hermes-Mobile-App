@@ -5,11 +5,11 @@ import { errorMessage } from '../connection-state'
 import { useEdgeSwipeBack } from '../edge-swipe'
 import { createCronJob, instantiateCronBlueprint, loadCronBlueprints, loadCronDeliveryTargets, loadModelOptions, type AutomationBlueprint, type CronDeliveryTarget, type LiveProfile, type ModelOptions } from '../hermes'
 
-type Props = { profiles: LiveProfile[]; onClose: () => void; onCreated: () => Promise<void> }
+type Props = { profiles: LiveProfile[]; onClose: () => void; onCreated: () => Promise<void>; baseUrl?: string }
 const frequencies = [{ id: 'daily', label: 'Daily at 9:00 AM', schedule: '0 9 * * *' }, { id: 'weekdays', label: 'Weekdays at 9:00 AM', schedule: '0 9 * * 1-5' }, { id: 'hourly', label: 'Every hour', schedule: '0 * * * *' }, { id: 'every-15', label: 'Every 15 minutes', schedule: '*/15 * * * *' }, { id: 'custom', label: 'Custom schedule', schedule: '' }]
 const titleizeBot = (value: string) => value.split(/[-_\s]+/).filter(Boolean).map(part => part[0].toUpperCase() + part.slice(1)).join(' ')
 
-export function NewTaskSheet({ profiles, onClose, onCreated }: Props) {
+export function NewTaskSheet({ profiles, onClose, onCreated, baseUrl }: Props) {
   const shellRef = useRef<HTMLElement>(null)
   useEdgeSwipeBack(shellRef, onClose)
   const [blueprints, setBlueprints] = useState<AutomationBlueprint[]>([])
@@ -40,7 +40,7 @@ export function NewTaskSheet({ profiles, onClose, onCreated }: Props) {
     })
   }, [profiles, targets])
 
-  useEffect(() => { let active = true; void Promise.all([loadCronBlueprints(), loadCronDeliveryTargets(), loadModelOptions(bot)]).then(([nextBlueprints, nextTargets, nextModels]) => { if (!active) return; setBlueprints(nextBlueprints); setTargets(nextTargets); setModelOptions(nextModels) }).catch(reason => { if (active) setError(reason instanceof Error ? reason.message : 'Could not load New Task options.') }).finally(() => { if (active) setLoading(false) }); return () => { active = false } }, [bot])
+  useEffect(() => { let active = true; void Promise.all([loadCronBlueprints(baseUrl), loadCronDeliveryTargets(baseUrl), loadModelOptions(bot, baseUrl)]).then(([nextBlueprints, nextTargets, nextModels]) => { if (!active) return; setBlueprints(nextBlueprints); setTargets(nextTargets); setModelOptions(nextModels) }).catch(reason => { if (active) setError(reason instanceof Error ? reason.message : 'Could not load New Task options.') }).finally(() => { if (active) setLoading(false) }); return () => { active = false } }, [bot, baseUrl])
   useEffect(() => { if (!selectedBlueprint) return; const seeded: Record<string, string> = {}; selectedBlueprint.fields.forEach(field => { seeded[field.name] = field.name === 'deliver' ? (bot ? `bot-chat:${bot}` : '') : field.default || '' }); setValues(seeded) }, [selectedBlueprint, bot])
   const submit = async () => {
     setSaving(true); setError('')
@@ -48,12 +48,12 @@ export function NewTaskSheet({ profiles, onClose, onCreated }: Props) {
       if (!bot) throw new Error('Choose a Bot for this task.')
       const selectedDeliveries = selectedBlueprint ? (values.deliver || '').split(',').filter(Boolean) : deliver
       if (!selectedDeliveries.length) throw new Error('Select at least one Bot to receive this task.')
-      if (selectedBlueprint) { await instantiateCronBlueprint(bot, selectedBlueprint.key, { ...values, deliver: selectedDeliveries.join(',') }) }
+      if (selectedBlueprint) { await instantiateCronBlueprint(bot, selectedBlueprint.key, { ...values, deliver: selectedDeliveries.join(',') }, baseUrl) }
       else {
         if (!prompt.trim()) throw new Error('Prompt is required.')
         if (!schedule.trim()) throw new Error('Schedule is required.')
         const [provider, ...modelParts] = modelChoice.split(':'); const model = modelParts.join(':')
-        await createCronJob(bot, { name: name.trim() || undefined, prompt: prompt.trim(), schedule: schedule.trim(), deliver: selectedDeliveries.join(','), ...(model ? { model, provider } : {}) })
+        await createCronJob(bot, { name: name.trim() || undefined, prompt: prompt.trim(), schedule: schedule.trim(), deliver: selectedDeliveries.join(','), ...(model ? { model, provider } : {}) }, baseUrl)
       }
       await onCreated(); onClose()
     } catch (reason) { setError(errorMessage(reason, 'Hermes could not create this task.')) } finally { setSaving(false) }

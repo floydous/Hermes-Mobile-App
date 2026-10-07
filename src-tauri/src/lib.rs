@@ -182,6 +182,36 @@ fn hermes_session_messages(
     )
 }
 
+#[tauri::command]
+fn hermes_fetch_media(
+    app: tauri::AppHandle,
+    base_url: String,
+    path: String,
+) -> Result<String, String> {
+    let origin = server_origin(&base_url);
+    // 1. Try GET /api/media?path=...
+    if let Ok(res) = authenticated_get(&app, &origin, &format!("/api/media?path={}", urlencoding::encode(&path))) {
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&res) {
+            if let Some(data_url) = val.get("data_url").and_then(|v| v.as_str()) {
+                if !data_url.is_empty() {
+                    return Ok(data_url.to_string());
+                }
+            }
+        }
+    }
+    // 2. Fallback to GET /api/fs/read-data-url?path=...
+    if let Ok(res) = authenticated_get(&app, &origin, &format!("/api/fs/read-data-url?path={}", urlencoding::encode(&path))) {
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&res) {
+            if let Some(data_url) = val.get("dataUrl").or_else(|| val.get("data_url")).and_then(|v| v.as_str()) {
+                if !data_url.is_empty() {
+                    return Ok(data_url.to_string());
+                }
+            }
+        }
+    }
+    Err("Could not load media from remote host".to_string())
+}
+
 fn authenticated_post(origin: &str, path: &str, body: serde_json::Value) -> Result<String, String> {
     authenticated_post_with_timeout(origin, path, body, Duration::from_secs(120))
 }
@@ -264,6 +294,25 @@ fn authenticated_post_for_app(
         return Err(format!("Hermes rejected task creation (HTTP {status}): {detail}"));
     }
     Ok(text)
+}
+
+#[tauri::command]
+fn hermes_cron_jobs(
+    app: tauri::AppHandle,
+    base_url: String,
+    profile: Option<String>,
+) -> Result<String, String> {
+    let origin = server_origin(&base_url);
+    let profile_param = profile
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("all");
+    authenticated_get(
+        &app,
+        &origin,
+        &format!("/api/cron/jobs?profile={}", urlencoding::encode(profile_param)),
+    )
 }
 
 #[tauri::command]
@@ -536,7 +585,9 @@ pub fn run() {
             hermes_snapshot,
             hermes_model_options,
             hermes_session_messages,
+            hermes_fetch_media,
             hermes_transcribe,
+            hermes_cron_jobs,
             hermes_cron_job,
             hermes_cron_runs,
             hermes_trigger_cron,
