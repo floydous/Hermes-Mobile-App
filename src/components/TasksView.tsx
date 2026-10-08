@@ -28,7 +28,16 @@ import {
 } from '../hermes'
 import { useEdgeSwipeBack } from '../edge-swipe'
 
-type Props = { profiles: LiveProfile[]; back?: () => void; createOpen?: boolean; setCreateOpen?: (open: boolean) => void; query?: string; baseUrl?: string }
+type Props = {
+  profiles: LiveProfile[]
+  back?: () => void
+  createOpen?: boolean
+  setCreateOpen?: (open: boolean) => void
+  query?: string
+  baseUrl?: string
+  active?: boolean
+  style?: React.CSSProperties
+}
 const jobTitle = (job: CronJob) => (job.name || 'Untitled task').replace(/^\[bot:[^\]]+\]\s*/i, '')
 const stateOf = (job: CronJob) => job.state === 'paused' || job.enabled === false ? 'paused' : job.state === 'running' ? 'running' : job.last_error ? 'error' : 'scheduled'
 const dateLabel = (value?: number | string) => { if (!value) return '—'; const date = new Date(typeof value === 'number' ? value * 1000 : value); return Number.isNaN(date.valueOf()) ? String(value) : date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) }
@@ -61,10 +70,121 @@ export function deriveTaskSections(jobs: CronJob[], filter: TaskFilter) {
   }
 }
 
-let cachedTaskJobs: CronJob[] = []
-let hasLoadedTaskJobsOnce = false
+function getTasksStorageKey(endpoint?: string): string {
+  const clean = (endpoint || getActiveHermesEndpoint()).replace(/[^a-zA-Z0-9]/g, '_')
+  return `hermes-tasks-v1:${clean}`
+}
 
-export function TasksView({ back, profiles, createOpen: propCreateOpen, setCreateOpen: propSetCreateOpen, query = '', baseUrl }: Props) {
+function loadPersistedTaskJobs(endpoint?: string): CronJob[] {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const raw = localStorage.getItem(getTasksStorageKey(endpoint))
+      if (raw) {
+        const parsed = JSON.parse(raw) as CronJob[]
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed
+      }
+    }
+  } catch {}
+  return []
+}
+
+let cachedTaskJobs: CronJob[] = loadPersistedTaskJobs()
+let hasLoadedTaskJobsOnce = cachedTaskJobs.length > 0
+
+let inFlightTasksPromise: Promise<CronJob[]> | null = null
+let lastTaskFetchTime = 0
+let lastTaskFetchEndpoint = ''
+export const TASK_FETCH_COOLDOWN_MS = 15_000
+
+export function resetTaskFetchCooldown() {
+  lastTaskFetchTime = 0
+  lastTaskFetchEndpoint = ''
+  inFlightTasksPromise = null
+}
+
+export async function fetchAllCronJobs(
+  baseUrl?: string,
+  profiles: LiveProfile[] = [],
+  force = false
+): Promise<CronJob[]> {
+  const effectiveBaseUrl = baseUrl || getActiveHermesEndpoint()
+  const now = Date.now()
+
+  if (
+    !force &&
+    effectiveBaseUrl === lastTaskFetchEndpoint &&
+    now - lastTaskFetchTime < TASK_FETCH_COOLDOWN_MS &&
+    cachedTaskJobs.length > 0
+  ) {
+    return cachedTaskJobs
+  }
+
+  if (inFlightTasksPromise) {
+    return inFlightTasksPromise
+  }
+
+  inFlightTasksPromise = (async () => {
+    try {
+      // 1. Load system jobs
+      const systemJobs = await loadCronJobs(undefined, effectiveBaseUrl)
+
+      // 2. Also query any active profile scopes in case the gateway isolates per-bot stores
+      const scopes = profiles.map(p => p.name).filter(Boolean)
+      const scopeResults = scopes.length
+        ? await Promise.allSettled(scopes.map(s => loadCronJobs(s, effectiveBaseUrl)))
+        : []
+      const additionalJobs = scopeResults
+        .filter((r): r is PromiseFulfilledResult<CronJob[]> => r.status === 'fulfilled')
+        .flatMap(r => r.value)
+
+      const jobMap = new Map<string, CronJob>()
+      for (const job of [...systemJobs, ...additionalJobs]) {
+        if (job?.job_id) jobMap.set(job.job_id, job)
+      }
+      const allJobs = Array.from(jobMap.values())
+      lastTaskFetchTime = Date.now()
+      lastTaskFetchEndpoint = effectiveBaseUrl
+
+      if (allJobs.length > 0 || systemJobs.length === 0) {
+        cachedTaskJobs = allJobs
+        hasLoadedTaskJobsOnce = true
+        try {
+          if (typeof window !== 'undefined' && window.localStorage) {
+            localStorage.setItem(getTasksStorageKey(effectiveBaseUrl), JSON.stringify(allJobs))
+          }
+        } catch {}
+      }
+      return allJobs
+    } finally {
+      inFlightTasksPromise = null
+    }
+  })()
+
+  return inFlightTasksPromise
+}
+
+export async function preloadTaskJobs(baseUrl?: string, profiles: LiveProfile[] = []): Promise<CronJob[]> {
+  const effectiveBaseUrl = baseUrl || getActiveHermesEndpoint()
+  try {
+    const allJobs = await fetchAllCronJobs(effectiveBaseUrl, profiles, false)
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('hermes-tasks-preloaded', { detail: { endpoint: effectiveBaseUrl, jobs: allJobs } }))
+    }
+    return allJobs
+  } catch {}
+  return cachedTaskJobs
+}
+
+export function TasksView({
+  back,
+  profiles,
+  createOpen: propCreateOpen,
+  setCreateOpen: propSetCreateOpen,
+  query = '',
+  baseUrl,
+  active = true,
+  style,
+}: Props) {
   const effectiveBaseUrl = baseUrl || getActiveHermesEndpoint()
   const [jobs, setJobs] = useState<CronJob[]>(() => cachedTaskJobs)
   const [selected, setSelected] = useState<CronJob | null>(null)
@@ -80,42 +200,24 @@ export function TasksView({ back, profiles, createOpen: propCreateOpen, setCreat
   const [pullRefreshing, setPullRefreshing] = useState(false)
   const scrollRef = useRef<HTMLElement | null>(null)
   const pullStartRef = useRef<number | null>(null)
-  useEdgeSwipeBack(scrollRef, back || (() => {}), Boolean(back) && !selected && !isCreateOpen)
+  useEdgeSwipeBack(scrollRef, back || (() => {}), Boolean(back) && !selected && !isCreateOpen && active)
   const optimisticJobsRef = useRef(new Map<string, CronJob>())
   const scopeKey = profiles.map(profile => profile.name).sort().join('|')
-  const refresh = async (silent = cachedTaskJobs.length > 0) => {
-    if (!silent) setLoading(true)
+
+  const refresh = async (silent = true, force = false) => {
+    if (!silent && !cachedTaskJobs.length) setLoading(true)
     setError('')
     try {
-      // 1. Load all system / cross-profile jobs
-      const systemJobs = await loadCronJobs(undefined, effectiveBaseUrl)
-
-      // 2. Also query any active profile scopes in case the gateway isolates per-bot stores
-      const scopes = profiles.map(profile => profile.name).filter(Boolean)
-      const scopeResults = scopes.length
-        ? await Promise.allSettled(scopes.map(scope => loadCronJobs(scope, effectiveBaseUrl)))
-        : []
-
-      const additionalJobs = scopeResults
-        .filter((result): result is PromiseFulfilledResult<CronJob[]> => result.status === 'fulfilled')
-        .flatMap(result => result.value)
-
-      // De-duplicate by job_id
-      const jobMap = new Map<string, CronJob>()
-      for (const job of systemJobs) {
-        jobMap.set(job.job_id, job)
-      }
-      for (const job of additionalJobs) {
-        if (!jobMap.has(job.job_id)) {
-          jobMap.set(job.job_id, job)
-        }
-      }
-
-      const serverJobs = Array.from(jobMap.values())
+      const serverJobs = await fetchAllCronJobs(effectiveBaseUrl, profiles, force)
       const reconciled = reconcileTaskJobs(serverJobs, optimisticJobsRef.current)
       optimisticJobsRef.current = reconciled.pending
       cachedTaskJobs = reconciled.jobs
       hasLoadedTaskJobsOnce = true
+      try {
+        if (typeof window !== 'undefined' && window.localStorage) {
+          localStorage.setItem(getTasksStorageKey(effectiveBaseUrl), JSON.stringify(reconciled.jobs))
+        }
+      } catch {}
       setJobs(reconciled.jobs)
       setSelected(current => current ? (reconciled.jobs.find(job => job.job_id === current.job_id) || current) : null)
     } catch {
@@ -128,9 +230,27 @@ export function TasksView({ back, profiles, createOpen: propCreateOpen, setCreat
   }
   const pullRefresh = async () => {
     setPullRefreshing(true)
-    try { await refresh(false) } finally { setPullRefreshing(false) }
+    try { await refresh(false, true) } finally { setPullRefreshing(false) }
   }
   useEffect(() => {
+    const persisted = loadPersistedTaskJobs(effectiveBaseUrl)
+    if (persisted.length > 0) {
+      setJobs(persisted)
+      setLoading(false)
+    }
+    const onPreload = (e: Event) => {
+      const detail = (e as CustomEvent<{ endpoint: string; jobs: CronJob[] }>).detail
+      if (detail && detail.endpoint === effectiveBaseUrl && Array.isArray(detail.jobs)) {
+        setJobs(detail.jobs)
+        setLoading(false)
+      }
+    }
+    window.addEventListener('hermes-tasks-preloaded', onPreload)
+    return () => window.removeEventListener('hermes-tasks-preloaded', onPreload)
+  }, [effectiveBaseUrl])
+
+  useEffect(() => {
+    if (!active) return
     const onMobileBack = (event: Event) => {
       if (selected) { event.preventDefault(); setSelected(null) }
       else if (isCreateOpen) { event.preventDefault(); setIsCreateOpen(false) }
@@ -138,12 +258,14 @@ export function TasksView({ back, profiles, createOpen: propCreateOpen, setCreat
     }
     window.addEventListener('hermes-mobile-back', onMobileBack)
     return () => window.removeEventListener('hermes-mobile-back', onMobileBack)
-  }, [selected, isCreateOpen, back])
+  }, [active, selected, isCreateOpen, back])
+
   useEffect(() => {
-    void refresh(cachedTaskJobs.length > 0)
-    const timer = window.setInterval(() => void refresh(true), 20_000)
+    if (!active) return
+    void refresh(cachedTaskJobs.length > 0, false)
+    const timer = window.setInterval(() => void refresh(true, true), 20_000)
     return () => window.clearInterval(timer)
-  }, [scopeKey])
+  }, [active, scopeKey])
   const filteredJobs = useMemo(() => {
     if (!query.trim()) return jobs
     const q = query.trim().toLowerCase()
@@ -184,8 +306,16 @@ export function TasksView({ back, profiles, createOpen: propCreateOpen, setCreat
     try { setSelected(await loadCronJob(job.job_id, job.profile, effectiveBaseUrl)) }
     catch { /* Keep the list payload visible; the full prompt remains available when the gateway supports the detail route. */ }
   }
-  if (selected) return <TaskDetail job={selected} busy={busy} back={() => setSelected(null)} onRefresh={refresh} onToggle={toggle} onTrigger={trigger} onDelete={() => setDeleteCandidate(selected)} baseUrl={effectiveBaseUrl}/>
-  if (isCreateOpen) return <NewTaskSheet profiles={profiles} baseUrl={effectiveBaseUrl} onClose={() => setIsCreateOpen(false)} onCreated={refresh}/>
+  if (selected) {
+    return active ? (
+      <TaskDetail job={selected} busy={busy} back={() => setSelected(null)} onRefresh={() => refresh(true, true)} onToggle={toggle} onTrigger={trigger} onDelete={() => setDeleteCandidate(selected)} baseUrl={effectiveBaseUrl}/>
+    ) : null
+  }
+  if (isCreateOpen) {
+    return active ? (
+      <NewTaskSheet profiles={profiles} baseUrl={effectiveBaseUrl} onClose={() => setIsCreateOpen(false)} onCreated={() => refresh(true, true)}/>
+    ) : null
+  }
   const showRunning = running.length > 0
   const showScheduled = scheduled.length > 0
   const showOther = attention.length > 0
@@ -193,7 +323,15 @@ export function TasksView({ back, profiles, createOpen: propCreateOpen, setCreat
   const runningCount = filteredJobs.filter(job => stateOf(job) === 'running').length
   const scheduledCount = filteredJobs.filter(job => stateOf(job) === 'scheduled').length
   const pullActive = pullDistance > 8 || pullRefreshing
-  return <div className="tasks-sheet tasks-scroll" ref={scrollRef as any} onTouchStart={event => { if (scrollRef.current?.scrollTop === 0) pullStartRef.current = event.touches[0].clientY }} onTouchMove={event => { if (pullStartRef.current == null || scrollRef.current?.scrollTop !== 0) return; const distance = Math.min(76, Math.max(0, event.touches[0].clientY - pullStartRef.current)); if (distance > 0) event.preventDefault(); setPullDistance(distance) }} onTouchEnd={() => { const shouldRefresh = pullDistance >= 56; pullStartRef.current = null; setPullDistance(0); if (shouldRefresh) void pullRefresh() }}>
+  return (
+    <div
+      className="tasks-sheet tasks-scroll"
+      style={{ display: active ? undefined : 'none', ...style }}
+      ref={scrollRef as any}
+      onTouchStart={event => { if (scrollRef.current?.scrollTop === 0) pullStartRef.current = event.touches[0].clientY }}
+      onTouchMove={event => { if (pullStartRef.current == null || scrollRef.current?.scrollTop !== 0) return; const distance = Math.min(76, Math.max(0, event.touches[0].clientY - pullStartRef.current)); if (distance > 0) event.preventDefault(); setPullDistance(distance) }}
+      onTouchEnd={() => { const shouldRefresh = pullDistance >= 56; pullStartRef.current = null; setPullDistance(0); if (shouldRefresh) void pullRefresh() }}
+    >
     {pullActive && <div className="pull-refresh-cue" style={{ height: `${pullRefreshing ? 46 : pullDistance}px` }}><RefreshCw size={15} className={pullRefreshing ? 'pull-refresh-spinner' : ''}/><span>{pullRefreshing ? 'Refreshing…' : pullDistance >= 56 ? 'Release to refresh' : 'Pull to refresh'}</span></div>}
 
     <section className="tasks-intro">
@@ -251,6 +389,7 @@ export function TasksView({ back, profiles, createOpen: propCreateOpen, setCreat
     )}
     {deleteCandidate && <DeleteTaskModal job={deleteCandidate} deleting={busy === `${deleteCandidate.job_id}:remove`} onCancel={() => setDeleteCandidate(null)} onConfirm={() => void remove(deleteCandidate)}/>}
   </div>
+  )
 }
 
 function TaskSection({ id, label, jobs, busy, onOpen, onToggle, onTrigger, onDelete }: { id?: string; label: string; jobs: CronJob[]; busy: string; onOpen: (job: CronJob) => void; onToggle: (job: CronJob) => void; onTrigger: (job: CronJob) => void; onDelete: (job: CronJob) => void }) {

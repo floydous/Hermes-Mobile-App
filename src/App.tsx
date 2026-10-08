@@ -5,7 +5,7 @@ import { ChatView } from './components/ChatView'
 import { BotAvatar } from './components/BotAvatar'
 import { BotAppearancePicker } from './components/BotAppearancePicker'
 import { BotProfileSheet } from './components/BotProfileSheet'
-import { TasksView } from './components/TasksView'
+import { TasksView, preloadTaskJobs } from './components/TasksView'
 import { ConnectionSettings } from './components/ConnectionSettings'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import HermesHostIcon from './assets/hermes-agent-icon-transparent.svg'
@@ -22,6 +22,14 @@ import {
   type ToolActivity,
 } from './chat-turn'
 import { errorMessage, RequestEpoch, selectRestoredEndpoint } from './connection-state'
+import {
+  getCachedSessionMessages,
+  removeCachedSessionMessages,
+  setCachedSessionMessages,
+} from './session-cache'
+import {
+  executeTurnSubmissionPipeline,
+} from './session-title'
 import {
   clearSession,
   connectAndSubmit,
@@ -280,18 +288,27 @@ export default function App() {
         setActiveTurns(prev => reconcileActiveTurns(prev, activeList, map, Date.now(), endedSet))
       }).catch(() => {})
 
-      // Warm up message cache in background so opening any bot or recent session is instant (0ms)
+      // Stagger background warm-up so we don't saturate the network/tunnel
       window.setTimeout(() => {
         const candidates = [
           ...data.profiles.map(p => p.canonical_session ? { id: resolveCanonicalSessionId(p.canonical_session), profile: p.name } : null).filter((item): item is { id: string; profile: string } => Boolean(item?.id)),
-          ...data.sessions.slice(0, 15).map(s => ({ id: s.id, profile: s.profile })),
+          ...data.sessions.slice(0, 8).map(s => ({ id: s.id, profile: s.profile })),
         ]
-        for (const candidate of candidates) {
-          if (!candidate?.id || messageCacheRef.current.has(candidate.id)) continue
-          void loadMessages(candidate.id, candidate.profile, endpoint).then(msgs => {
-            messageCacheRef.current.set(candidate.id, msgs)
-          }).catch(() => {})
-        }
+        candidates.forEach((candidate, idx) => {
+          if (!candidate?.id || messageCacheRef.current.has(candidate.id)) return
+          const delay = idx < 2 ? 0 : (idx - 1) * 200
+          window.setTimeout(() => {
+            void loadMessages(candidate.id, candidate.profile, endpoint).then(msgs => {
+              messageCacheRef.current.set(candidate.id, msgs)
+              setCachedSessionMessages(candidate.id, msgs)
+            }).catch(() => {})
+          }, delay)
+        })
+
+        // Pre-warm scheduled tasks so swiping to Tasks is instantaneous with zero delay
+        window.setTimeout(() => {
+          void preloadTaskJobs(endpoint, data.profiles)
+        }, 80)
       }, 50)
 
       return data
@@ -398,7 +415,16 @@ export default function App() {
     }
     const requestId = ++sessionLoadRef.current
     const activeTurn = activeTurnsRef.current[safeSession.profile]
-    const cached = messageCacheRef.current.get(safeSession.id)
+
+    // Fast-path: check in-memory cache, then fallback to persistent localStorage cache for instant 0ms restoration
+    let cached = messageCacheRef.current.get(safeSession.id)
+    if (cached === undefined) {
+      const persisted = getCachedSessionMessages(safeSession.id)
+      if (persisted) {
+        cached = persisted
+        messageCacheRef.current.set(safeSession.id, persisted)
+      }
+    }
 
     setSelected(safeSession)
     setOpeningSessionId(null)
@@ -432,12 +458,13 @@ export default function App() {
 
     return (async () => {
       try {
-        const loaded = await loadMessages(safeSession.id, safeSession.profile)
+        const loaded = await loadMessages(safeSession.id, safeSession.profile, activeEndpointRef.current)
         if (requestId !== sessionLoadRef.current) return
         const latestAssistant = latestUsage ? [...loaded].reverse().findIndex(message => message.role === 'assistant') : -1
         const resolvedLoaded = latestAssistant >= 0 ? loaded.map((message, index) => index === loaded.length - latestAssistant - 1 ? { ...message, usage: latestUsage } : message) : loaded
 
         messageCacheRef.current.set(safeSession.id, resolvedLoaded)
+        setCachedSessionMessages(safeSession.id, resolvedLoaded)
 
         const currentActive = activeTurnsRef.current[safeSession.profile]
         const lastLoaded = resolvedLoaded[resolvedLoaded.length - 1]
@@ -544,13 +571,15 @@ export default function App() {
     })
 
     try {
-      const { sessionId: activeSessionId } = await connectAndSubmit(
+      const { finalSessionId, finalText: finalOutput, completionUsage: usage } = await executeTurnSubmissionPipeline({
         turnSessionId,
         turnProfile,
         prompt,
-        (type, payload) => {
-        if (type === 'message.delta') {
-          finalText += String(payload.text || '')
+        activeEndpoint: activeEndpointRef.current,
+        options,
+        connectAndSubmitFn: connectAndSubmit,
+        onDelta: text => {
+          finalText = text
           setActiveTurns(prev => {
             const current = prev[turnProfile]
             if (!current) return prev
@@ -560,17 +589,17 @@ export default function App() {
                 ...current,
                 status: 'streaming',
                 statusText: 'Replying…',
-                streamingText: finalText,
+                streamingText: text,
               },
             }
           })
           if (selectedRef.current?.profile === turnProfile) {
-            setStreaming(finalText)
+            setStreaming(text)
           }
-        }
-        if (type === 'message.complete') {
-          finalText = String(payload.text || finalText)
-          completionUsage = payload.usage && typeof payload.usage === 'object' ? payload.usage as LiveUsage : undefined
+        },
+        onComplete: (text, compUsage) => {
+          finalText = text
+          completionUsage = compUsage
           setActiveTurns(prev => {
             const current = prev[turnProfile]
             if (!current) return prev
@@ -578,24 +607,22 @@ export default function App() {
               ...prev,
               [turnProfile]: {
                 ...current,
-                streamingText: finalText,
+                streamingText: text,
               },
             }
           })
           if (selectedRef.current?.profile === turnProfile) {
-            setStreaming(finalText)
+            setStreaming(text)
           }
-        }
-        if (type === 'tool.start') {
-          const id = String(payload.tool_id || payload.name || `tool-${Date.now()}`)
-          const toolName = String(payload.name || 'tool')
+        },
+        onToolStart: (id, toolName, summary) => {
           setActiveTurns(prev => {
             const current = prev[turnProfile]
             if (!current) return prev
             const safeCurrentTools = Array.isArray(current.toolActivities) ? current.toolActivities : []
             const nextTools = [
               ...safeCurrentTools.filter(t => t && t.id !== id),
-              { id, name: toolName, status: 'running' as const, summary: typeof payload.context === 'string' ? payload.context : undefined },
+              { id, name: toolName, status: 'running' as const, summary },
             ]
             const activeCount = nextTools.length
             const statusText = activeCount > 1 ? `Using ${toolName} · ${activeCount} tool calls…` : `Using ${toolName}…`
@@ -612,20 +639,18 @@ export default function App() {
           if (selectedRef.current?.profile === turnProfile) {
             setToolActivities(items => [
               ...(Array.isArray(items) ? items : []).filter(item => item && item.id !== id),
-              { id, name: toolName, status: 'running', summary: typeof payload.context === 'string' ? payload.context : undefined },
+              { id, name: toolName, status: 'running', summary },
             ])
           }
-        }
-        if (type === 'tool.complete') {
-          const id = String(payload.tool_id || payload.name || `tool-${Date.now()}`)
-          const toolName = String(payload.name || 'tool')
+        },
+        onToolComplete: (id, toolName, duration_s, summary) => {
           setActiveTurns(prev => {
             const current = prev[turnProfile]
             if (!current) return prev
             const safeCurrentTools = Array.isArray(current.toolActivities) ? current.toolActivities : []
             const nextTools = [
               ...safeCurrentTools.filter(t => t && t.id !== id),
-              { id, name: toolName, status: 'done' as const, duration_s: typeof payload.duration_s === 'number' ? payload.duration_s : undefined, summary: typeof payload.summary === 'string' ? payload.summary : undefined },
+              { id, name: toolName, status: 'done' as const, duration_s, summary },
             ]
             return {
               ...prev,
@@ -638,30 +663,25 @@ export default function App() {
           if (selectedRef.current?.profile === turnProfile) {
             setToolActivities(items => [
               ...(Array.isArray(items) ? items : []).filter(item => item && item.id !== id),
-              { id, name: toolName, status: 'done', duration_s: typeof payload.duration_s === 'number' ? payload.duration_s : undefined, summary: typeof payload.summary === 'string' ? payload.summary : undefined },
+              { id, name: toolName, status: 'done', duration_s, summary },
             ])
           }
-        }
-        if (type === 'session.title') {
-          const newTitle = String(payload.title || '').trim()
-          if (newTitle) {
-            setSelected(current => current ? { ...current, title: newTitle } : current)
-            setSessions(items => items.map(s => (s.id === turnSessionId || s.id === activeSessionId) ? { ...s, title: newTitle } : s))
-          }
-        }
-        if (type === 'error') {
+        },
+        onTitleUpdate: title => {
+          setSelected(current => current ? { ...current, title } : current)
+        },
+        onSessionsUpdate: setSessions,
+        onSelectedIdUpdate: newId => {
+          setSelected(current => current?.id === turnSessionId ? { ...current, id: newId } : current)
+        },
+        onError: msg => {
           if (selectedRef.current?.profile === turnProfile) {
-            setError(String(payload.message || 'Hermes could not complete that request.'))
+            setError(msg)
           }
-        }
-      },
-      undefined,
-      options?.editMessageId != null ? { truncateMessageId: options.editMessageId } : undefined
-      )
-      const finalSessionId = activeSessionId || turnSessionId
-      if (activeSessionId && activeSessionId !== turnSessionId) {
-        setSelected(current => current?.id === turnSessionId ? { ...current, id: activeSessionId } : current)
-      }
+        },
+      })
+      finalText = finalOutput
+      completionUsage = usage
       recentEndedTurnsRef.current.set(finalSessionId, Date.now())
       recentEndedTurnsRef.current.set(turnSessionId, Date.now())
 
@@ -770,6 +790,7 @@ export default function App() {
     setSettledAssistant(null)
     setError('')
     messageCacheRef.current.delete(session.id)
+    removeCachedSessionMessages(session.id)
 
     try {
       const botProfile = profiles.find(p => p.name === session.profile)
@@ -1086,25 +1107,16 @@ export default function App() {
       </header>
       {searching && <div className="search"><Search size={16}/><input autoFocus value={query} onChange={event => setQuery(event.target.value)} placeholder={tab === 'bots' ? 'Search bots and group chats…' : tab === 'sessions' ? 'Search sessions…' : 'Search tasks…'}/><button onClick={() => { setQuery(''); setSearching(false) }}><X size={16}/></button></div>}
     </div>
-    {tab === 'tasks' ? (
-      <TasksView
-        key="tasks-view"
-        profiles={profiles}
-        query={searching ? query : ''}
-        baseUrl={activeEndpoint}
-        createOpen={createTaskOpen}
-        setCreateOpen={setCreateTaskOpen}
-      />
-    ) : (
-      <div
-        className="roster-list-scroll"
-        key="roster-scroll"
-        ref={rosterScrollRef}
-        onTouchStart={rosterTouchStart}
-        onTouchMove={rosterTouchMove}
-        onTouchEnd={rosterTouchEnd}
-        onTouchCancel={rosterTouchCancel}
-      >
+    <div
+      className="roster-list-scroll"
+      key="roster-scroll"
+      ref={rosterScrollRef}
+      style={{ display: tab === 'tasks' ? 'none' : undefined }}
+      onTouchStart={rosterTouchStart}
+      onTouchMove={rosterTouchMove}
+      onTouchEnd={rosterTouchEnd}
+      onTouchCancel={rosterTouchCancel}
+    >
         {rosterPullActive && <div className="roster-pull-cue" style={{ height: `${rosterPullRefreshing ? 46 : rosterPullDistance}px` }}><RefreshCw size={15} className={rosterPullRefreshing ? 'pull-refresh-spinner' : ''}/><span>{rosterPullRefreshing ? 'Refreshing…' : rosterPullDistance >= 56 ? 'Release to refresh' : 'Pull to refresh'}</span></div>}
         {error && <Notice message={error} retry={() => void refresh()}/>}
         {((loading && !profiles.length) || (tab === 'sessions' && loading && !sessions.length)) ? <Skeleton/> : tab === 'bots' ? (
@@ -1193,7 +1205,14 @@ export default function App() {
           </section>
         )}
       </div>
-    )}
+      <TasksView
+        profiles={profiles}
+        query={searching ? query : ''}
+        baseUrl={activeEndpoint}
+        createOpen={createTaskOpen}
+        setCreateOpen={setCreateTaskOpen}
+        active={tab === 'tasks'}
+      />
     <NavIsland tab={tab} setTab={switchTab}/>
   </main>
 }

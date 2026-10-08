@@ -1,7 +1,9 @@
-import { memo, useEffect, useState, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Check,
   Copy,
+  Download,
   File,
   FileCode,
   FileSpreadsheet,
@@ -21,6 +23,12 @@ import 'katex/dist/katex.min.css'
 import type { LiveMessage, LiveProfile } from '../hermes'
 import { fetchRemoteMedia } from '../hermes'
 import { formatMessageTime, formatResponseStats } from '../message-stats'
+import {
+  computeDismissDelay,
+  computeSwipeTransform,
+  processSwipeMove,
+  shouldDismissOnRelease,
+} from '../swipe-dismiss'
 
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif'])
 
@@ -186,6 +194,46 @@ function parseMessageSegments(text: string): MessageSegment[] {
   return segments
 }
 
+export async function triggerDownload(src: string, fileName: string) {
+  try {
+    if (src.startsWith('data:')) {
+      const a = document.createElement('a')
+      a.href = src
+      const hasExt = /\.(png|jpe?g|webp|gif|svg|bmp)$/i.test(fileName)
+      a.download = hasExt ? fileName : `${fileName}.png`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      return
+    }
+
+    try {
+      const response = await fetch(src)
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = fileName
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      setTimeout(() => URL.revokeObjectURL(url), 2000)
+    } catch {
+      // Fallback for CORS restricted images: trigger anchor download directly
+      const a = document.createElement('a')
+      a.href = src
+      a.target = '_blank'
+      a.rel = 'noopener noreferrer'
+      a.download = fileName
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+    }
+  } catch {
+    window.open(src, '_blank')
+  }
+}
+
 export function ImageLightbox({
   src,
   alt,
@@ -197,46 +245,215 @@ export function ImageLightbox({
   rawPath?: string
   onClose: () => void
 }) {
-  const [copied, setCopied] = useState(false)
+  const [downloading, setDownloading] = useState(false)
+  const [dragY, setDragY] = useState(0)
+  const [isDragging, setIsDragging] = useState(false)
+  const [isEntering, setIsEntering] = useState(true)
+  const [isClosing, setIsClosing] = useState(false)
+  const closeTimerRef = useRef<number | null>(null)
+  const startYRef = useRef<number | null>(null)
+  const startXRef = useRef<number | null>(null)
+  const isSwipeDownRef = useRef(false)
+
   const isData = src.startsWith('data:')
-  const fileName = rawPath
+  const rawFileName = rawPath
     ? (rawPath.split(/[/\\]/).filter(Boolean).pop() || rawPath)
-    : alt || (isData ? 'Image Preview' : src.split(/[/\\]/).filter(Boolean).pop() || 'Image Preview')
+    : alt || (isData ? 'image.png' : src.split(/[/\\]/).filter(Boolean).pop() || 'image.png')
+  const fileName = rawFileName.trim() || 'image.png'
+
+  const prefersReducedMotion = () => {
+    try {
+      return typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    } catch {
+      return false
+    }
+  }
+
+  const dismiss = useCallback(() => {
+    if (isClosing) return
+    const delay = computeDismissDelay(prefersReducedMotion())
+    if (delay === 0) {
+      onClose()
+      return
+    }
+    setIsClosing(true)
+    setIsEntering(false)
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
+    closeTimerRef.current = window.setTimeout(() => {
+      onClose()
+    }, delay)
+  }, [isClosing, onClose])
+
+  // Unconditional unmount cleanup for dismissal timers
+  useEffect(() => {
+    return () => {
+      if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (prefersReducedMotion()) {
+      setIsEntering(false)
+      return
+    }
+    const timer = window.setTimeout(() => {
+      setIsEntering(false)
+    }, 280)
+    return () => clearTimeout(timer)
+  }, [])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') dismiss()
     }
+    const origOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
     window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [onClose])
+    return () => {
+      document.body.style.overflow = origOverflow
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [dismiss])
 
-  const copy = async () => {
-    await navigator.clipboard.writeText(rawPath || src)
-    setCopied(true)
-    window.setTimeout(() => setCopied(false), 1400)
+  const handleDownload = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setDownloading(true)
+    try {
+      await triggerDownload(src, fileName)
+    } finally {
+      setTimeout(() => setDownloading(false), 800)
+    }
   }
 
-  return (
-    <div className="image-lightbox-backdrop" onClick={onClose} role="dialog" aria-modal="true">
-      <div className="image-lightbox-panel" onClick={e => e.stopPropagation()}>
-        <header className="image-lightbox-header">
-          <span className="image-lightbox-title" title={fileName}>{fileName}</span>
-          <div className="image-lightbox-actions">
-            <button type="button" className="image-lightbox-btn" onClick={() => void copy()} title="Copy path">
-              {copied ? <Check size={15} /> : <Copy size={15} />}
-            </button>
-            <button type="button" className="image-lightbox-btn close" onClick={onClose} title="Close">
-              <X size={16} />
-            </button>
-          </div>
-        </header>
-        <div className="image-lightbox-body">
-          <img className="image-lightbox-img" src={src} alt={alt || fileName} />
-        </div>
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length !== 1 || isClosing) return
+    setIsEntering(false)
+    startYRef.current = e.touches[0].clientY
+    startXRef.current = e.touches[0].clientX
+    isSwipeDownRef.current = false
+    setIsDragging(false)
+  }
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (isClosing || startYRef.current == null || startXRef.current == null) return
+    const currentY = e.touches[0].clientY
+    const currentX = e.touches[0].clientX
+    const res = processSwipeMove(startXRef.current, startYRef.current, currentX, currentY, isSwipeDownRef.current)
+    if (res.active) {
+      isSwipeDownRef.current = true
+      setIsDragging(true)
+      setDragY(res.dragY)
+      if (res.shouldPreventDefault) e.preventDefault()
+    }
+  }
+
+  const handleTouchEnd = () => {
+    if (isClosing) return
+    if (isSwipeDownRef.current && shouldDismissOnRelease(dragY)) {
+      dismiss()
+      return
+    }
+    setIsDragging(false)
+    setDragY(0)
+    startYRef.current = null
+    startXRef.current = null
+    isSwipeDownRef.current = false
+  }
+
+  const handleTouchCancel = () => {
+    if (isClosing) return
+    setIsDragging(false)
+    setDragY(0)
+    startYRef.current = null
+    startXRef.current = null
+    isSwipeDownRef.current = false
+  }
+
+  const { backdropOpacity, scale } = computeSwipeTransform(dragY, isDragging)
+
+  const backdropClass = [
+    'image-lightbox-backdrop',
+    isEntering && 'is-entering',
+    isClosing && 'is-closing',
+  ].filter(Boolean).join(' ')
+
+  const topBarClass = [
+    'image-lightbox-top-bar',
+    isEntering && 'is-entering',
+    isClosing && 'is-closing',
+  ].filter(Boolean).join(' ')
+
+  const stageClass = [
+    'image-lightbox-stage',
+    isEntering && 'is-entering',
+    isClosing && 'is-closing',
+  ].filter(Boolean).join(' ')
+
+  const stageStyle: React.CSSProperties = isEntering || isClosing
+    ? {}
+    : {
+        transform: `translate3d(0, ${dragY}px, 0) scale(${scale})`,
+        transition: isDragging ? 'none' : 'transform 0.24s cubic-bezier(0.16, 1, 0.3, 1)',
+      }
+
+  const backdropStyle: React.CSSProperties = isEntering || isClosing
+    ? {}
+    : {
+        backgroundColor: `rgba(0, 0, 0, ${backdropOpacity})`,
+        transition: isDragging ? 'none' : 'background-color 0.22s ease',
+      }
+
+  const content = (
+    <div
+      className={backdropClass}
+      style={backdropStyle}
+      onClick={dismiss}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchCancel}
+      role="dialog"
+      aria-modal="true"
+    >
+      <header className={topBarClass} onClick={e => e.stopPropagation()}>
+        <button
+          type="button"
+          className="image-lightbox-circle-btn"
+          onClick={dismiss}
+          title="Close preview"
+          aria-label="Close image preview"
+        >
+          <X size={20} />
+        </button>
+        <button
+          type="button"
+          className="image-lightbox-circle-btn"
+          onClick={handleDownload}
+          title="Download image"
+          aria-label="Download image"
+        >
+          {downloading ? <Check size={18} /> : <Download size={19} />}
+        </button>
+      </header>
+
+      <div
+        className={stageClass}
+        style={stageStyle}
+      >
+        <img
+          className="image-lightbox-img"
+          src={src}
+          alt={alt || fileName}
+          onClick={e => e.stopPropagation()}
+        />
       </div>
     </div>
   )
+
+  if (typeof document !== 'undefined' && document.body) {
+    return createPortal(content, document.body)
+  }
+  return content
 }
 
 export function ChatImage({

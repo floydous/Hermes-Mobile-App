@@ -4,7 +4,7 @@ import type { DragEvent } from 'react'
 
 import { BotAvatar } from './BotAvatar'
 import { MessageCard, MarkdownContent } from './MarkdownContent'
-import type { ToolActivity } from '../App'
+import type { ToolActivity } from '../chat-turn'
 import { applySlashCompletion } from '../slash-routing'
 import { SCROLL_FOLLOW_THRESHOLD, shouldStickToBottom } from '../scroll-follow'
 import { formatResponseStats } from '../message-stats'
