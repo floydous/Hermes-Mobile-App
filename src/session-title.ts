@@ -102,8 +102,8 @@ export type TurnSubmissionPipelineArgs = {
   ) => Promise<{ sessionId: string }>
   onDelta: (text: string) => void
   onComplete: (text: string, usage?: LiveUsage) => void
-  onToolStart: (id: string, name: string, summary?: string) => void
-  onToolComplete: (id: string, name: string, duration_s?: number, summary?: string) => void
+  onToolStart: (id: string, name: string, context?: string, parameters?: Record<string, unknown>) => void
+  onToolComplete: (id: string, name: string, durationS?: number, summary?: string) => void
   onTitleUpdate: (title: string) => void
   onSessionsUpdate: (updater: (items: LiveSession[]) => LiveSession[]) => void
   onSelectedIdUpdate: (newId: string) => void
@@ -139,7 +139,9 @@ export async function executeTurnSubmissionPipeline(
       if (type === 'tool.start') {
         const id = String(payload.tool_id || payload.name || `tool-${Date.now()}`)
         const toolName = String(payload.name || 'tool')
-        args.onToolStart(id, toolName, typeof payload.context === 'string' ? payload.context : undefined)
+        const rawParams = payload.parameters || payload.args || {}
+        const params = (rawParams && typeof rawParams === 'object' ? rawParams : {}) as Record<string, unknown>
+        args.onToolStart(id, toolName, typeof payload.context === 'string' ? payload.context : undefined, params)
       }
       if (type === 'tool.complete') {
         const id = String(payload.tool_id || payload.name || `tool-${Date.now()}`)

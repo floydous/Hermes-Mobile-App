@@ -107,8 +107,9 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
     lastMessageIsAssistant &&
     ((activeAssistantText && lastMessage.content === activeAssistantText) || (!streaming && !sending))
   )
+  const hasRunningTools = Boolean(sending && toolActivities && toolActivities.length > 0)
   const showActiveAssistant = Boolean(
-    (sending && !lastMessageIsAssistant) ||
+    (sending && (!lastMessageIsAssistant || hasRunningTools || !activeAssistantText || (activeAssistantText && lastMessage.content !== activeAssistantText))) ||
     (streaming && (!lastMessageIsAssistant || lastMessage.content !== streaming)) ||
     (settledAssistant && !isLastMessageSettledAssistant)
   )
@@ -123,9 +124,13 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
 
   let liveStatus = 'Thinking…'
   if (runningTool) {
-    liveStatus = activeToolsCount > 1
-      ? `Using ${runningTool.name} · ${activeToolsCount} tool calls…`
-      : `Using ${runningTool.name}…`
+    if (runningTool.name === 'Dispatched Task') {
+      liveStatus = runningTool.summary ? `${runningTool.summary}…` : 'Working on dispatched task…'
+    } else {
+      liveStatus = activeToolsCount > 1
+        ? `Using ${runningTool.name} · ${activeToolsCount} tool calls…`
+        : `Using ${runningTool.name}…`
+    }
   } else if (activeToolsCount > 0 && !streaming) {
     liveStatus = `${activeToolsCount} tool call${activeToolsCount > 1 ? 's' : ''} completed…`
   }
@@ -299,7 +304,7 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
           </section>
         )}
         {showEmptyState && <section className="chat-empty-state" aria-label={`Start a conversation with ${botName}`}><BotAvatar profile={botProfile} fallbackName={session.profile} variant="welcome"/><h1>{botName.toUpperCase()}</h1><p>Say something to get started.</p></section>}
-        {messages.map(message => <MessageCard key={message.id} message={message} onEdit={editMessage} profile={botProfile} fallbackName={session.profile} revealTimestamp={message.role === 'assistant' && revealedTimestampId === message.id} onRevealTimestamp={() => setRevealedTimestampId(current => current === message.id ? null : message.id)}/>)}
+        {messages.map(message => <MessageCard key={message.id} message={message} onEdit={editMessage} profile={botProfile} profiles={profiles} fallbackName={session.profile} revealTimestamp={message.role === 'assistant' && revealedTimestampId === message.id} onRevealTimestamp={() => setRevealedTimestampId(current => current === message.id ? null : message.id)}/>)}
         {showActiveAssistant && (
           <article className="message-row assistant-row live-response">
             <div className="assistant-message-layout">

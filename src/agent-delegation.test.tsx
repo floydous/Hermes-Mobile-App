@@ -90,14 +90,124 @@ Output:
     )
 
     // Renders agent delegation structure
-    expect(html).toContain('agent-delegation-card')
+    expect(html).toContain('agent-dispatch-bubble')
     expect(html).toContain('@hermes')
-    expect(html).toContain('Agent Dispatch')
+    expect(html).toContain('Dispatched task')
     expect(html).toContain('Tolong carikan tugas saya.')
 
     // Must NOT render human user bubble or Edit button
     expect(html).not.toContain('user-bubble')
     expect(html).not.toContain('>Edit<')
+  })
+
+  it('renders sender bot profile avatar in dispatch bubble when profile is available', () => {
+    const delegationMessage = {
+      id: 10,
+      role: 'user' as const,
+      content: 'Message from 🤖 hermes (@hermes): Delegated query',
+    }
+    // Real roster: the primary Bot's profile name is `default`, not its handle.
+    const profiles = [
+      {
+        name: 'default',
+        display_name: 'Hermes Agent',
+        has_avatar: false,
+        ui_meta: { 'hermes-bots': { shape: 'squircle', color: '#7170ff' } },
+      },
+    ]
+
+    const html = renderToString(
+      <MessageCard
+        message={delegationMessage}
+        onEdit={vi.fn()}
+        profiles={profiles as any}
+        fallbackName="default"
+        revealTimestamp={false}
+        onRevealTimestamp={vi.fn()}
+      />
+    )
+
+    expect(html).toContain('agent-dispatch-avatar')
+    expect(html).toContain('bot-avatar-dispatch')
+    expect(html).toContain('bot-avatar-svg')
+    expect(html).toContain('fill="#7170ff"')
+  })
+
+  it('resolves sender profile via display_name fallback and renders initials when unknown', () => {
+    const delegationMessage = {
+      id: 11,
+      role: 'user' as const,
+      content: 'Message from 🤖 Dr. Research (@research-agent): Results are ready',
+    }
+    const profiles = [
+      {
+        name: 'researcher',
+        display_name: 'Dr. Research',
+        has_avatar: false,
+        ui_meta: { 'hermes-bots': { shape: 'squircle', color: '#10b981' } },
+      },
+    ]
+
+    // Case A: Resolves via display_name fallback
+    const matchedHtml = renderToString(
+      <MessageCard
+        message={delegationMessage}
+        onEdit={vi.fn()}
+        profiles={profiles as any}
+        fallbackName="default"
+        revealTimestamp={false}
+        onRevealTimestamp={vi.fn()}
+      />
+    )
+    expect(matchedHtml).toContain('bot-avatar-dispatch')
+    expect(matchedHtml).toContain('fill="#10b981"')
+
+    // Case B: Unknown profile falls back to initials
+    const unknownHtml = renderToString(
+      <MessageCard
+        message={delegationMessage}
+        onEdit={vi.fn()}
+        profiles={[]}
+        fallbackName="default"
+        revealTimestamp={false}
+        onRevealTimestamp={vi.fn()}
+      />
+    )
+    expect(unknownHtml).toContain('bot-avatar-dispatch')
+    expect(unknownHtml).toContain('avatar-fallback')
+    expect(unknownHtml).toContain('RA') // Initials for 'research-agent' ('R' and 'A')
+  })
+
+  it('renders the default profile avatar for a task dispatched to another Bot', () => {
+    // Regression: the dispatch card rendered a black initials square because the
+    // @hermes handle never matched the default profile's name.
+    const delegationMessage = {
+      id: 12,
+      role: 'user' as const,
+      content: 'Message from 🤖 hermes (@hermes): Please list all of the user\u2019s current tasks/homework.',
+    }
+    const profiles = [
+      { name: 'default', has_avatar: false, ui_meta: { 'hermes-bots': { shape: 'blobatar' } } },
+      { name: 'homework-manager', display_name: 'Homework Manager', has_avatar: false },
+    ]
+
+    const html = renderToString(
+      <MessageCard
+        message={delegationMessage}
+        onEdit={vi.fn()}
+        profiles={profiles as any}
+        fallbackName="homework-manager"
+        revealTimestamp={false}
+        onRevealTimestamp={vi.fn()}
+      />
+    )
+
+    // Resolves the sender to the default profile and renders its real avatar SVG
+    expect(html).toContain('bot-avatar-svg')
+    expect(html).toContain('<svg')
+    // The initials fallback square is not used for a resolvable profile
+    expect(html).not.toContain('avatar-fallback bot-avatar-slot')
+    expect(html).not.toContain('>H<')
   })
 
   it('renders standard user bubble with Edit button for regular human messages', () => {
@@ -119,7 +229,7 @@ Output:
 
     expect(html).toContain('user-bubble')
     expect(html).toContain('>Edit<')
-    expect(html).not.toContain('agent-delegation-card')
+    expect(html).not.toContain('agent-dispatch-bubble')
   })
 
   it('renders assistant message with background process notices stripped end-to-end', () => {

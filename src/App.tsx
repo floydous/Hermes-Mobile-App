@@ -17,9 +17,13 @@ import { settleAssistantResponse, type SettledAssistantResponse as SettledAssist
 import {
   InFlightSubmissionTracker,
   isActiveChatTurn,
+  isOptimisticUserMessageAlreadyCached,
+  isTurnSettledByTranscript,
   reconcileActiveTurns,
+  resolveDelegationTargetProfile,
   restorePersistedActiveTurns,
   shouldRetainLocalMessages,
+  shouldShowWorkingIndicator,
   type ActiveBotTurn,
   type ToolActivity,
 } from './chat-turn'
@@ -157,11 +161,13 @@ export default function App() {
         const sid = event.sessionId
         if (sid) {
           recentEndedTurnsRef.current.set(sid, Date.now())
+          activeInFlightTurnsRef.current.end(sid)
           setActiveTurns(prev => {
             let changed = false
             const next = { ...prev }
             for (const [prof, turn] of Object.entries(next)) {
               if (turn && (turn.sessionId === sid || prof === sid)) {
+                activeInFlightTurnsRef.current.end(prof)
                 delete next[prof]
                 changed = true
               }
@@ -421,6 +427,7 @@ export default function App() {
     }
     const requestId = ++sessionLoadRef.current
     const activeTurn = activeTurnsRef.current[safeSession.profile]
+      || Object.values(activeTurnsRef.current).find(t => t?.sessionId === safeSession.id)
 
     // Fast-path: check in-memory cache, then fallback to persistent localStorage cache for instant 0ms restoration
     let cached = messageCacheRef.current.get(safeSession.id)
@@ -438,15 +445,25 @@ export default function App() {
     setSettledAssistant(null)
     setError('')
 
-    const isCachedSettled = Boolean(cached && cached.length > 0 && cached[cached.length - 1]?.role === 'assistant')
+    const isTurnInFlight = Boolean(
+      activeInFlightTurnsRef.current.has(safeSession.profile) ||
+      activeInFlightTurnsRef.current.has(safeSession.id)
+    )
+    const isCachedSettled = isTurnSettledByTranscript(activeTurn, cached, isTurnInFlight)
 
-    if (activeTurn && !isCachedSettled) {
+    if (shouldShowWorkingIndicator(activeTurn, isCachedSettled)) {
       setSending(true)
       setStreaming(activeTurn.streamingText)
       setToolActivities(activeTurn.toolActivities)
       setConversationLoading(false)
       if (activeTurn.userMessage) {
-        setMessages(cached ? [...cached, activeTurn.userMessage] : [activeTurn.userMessage])
+        if (isOptimisticUserMessageAlreadyCached(cached, activeTurn.userMessage)) {
+          setMessages(cached || [])
+        } else {
+          setMessages(cached ? [...cached, activeTurn.userMessage] : [activeTurn.userMessage])
+        }
+      } else {
+        setMessages(cached || [])
       }
     } else if (cached !== undefined) {
       setMessages(cached)
@@ -482,12 +499,18 @@ export default function App() {
         messageCacheRef.current.set(safeSession.id, resolvedLoaded)
         setCachedSessionMessages(safeSession.id, resolvedLoaded)
 
+        if (requestId !== sessionLoadRef.current || selectedRef.current?.id !== safeSession.id) return
+
         const currentActive = activeTurnsRef.current[safeSession.profile]
-        const lastLoaded = resolvedLoaded[resolvedLoaded.length - 1]
-        const isTranscriptSettled = lastLoaded?.role === 'assistant'
+          || Object.values(activeTurnsRef.current).find(t => t?.sessionId === safeSession.id)
+        const isTurnInFlightAsync = Boolean(
+          activeInFlightTurnsRef.current.has(safeSession.profile) ||
+          activeInFlightTurnsRef.current.has(safeSession.id)
+        )
+        const isTranscriptSettled = isTurnSettledByTranscript(currentActive, resolvedLoaded, isTurnInFlightAsync)
 
         if (isTranscriptSettled) {
-          // If the last message is already an assistant response, this conversation turn has completed!
+          // If the turn has legitimately settled, clear sending and active turn
           setSending(false)
           setStreaming('')
           setToolActivities([])
@@ -500,6 +523,11 @@ export default function App() {
               return next
             })
           }
+        } else if (currentActive) {
+          // Turn is still active: maintain live sending and tool activity state
+          setSending(true)
+          setStreaming(currentActive.streamingText)
+          setToolActivities(currentActive.toolActivities)
         }
 
         if (currentActive?.userMessage && !isTranscriptSettled) {
@@ -569,6 +597,10 @@ export default function App() {
       userMessage: localUserMessage,
       startedAt: Date.now(),
     }
+    recentEndedTurnsRef.current.delete(turnProfile)
+    recentEndedTurnsRef.current.delete(turnSessionId)
+    recentEndedTurnsRef.current.delete(turnSession.id)
+
     setActiveTurns(prev => ({ ...prev, [turnProfile]: initialTurn }))
     activeInFlightTurnsRef.current.start(turnProfile)
     activeInFlightTurnsRef.current.start(turnSessionId)
@@ -636,7 +668,7 @@ export default function App() {
             setStreaming(text)
           }
         },
-        onToolStart: (id, toolName, summary) => {
+        onToolStart: (id, toolName, summary, params) => {
           setActiveTurns(prev => {
             const current = prev[turnProfile]
             if (!current) return prev
@@ -662,6 +694,33 @@ export default function App() {
               ...(Array.isArray(items) ? items : []).filter(item => item && item.id !== id),
               { id, name: toolName, status: 'running', summary },
             ])
+          }
+
+          // Multi-agent task delegation: immediately activate working status on the receiving bot
+          const targetProf = resolveDelegationTargetProfile(toolName, params, profiles)
+          if (targetProf) {
+            const matchedTarget = profiles.find(p => p.name === targetProf)
+            const targetSid = matchedTarget?.canonical_session?.id || `dispatched:${targetProf}`
+            setActiveTurns(prev => ({
+              ...prev,
+              [targetProf]: {
+                sessionId: targetSid,
+                profile: targetProf,
+                status: 'tool',
+                statusText: `Working on task from @${turnProfile}…`,
+                streamingText: '',
+                toolActivities: [{
+                  id: `delegation-${id}`,
+                  name: 'Dispatched Task',
+                  status: 'running',
+                  summary: `Task from @${turnProfile}`,
+                }],
+                userMessage: { id: -Date.now(), role: 'user', content: '' },
+                startedAt: Date.now(),
+              },
+            }))
+            activeInFlightTurnsRef.current.start(targetProf)
+            activeInFlightTurnsRef.current.start(targetSid)
           }
         },
         onToolComplete: (id, toolName, duration_s, summary) => {

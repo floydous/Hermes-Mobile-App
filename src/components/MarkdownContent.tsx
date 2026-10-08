@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import {
+  Bot,
   Check,
   Copy,
   Download,
@@ -22,7 +23,9 @@ import 'katex/dist/katex.min.css'
 
 import type { LiveMessage, LiveProfile } from '../hermes'
 import { fetchRemoteMedia } from '../hermes'
+import { resolveDelegationSenderProfile } from '../chat-turn'
 import { formatMessageTime, formatResponseStats } from '../message-stats'
+import { BotAvatar } from './BotAvatar'
 import {
   computeDismissDelay,
   computeSwipeTransform,
@@ -849,12 +852,13 @@ type MessageCardProps = {
   message: LiveMessage & { local?: boolean }
   onEdit: (text: string, id: number) => void
   profile?: LiveProfile
+  profiles?: LiveProfile[]
   fallbackName: string
   revealTimestamp: boolean
   onRevealTimestamp: () => void
 }
 
-export const MessageCard = memo(function MessageCard({ message, onEdit, profile: _profile, fallbackName: _fallbackName, revealTimestamp, onRevealTimestamp }: MessageCardProps) {
+export const MessageCard = memo(function MessageCard({ message, onEdit, profile: _profile, profiles, fallbackName: _fallbackName, revealTimestamp, onRevealTimestamp }: MessageCardProps) {
   const [copied, setCopied] = useState(false)
   const [swipeStartX, setSwipeStartX] = useState<number | null>(null)
   const stats = formatResponseStats(message)
@@ -876,18 +880,25 @@ export const MessageCard = memo(function MessageCard({ message, onEdit, profile:
 
   const delegation = parseAgentDelegation(cleanContent)
   if (delegation) {
+    const senderProfile = resolveDelegationSenderProfile(delegation.handle, delegation.senderName, profiles)
     return (
       <article className="message-row agent-delegation-row">
-        <div className="agent-delegation-card">
-          <header className="agent-delegation-header">
-            <div className="agent-delegation-sender">
-              <span className="agent-delegation-bot-icon" aria-hidden="true">🤖</span>
-              <span className="agent-delegation-name">{`@${delegation.handle}`}</span>
-              <span className="agent-delegation-action">delegated prompt</span>
+        <div className="agent-dispatch-bubble">
+          <header className="agent-dispatch-header">
+            <div className="agent-dispatch-avatar" aria-hidden="true">
+              <BotAvatar
+                profile={senderProfile}
+                fallbackName={delegation.handle || delegation.senderName}
+                variant="dispatch"
+              />
             </div>
-            <span className="agent-delegation-badge">Agent Dispatch</span>
+            <div className="agent-dispatch-meta">
+              <span className="agent-dispatch-handle">{`@${delegation.handle}`}</span>
+              <span className="agent-dispatch-dot" aria-hidden="true">·</span>
+              <span className="agent-dispatch-label">Dispatched task</span>
+            </div>
           </header>
-          <div className="agent-delegation-body">
+          <div className="agent-dispatch-body">
             <MarkdownContent>{delegation.body}</MarkdownContent>
           </div>
         </div>

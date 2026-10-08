@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { canonicalProfileAvatarSvg } from '../avatar-render'
 import { loadProfileAvatar, type LiveProfile } from '../hermes'
 
-export type BotAvatarVariant = 'roster' | 'session' | 'header' | 'welcome' | 'mention' | 'message'
+export type BotAvatarVariant = 'roster' | 'session' | 'header' | 'welcome' | 'mention' | 'message' | 'dispatch'
 
 type Props = {
   profile?: LiveProfile
