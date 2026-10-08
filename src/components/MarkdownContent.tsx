@@ -122,9 +122,44 @@ export function resolveImageSrc(pathOrUrl: string): string {
   return clean
 }
 
+export function stripBackgroundProcessNotices(text: string): { clean: string; notices: string[] } {
+  if (!text) return { clean: '', notices: [] }
+  const notices: string[] = []
+  const pattern = /(?:--\s*)?\[IMPORTANT:\s*Background process\s+proc_[a-zA-Z0-9_-]+\s+completed[\s\S]*?\]/gi
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(text)) !== null) {
+    notices.push(match[0])
+  }
+  const clean = text.replace(pattern, '').trim()
+  return { clean, notices }
+}
+
+export type AgentDelegation = {
+  senderName: string
+  handle: string
+  body: string
+}
+
+export function parseAgentDelegation(text: string): AgentDelegation | null {
+  if (!text) return null
+  const trimmed = text.trim()
+  // Requires either 🤖 emoji or explicit handle (@...) to prevent false positives on plain text
+  const match = trimmed.match(/^Message from (?:🤖\s*([^\n(@:]+?)(?:\s*\(@([^\n)]+)\))?|([^\n(@:]+?)\s*\(@([^\n)]+)\)):\s*([\s\S]*)$/i)
+  if (!match) return null
+
+  const senderName = (match[1] || match[3] || '').trim()
+  const handle = (match[2] || match[4] || senderName).trim()
+  const body = (match[5] || '').trim()
+  if (!senderName || !body) return null
+
+  return { senderName, handle, body }
+}
+
 export function stripAttachedContextScaffolding(text: string): string {
   if (!text) return ''
-  return text.replace(/\n*--- (?:Attached Context|Context Warnings) ---\n[\s\S]*$/, '').trim()
+  const withoutContext = text.replace(/\n*--- (?:Attached Context|Context Warnings) ---\n[\s\S]*$/, '').trim()
+  const { clean } = stripBackgroundProcessNotices(withoutContext)
+  return clean
 }
 
 type MessageSegment =
@@ -838,16 +873,61 @@ export const MessageCard = memo(function MessageCard({ message, onEdit, profile:
     if (swipeStartX != null && swipeStartX - x > 42) onRevealTimestamp()
     setSwipeStartX(null)
   }
-  if (message.role === 'user') return <article className="message-row user-row"><div className="user-bubble"><MarkdownContent>{cleanContent}</MarkdownContent></div><div className="message-actions"><button onClick={() => void copy()}>{copied ? <Check size={13}/> : <Copy size={13}/>}<span>{copied ? 'Copied' : 'Copy'}</span></button><button onClick={() => onEdit(cleanContent, message.id)}>Edit</button></div></article>
 
-  return <article className={`message-row assistant-row ${revealTimestamp ? 'timestamp-visible' : ''}`} onPointerDown={event => setSwipeStartX(event.clientX)} onPointerUp={event => finishSwipe(event.clientX)} onPointerCancel={() => setSwipeStartX(null)}>
-    <div className="assistant-message-layout">
-      <div className="assistant-bubble">
-        {textContent && <MarkdownContent>{textContent}</MarkdownContent>}
-        {stats && <div className="response-stats" aria-label="Response generation statistics">{stats}</div>}
+  const delegation = parseAgentDelegation(cleanContent)
+  if (delegation) {
+    return (
+      <article className="message-row agent-delegation-row">
+        <div className="agent-delegation-card">
+          <header className="agent-delegation-header">
+            <div className="agent-delegation-sender">
+              <span className="agent-delegation-bot-icon" aria-hidden="true">🤖</span>
+              <span className="agent-delegation-name">{`@${delegation.handle}`}</span>
+              <span className="agent-delegation-action">delegated prompt</span>
+            </div>
+            <span className="agent-delegation-badge">Agent Dispatch</span>
+          </header>
+          <div className="agent-delegation-body">
+            <MarkdownContent>{delegation.body}</MarkdownContent>
+          </div>
+        </div>
+        <div className="message-actions">
+          <button onClick={() => void copy()}>
+            {copied ? <Check size={13}/> : <Copy size={13}/>}
+            <span>{copied ? 'Copied' : 'Copy'}</span>
+          </button>
+        </div>
+      </article>
+    )
+  }
+
+  if (message.role === 'user') {
+    return (
+      <article className="message-row user-row">
+        <div className="user-bubble">
+          <MarkdownContent>{cleanContent}</MarkdownContent>
+        </div>
+        <div className="message-actions">
+          <button onClick={() => void copy()}>
+            {copied ? <Check size={13}/> : <Copy size={13}/>}
+            <span>{copied ? 'Copied' : 'Copy'}</span>
+          </button>
+          <button onClick={() => onEdit(cleanContent, message.id)}>Edit</button>
+        </div>
+      </article>
+    )
+  }
+
+  return (
+    <article className={`message-row assistant-row ${revealTimestamp ? 'timestamp-visible' : ''}`} onPointerDown={event => setSwipeStartX(event.clientX)} onPointerUp={event => finishSwipe(event.clientX)} onPointerCancel={() => setSwipeStartX(null)}>
+      <div className="assistant-message-layout">
+        <div className="assistant-bubble">
+          {cleanContent && <MarkdownContent>{cleanContent}</MarkdownContent>}
+          {stats && <div className="response-stats" aria-label="Response generation statistics">{stats}</div>}
+        </div>
+        <div className="message-actions"><button onClick={() => void copy()}>{copied ? <Check size={13}/> : <Copy size={13}/>}<span>{copied ? 'Copied' : 'Copy'}</span></button></div>
       </div>
-      <div className="message-actions"><button onClick={() => void copy()}>{copied ? <Check size={13}/> : <Copy size={13}/>}<span>{copied ? 'Copied' : 'Copy'}</span></button></div>
-    </div>
-    {timestamp && <time className="message-time">{timestamp}</time>}
-  </article>
+      {timestamp && <time className="message-time">{timestamp}</time>}
+    </article>
+  )
 })

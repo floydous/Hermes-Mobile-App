@@ -183,7 +183,7 @@ function AppearanceSettings({
   useEdgeSwipeBack(shellRef, back)
 
   const scalePercent = Math.round(uiScale * 100)
-  const isDefault = scalePercent === 100
+  const isDefault = Math.abs(uiScale - 1.15) < 0.02
 
   return (
     <main ref={shellRef} className="app panel appearance-screen">
@@ -239,7 +239,7 @@ function AppearanceSettings({
             {[
               { label: 'Compact', val: 0.85 },
               { label: 'Normal', val: 1.0 },
-              { label: 'Large', val: 1.15 },
+              { label: 'Large (Default)', val: 1.15 },
               { label: 'X-Large', val: 1.25 },
             ].map(preset => (
               <button
@@ -257,7 +257,7 @@ function AppearanceSettings({
             <button
               type="button"
               className="scale-reset-button"
-              onClick={() => setUiScale(1.0)}
+              onClick={() => setUiScale(1.15)}
             >
               <RotateCcw size={13}/> Reset to default size
             </button>

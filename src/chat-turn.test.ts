@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  InFlightSubmissionTracker,
   isActiveChatTurn,
   isSessionStatusWorking,
   reconcileActiveTurns,
   restorePersistedActiveTurns,
+  shouldRetainLocalMessages,
   type ActiveBotTurn,
 } from './chat-turn'
 
@@ -213,5 +215,79 @@ describe('active chat turn guard', () => {
     ], { 'sess-hw-7': 'Homework Manager' }, 20000)
 
     expect(reconciled['Homework Manager']).toBeUndefined()
+  })
+
+  it('preserves client turns actively in-flight regardless of 4s threshold', () => {
+    const current: Record<string, ActiveBotTurn> = {
+      'InFlightBot': {
+        sessionId: 'sess-active-submission',
+        profile: 'InFlightBot',
+        status: 'thinking',
+        statusText: 'Thinking…',
+        streamingText: '',
+        toolActivities: [],
+        userMessage: { id: 10, role: 'user', content: 'test prompt' },
+        startedAt: 1000,
+      },
+    }
+
+    // After 10 seconds (well past the 4000ms threshold), gateway hasn't reported it yet
+    const inFlightSet = new Set<string>(['InFlightBot'])
+    const reconciled = reconcileActiveTurns(current, [], {}, 15000, undefined, inFlightSet)
+
+    // Because it is in the active client submission pipeline, it must NOT be pruned!
+    expect(reconciled['InFlightBot']).toBeDefined()
+    expect(reconciled['InFlightBot'].statusText).toBe('Thinking…')
+  })
+
+  it('safely handles reference-counted overlapping client submissions with InFlightSubmissionTracker', () => {
+    const tracker = new InFlightSubmissionTracker()
+
+    // Two submissions launched for the same profile
+    tracker.start('BotA')
+    tracker.start('BotA')
+    expect(tracker.has('BotA')).toBe(true)
+
+    // First submission finishes -> tracker still has BotA!
+    tracker.end('BotA')
+    expect(tracker.has('BotA')).toBe(true)
+
+    const current: Record<string, ActiveBotTurn> = {
+      'BotA': {
+        profile: 'BotA',
+        status: 'thinking',
+        statusText: 'Thinking…',
+        streamingText: '',
+        toolActivities: [],
+        userMessage: { id: 1, role: 'user', content: 'test' },
+        startedAt: 1000,
+      },
+    }
+    const reconciled = reconcileActiveTurns(current, [], {}, 10000, undefined, tracker.toSet())
+    expect(reconciled['BotA']).toBeDefined()
+
+    // Second submission finishes -> properly cleared
+    tracker.end('BotA')
+    expect(tracker.has('BotA')).toBe(false)
+  })
+
+  it('determines whether to retain local messages during backend race conditions via shouldRetainLocalMessages', () => {
+    const localMsgs = [{ id: 1, role: 'user', content: 'hello' }]
+
+    // Backend returns empty [] while turn is active: MUST retain local messages!
+    expect(shouldRetainLocalMessages([], localMsgs, true)).toBe(true)
+
+    // Backend returns empty [] when local messages exist even if turn not marked active: MUST retain!
+    expect(shouldRetainLocalMessages([], localMsgs, false)).toBe(true)
+
+    // Backend returns empty [] and cache is empty: do not retain (true empty state)
+    expect(shouldRetainLocalMessages([], [], false)).toBe(false)
+
+    // Backend returns populated messages: MUST NOT retain local only; accept loaded!
+    const backendMsgs = [
+      { id: 1, role: 'user', content: 'hello' },
+      { id: 2, role: 'assistant', content: 'world' },
+    ]
+    expect(shouldRetainLocalMessages(backendMsgs, localMsgs, false)).toBe(false)
   })
 })

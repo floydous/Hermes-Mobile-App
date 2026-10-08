@@ -525,6 +525,10 @@ function TaskDetail({
     <main ref={shellRef} className="app task-detail">
       {/* iOS Top Nav Header */}
       <header className="ios-task-header">
+        <button className="ios-nav-back" onClick={back} aria-label="Back to tasks">
+          <ChevronLeft size={18} />
+          <span>Tasks</span>
+        </button>
         <span className="ios-nav-title">Task Details</span>
         <button className="ios-nav-action" onClick={() => void onRefresh()} aria-label="Refresh task">
           <RefreshCw size={17} />

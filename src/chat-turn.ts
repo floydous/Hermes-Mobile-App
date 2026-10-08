@@ -29,6 +29,41 @@ export function isSessionStatusWorking(status: string): boolean {
   return norm === 'working' || norm === 'starting' || norm === 'waiting'
 }
 
+export class InFlightSubmissionTracker {
+  private counts = new Map<string, number>()
+
+  start(key: string): void {
+    this.counts.set(key, (this.counts.get(key) || 0) + 1)
+  }
+
+  end(key: string): void {
+    const cur = this.counts.get(key) || 0
+    if (cur <= 1) this.counts.delete(key)
+    else this.counts.set(key, cur - 1)
+  }
+
+  has(key: string): boolean {
+    return this.counts.has(key)
+  }
+
+  toSet(): Set<string> {
+    return new Set(this.counts.keys())
+  }
+}
+
+/**
+ * Determines whether local optimistic messages must be protected from being
+ * overwritten by an empty `[]` response during an active or recent backend turn.
+ */
+export function shouldRetainLocalMessages(
+  incomingLoaded: Array<{ id: number | string; role: string; content: string }>,
+  existingCached: Array<{ id: number | string; role: string; content: string }>,
+  isTurnActive: boolean
+): boolean {
+  if (incomingLoaded.length > 0) return false
+  return existingCached.length > 0 || isTurnActive
+}
+
 export function restorePersistedActiveTurns(raw: string | null, maxAgeMs = 15 * 60 * 1000): Record<string, ActiveBotTurn> {
   if (!raw) return {}
   try {
@@ -62,7 +97,8 @@ export function reconcileActiveTurns(
   activeSessions: Array<{ id: string; session_key?: string; status: string; started_at?: number }>,
   sessionToProfileMap: Record<string, string>,
   now = Date.now(),
-  endedSessionIds?: Set<string>
+  endedSessionIds?: Set<string>,
+  inFlightClientProfiles?: Set<string>
 ): Record<string, ActiveBotTurn> {
   const next: Record<string, ActiveBotTurn> = { ...currentTurns }
   const activeProfilesFromGateway = new Set<string>()
@@ -103,7 +139,8 @@ export function reconcileActiveTurns(
   }
 
   // Any turn in currentTurns that is NOT confirmed as working on the gateway must be cleared,
-  // unless it was initiated in this client session within the last 4 seconds (optimistic spin-up).
+  // unless it was initiated in this client session within the last 4 seconds (optimistic spin-up)
+  // or is currently being actively executed by this client's streaming submission pipeline.
   for (const [key, turn] of Object.entries(next)) {
     const profile = turn?.profile || key
     if (!turn) {
@@ -117,9 +154,14 @@ export function reconcileActiveTurns(
     )
     const isExplicitlyIdle = explicitlyIdleProfiles.has(profile) || explicitlyIdleProfiles.has(key)
     const isGatewayWorking = activeProfilesFromGateway.has(profile) || activeProfilesFromGateway.has(key)
-    const isVeryRecentClientTurn = turn.startedAt && (now - turn.startedAt < 4000)
+    const isVeryRecentClientTurn = Boolean(turn.startedAt && (now - turn.startedAt < 4000))
+    const isInFlightClientTurn = Boolean(
+      inFlightClientProfiles?.has(profile) ||
+      inFlightClientProfiles?.has(key) ||
+      (turn.sessionId && inFlightClientProfiles?.has(turn.sessionId))
+    )
 
-    if (isEnded || isExplicitlyIdle || (!isGatewayWorking && !isVeryRecentClientTurn)) {
+    if (isEnded || isExplicitlyIdle || (!isGatewayWorking && !isVeryRecentClientTurn && !isInFlightClientTurn)) {
       delete next[key]
     }
   }

@@ -28,13 +28,14 @@ import './edge-swipe.css'
 import './transitions.css'
 
 try {
+  const savedTheme = localStorage.getItem('hermes-mobile-theme') || 'light'
+  document.documentElement.setAttribute('data-theme', savedTheme)
+
   const savedScale = localStorage.getItem('hermes-mobile-ui-scale')
-  if (savedScale) {
-    const parsed = parseFloat(savedScale)
-    if (!isNaN(parsed) && parsed >= 0.75 && parsed <= 1.5) {
-      document.documentElement.style.zoom = String(parsed)
-      document.documentElement.style.setProperty('--ui-scale', String(parsed))
-    }
+  const parsed = savedScale ? parseFloat(savedScale) : 1.15
+  if (!isNaN(parsed) && parsed >= 0.75 && parsed <= 1.5) {
+    document.documentElement.style.zoom = String(parsed)
+    document.documentElement.style.setProperty('--ui-scale', String(parsed))
   }
 } catch {}
 

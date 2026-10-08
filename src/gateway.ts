@@ -11,7 +11,7 @@ export type GatewayEvent = {
 }
 
 type JsonRpcFrame = {
-  id?: number
+  id?: number | string
   method?: string
   result?: unknown
   error?: { code?: number; message?: string; data?: GatewayPayload }
@@ -22,7 +22,7 @@ type Pending = {
   method: string
   resolve: (value: unknown) => void
   reject: (reason: Error) => void
-  timer: number
+  timer: ReturnType<typeof setTimeout>
 }
 
 export class GatewayRpcError extends Error {
@@ -83,6 +83,7 @@ export class HermesGatewayClient {
   private readyReject: ((reason: Error) => void) | null = null
   private readonly pending = new Map<number, Pending>()
   private readonly sessionListeners = new Map<string, Set<(event: GatewayEvent) => void>>()
+  private readonly requestHandlers = new Map<string, (params: GatewayPayload) => unknown>()
   private readonly activeTurnCancels = new Map<string, () => void>()
   private globalListener?: (event: GatewayEvent) => void
 
@@ -113,9 +114,9 @@ export class HermesGatewayClient {
     this.socket = socket
 
     const opened = new Promise<void>((resolve, reject) => {
-      const timer = window.setTimeout(() => reject(new Error('Hermes Gateway connection timed out')), 15_000)
-      socket.onopen = () => { window.clearTimeout(timer); resolve() }
-      socket.onerror = () => { window.clearTimeout(timer); reject(new Error('Hermes Gateway connection failed')) }
+      const timer = setTimeout(() => reject(new Error('Hermes Gateway connection timed out')), 15_000)
+      socket.onopen = () => { clearTimeout(timer); resolve() }
+      socket.onerror = () => { clearTimeout(timer); reject(new Error('Hermes Gateway connection failed')) }
     })
     const ready = new Promise<void>((resolve, reject) => {
       this.readyResolve = resolve
@@ -127,7 +128,7 @@ export class HermesGatewayClient {
     await opened
     await Promise.race([
       ready,
-      new Promise<never>((_, reject) => window.setTimeout(() => reject(new Error('Hermes Gateway did not announce readiness')), 15_000)),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Hermes Gateway did not announce readiness')), 15_000)),
     ])
   }
 
@@ -140,10 +141,46 @@ export class HermesGatewayClient {
       if (frame.method === 'event' && frame.params) {
         const event = parseGatewayEvent(frame.params)
         if (!event) continue
-        if (event.type === 'gateway.ready') this.readyResolve?.()
+        if (event.type === 'gateway.ready') {
+          this.readyResolve?.()
+          void this.advertiseCapabilities().catch(() => {})
+        }
         this.globalListener?.(event)
         if (event.sessionId) {
           for (const listener of this.sessionListeners.get(event.sessionId) ?? []) listener(event)
+        }
+        continue
+      }
+
+      // Handle server→client requests (id is string like "srq-...") per tui_gateway protocol
+      if (typeof frame.id === 'string' && frame.id.startsWith('srq-') && frame.method) {
+        const reqEvent: GatewayEvent = {
+          type: `request.${frame.method}`,
+          payload: {
+            requestId: frame.id,
+            method: frame.method,
+            ...(frame.params || {}),
+          },
+          sessionId: typeof frame.params?.session_id === 'string' ? frame.params.session_id : undefined,
+          terminal: false,
+        }
+        this.globalListener?.(reqEvent)
+        if (reqEvent.sessionId) {
+          for (const listener of this.sessionListeners.get(reqEvent.sessionId) ?? []) listener(reqEvent)
+        }
+        const handler = this.requestHandlers.get(frame.method)
+        if (handler) {
+          try {
+            const res = handler(frame.params || {})
+            this.respondToServerRequest(frame.id, res)
+          } catch (err) {
+            this.respondToServerRequest(frame.id, null, { code: -32603, message: String(err) })
+          }
+        } else {
+          this.respondToServerRequest(frame.id, null, {
+            code: -32601,
+            message: `Method ${frame.method} not implemented on this client`,
+          })
         }
         continue
       }
@@ -152,7 +189,7 @@ export class HermesGatewayClient {
         const pending = this.pending.get(frame.id)
         if (!pending) continue
         this.pending.delete(frame.id)
-        window.clearTimeout(pending.timer)
+        clearTimeout(pending.timer)
         if (frame.error) pending.reject(new GatewayRpcError(pending.method, frame.error.message || `${pending.method} failed`, frame.error.code, frame.error.data))
         else pending.resolve(frame.result)
       }
@@ -168,7 +205,7 @@ export class HermesGatewayClient {
     this.readyResolve = null
     this.readyReject = null
     for (const pending of this.pending.values()) {
-      window.clearTimeout(pending.timer)
+      clearTimeout(pending.timer)
       pending.reject(error)
     }
     this.pending.clear()
@@ -181,7 +218,7 @@ export class HermesGatewayClient {
     if (!socket || socket.readyState !== WebSocket.OPEN) throw new Error('Hermes Gateway is not connected')
     const id = this.nextId++
     return new Promise<T>((resolve, reject) => {
-      const timer = window.setTimeout(() => {
+      const timer = setTimeout(() => {
         this.pending.delete(id)
         reject(new GatewayRpcError(method, `${method} timed out`))
       }, timeoutMs)
@@ -222,13 +259,16 @@ export class HermesGatewayClient {
       // event is received, and never auto-resubmit after an ambiguous failure.
       const payload: Record<string, unknown> = { session_id: sessionId, text }
       if (options?.truncateMessageId != null) {
-        payload.truncate_before_message_id = options.truncateMessageId
+        payload.truncate_before_message_id = String(options.truncateMessageId)
         payload.confirm_truncate = true
+        if (options.truncateMessageId === 0 || options.truncateMessageId === 1) {
+          payload.confirm_empty_truncate = true
+        }
       }
       await this.call('prompt.submit', payload, 30_000)
       await Promise.race([
         terminal,
-        new Promise<never>((_, reject) => window.setTimeout(() => reject(new GatewayRpcError('prompt.submit', 'Hermes turn timed out')), 10 * 60_000)),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new GatewayRpcError('prompt.submit', 'Hermes turn timed out')), 10 * 60_000)),
       ])
     } finally {
       listeners.delete(terminalListener)
@@ -275,6 +315,41 @@ export class HermesGatewayClient {
 
   setSessionReasoning(sessionId: string, effort: string) {
     return this.call('config.set', { session_id: sessionId, key: 'reasoning', value: effort })
+  }
+
+  private async advertiseCapabilities(): Promise<void> {
+    try {
+      await this.call('client.capabilities', { server_requests: true }, 5_000)
+    } catch {
+      // Graceful fallback for older backends without client.capabilities
+    }
+  }
+
+  registerRequestHandler(method: string, handler: (params: GatewayPayload) => unknown): () => void {
+    this.requestHandlers.set(method, handler)
+    return () => {
+      if (this.requestHandlers.get(method) === handler) {
+        this.requestHandlers.delete(method)
+      }
+    }
+  }
+
+  respondToServerRequest(id: string, result: unknown, error?: { code: number; message: string }) {
+    const socket = this.socket
+    if (!socket || socket.readyState !== WebSocket.OPEN) return
+    const frame = error
+      ? { jsonrpc: '2.0', id, error }
+      : { jsonrpc: '2.0', id, result: result ?? {} }
+    socket.send(`${JSON.stringify(frame)}\n`)
+  }
+
+  async ping(): Promise<boolean> {
+    try {
+      const res = await this.call<{ pong?: boolean }>('ping', {}, 5000)
+      return res.pong === true
+    } catch {
+      return false
+    }
   }
 
   close() {

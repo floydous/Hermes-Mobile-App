@@ -15,9 +15,11 @@ import { buildAttachmentPrompt, attachmentSummary } from './attachment-routing'
 import { buildBotRows, resolveCanonicalSessionId, type RosterProfile } from './live-model'
 import { settleAssistantResponse, type SettledAssistantResponse as SettledAssistantState } from './settled-assistant'
 import {
+  InFlightSubmissionTracker,
   isActiveChatTurn,
   reconcileActiveTurns,
   restorePersistedActiveTurns,
+  shouldRetainLocalMessages,
   type ActiveBotTurn,
   type ToolActivity,
 } from './chat-turn'
@@ -135,6 +137,7 @@ export default function App() {
   })
   const activeTurnsRef = useRef<Record<string, ActiveBotTurn>>({})
   activeTurnsRef.current = activeTurns
+  const activeInFlightTurnsRef = useRef<InFlightSubmissionTracker>(new InFlightSubmissionTracker())
 
   useEffect(() => {
     try {
@@ -182,11 +185,11 @@ export default function App() {
     soul: 'You are a pragmatic software engineer. Read surrounding code before changing it, keep diffs focused, and verify your work by running it.',
     model: '', provider: '', shape: 'blobatar',
   })
-  const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem('hermes-mobile-theme') as Theme | null) || 'dark')
+  const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem('hermes-mobile-theme') as Theme | null) || 'light')
   const [uiScale, setUiScale] = useState<number>(() => {
     const saved = localStorage.getItem('hermes-mobile-ui-scale')
-    const parsed = saved ? parseFloat(saved) : 1
-    return !isNaN(parsed) && parsed >= 0.75 && parsed <= 1.5 ? parsed : 1
+    const parsed = saved ? parseFloat(saved) : 1.15
+    return !isNaN(parsed) && parsed >= 0.75 && parsed <= 1.5 ? parsed : 1.15
   })
 
   useEffect(() => {
@@ -285,7 +288,7 @@ export default function App() {
             if (p.last_session.resolved_id) map[p.last_session.resolved_id] = p.name
           }
         }
-        setActiveTurns(prev => reconcileActiveTurns(prev, activeList, map, Date.now(), endedSet))
+        setActiveTurns(prev => reconcileActiveTurns(prev, activeList, map, Date.now(), endedSet, activeInFlightTurnsRef.current.toSet()))
       }).catch(() => {})
 
       // Stagger background warm-up so we don't saturate the network/tunnel
@@ -299,6 +302,9 @@ export default function App() {
           const delay = idx < 2 ? 0 : (idx - 1) * 200
           window.setTimeout(() => {
             void loadMessages(candidate.id, candidate.profile, endpoint).then(msgs => {
+              const existing = messageCacheRef.current.get(candidate.id) || []
+              const isTurnActive = Boolean(activeTurnsRef.current[candidate.profile] || activeInFlightTurnsRef.current.has(candidate.profile))
+              if (shouldRetainLocalMessages(msgs, existing, isTurnActive)) return
               messageCacheRef.current.set(candidate.id, msgs)
               setCachedSessionMessages(candidate.id, msgs)
             }).catch(() => {})
@@ -463,6 +469,16 @@ export default function App() {
         const latestAssistant = latestUsage ? [...loaded].reverse().findIndex(message => message.role === 'assistant') : -1
         const resolvedLoaded = latestAssistant >= 0 ? loaded.map((message, index) => index === loaded.length - latestAssistant - 1 ? { ...message, usage: latestUsage } : message) : loaded
 
+        const isTurnActive = Boolean(activeTurnsRef.current[safeSession.profile] || activeInFlightTurnsRef.current.has(safeSession.profile))
+        const existingMessages = messageCacheRef.current.get(safeSession.id) || []
+        if (shouldRetainLocalMessages(resolvedLoaded, existingMessages, isTurnActive)) {
+          // Do not overwrite optimistic user messages with empty array from unset SQLite backend
+          if (requestId === sessionLoadRef.current) {
+            setConversationLoading(false)
+          }
+          return
+        }
+
         messageCacheRef.current.set(safeSession.id, resolvedLoaded)
         setCachedSessionMessages(safeSession.id, resolvedLoaded)
 
@@ -554,6 +570,8 @@ export default function App() {
       startedAt: Date.now(),
     }
     setActiveTurns(prev => ({ ...prev, [turnProfile]: initialTurn }))
+    activeInFlightTurnsRef.current.start(turnProfile)
+    activeInFlightTurnsRef.current.start(turnSessionId)
 
     setSettledAssistant(null)
     setError('')
@@ -567,7 +585,10 @@ export default function App() {
         const idx = items.findIndex(m => m.id === options.editMessageId)
         if (idx >= 0) baseItems = items.slice(0, idx)
       }
-      return [...baseItems, ...(priorAssistantMessage ? [priorAssistantMessage] : []), localUserMessage]
+      const nextMessages = [...baseItems, ...(priorAssistantMessage ? [priorAssistantMessage] : []), localUserMessage]
+      messageCacheRef.current.set(turnSessionId, nextMessages)
+      setCachedSessionMessages(turnSessionId, nextMessages)
+      return nextMessages
     })
 
     try {
@@ -747,6 +768,8 @@ export default function App() {
       }
       return false
     } finally {
+      activeInFlightTurnsRef.current.end(turnProfile)
+      activeInFlightTurnsRef.current.end(turnSessionId)
       setToolActivities([])
       if (selectedRef.current?.profile === turnProfile) {
         setSending(false)
@@ -1223,7 +1246,7 @@ const TABS: Array<{ id: Tab; label: string; icon: typeof Bot }> = [
   { id: 'tasks', label: 'Tasks', icon: ListTodo },
 ]
 
-function NavIsland({ tab, setTab }: { tab: Tab; setTab: (tab: Tab) => void }) {
+export function NavIsland({ tab, setTab }: { tab: Tab; setTab: (tab: Tab) => void }) {
   const [indicatorStyle, setIndicatorStyle] = useState<{ left: number; width: number } | null>(null)
   const [hasAnimated, setHasAnimated] = useState(false)
   const itemRefs = useRef<Record<Tab, HTMLButtonElement | null>>({
@@ -1265,30 +1288,33 @@ function NavIsland({ tab, setTab }: { tab: Tab; setTab: (tab: Tab) => void }) {
   }, [tab])
 
   return (
-    <nav className="nav-island" aria-label="Page navigation">
-      {indicatorStyle && (
-        <span
-          className={`nav-island-indicator ${hasAnimated ? 'animate' : ''}`}
-          style={{
-            transform: `translateX(${indicatorStyle.left}px)`,
-            width: `${indicatorStyle.width}px`,
-          }}
-          aria-hidden="true"
-        />
-      )}
-      {TABS.map(({ id, label, icon: Icon }) => (
-        <button
-          key={id}
-          type="button"
-          ref={el => { itemRefs.current[id] = el }}
-          className={`nav-island-item ${tab === id ? 'active' : ''}`}
-          onClick={() => setTab(id)}
-        >
-          <Icon size={14} strokeWidth={1.75} />
-          <span className="nav-island-label">{label}</span>
-        </button>
-      ))}
-    </nav>
+    <>
+      <div className="nav-bottom-scrim" aria-hidden="true" />
+      <nav className="nav-island" aria-label="Page navigation">
+        {indicatorStyle && (
+          <span
+            className={`nav-island-indicator ${hasAnimated ? 'animate' : ''}`}
+            style={{
+              transform: `translateX(${indicatorStyle.left}px)`,
+              width: `${indicatorStyle.width}px`,
+            }}
+            aria-hidden="true"
+          />
+        )}
+        {TABS.map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            type="button"
+            ref={el => { itemRefs.current[id] = el }}
+            className={`nav-island-item ${tab === id ? 'active' : ''}`}
+            onClick={() => setTab(id)}
+          >
+            <Icon size={14} strokeWidth={1.75} />
+            <span className="nav-island-label">{label}</span>
+          </button>
+        ))}
+      </nav>
+    </>
   )
 }
 

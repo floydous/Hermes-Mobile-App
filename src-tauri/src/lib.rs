@@ -212,10 +212,6 @@ fn hermes_fetch_media(
     Err("Could not load media from remote host".to_string())
 }
 
-fn authenticated_post(origin: &str, path: &str, body: serde_json::Value) -> Result<String, String> {
-    authenticated_post_with_timeout(origin, path, body, Duration::from_secs(120))
-}
-
 fn authenticated_post_with_timeout(
     origin: &str,
     path: &str,
@@ -241,13 +237,15 @@ fn authenticated_post_with_timeout(
 
 #[tauri::command]
 fn hermes_transcribe(
+    app: tauri::AppHandle,
     base_url: String,
     profile: String,
     data_url: String,
     mime_type: String,
 ) -> Result<String, String> {
     let origin = server_origin(&base_url);
-    authenticated_post(
+    authenticated_post_for_app(
+        &app,
         &origin,
         &format!("/api/audio/transcribe?profile={profile}"),
         serde_json::json!({ "data_url": data_url, "mime_type": mime_type }),
@@ -260,11 +258,21 @@ fn authenticated_post_for_app(
     path: &str,
     body: serde_json::Value,
 ) -> Result<String, String> {
+    authenticated_post_for_app_with_timeout(app, origin, path, body, Duration::from_secs(120))
+}
+
+fn authenticated_post_for_app_with_timeout(
+    app: &tauri::AppHandle,
+    origin: &str,
+    path: &str,
+    body: serde_json::Value,
+    timeout: Duration,
+) -> Result<String, String> {
     if is_loopback(origin) {
-        return authenticated_post(origin, path, body);
+        return authenticated_post_with_timeout(origin, path, body, timeout);
     }
     let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(120))
+        .timeout(timeout)
         .build()
         .map_err(|error| error.to_string())?;
     let mut response = client
@@ -291,7 +299,49 @@ fn authenticated_post_for_app(
             .ok()
             .and_then(|value| value.get("detail").and_then(|detail| detail.as_str()).map(str::to_string))
             .unwrap_or_else(|| text.trim().to_string());
-        return Err(format!("Hermes rejected task creation (HTTP {status}): {detail}"));
+        return Err(format!("Hermes rejected request (HTTP {status}): {detail}"));
+    }
+    Ok(text)
+}
+
+fn authenticated_put_for_app(
+    app: &tauri::AppHandle,
+    origin: &str,
+    path: &str,
+    body: serde_json::Value,
+) -> Result<String, String> {
+    if is_loopback(origin) {
+        return authenticated_put(origin, path, body);
+    }
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(120))
+        .build()
+        .map_err(|error| error.to_string())?;
+    let mut response = client
+        .put(format!("{origin}{path}"))
+        .bearer_auth(remote_auth::load(app, origin)?.access_token)
+        .json(&body)
+        .send()
+        .map_err(|error| format!("Hermes request failed: {error}"))?;
+    if response.status().as_u16() == 401 {
+        let refreshed = remote_auth::refresh(app, origin)?;
+        response = client
+            .put(format!("{origin}{path}"))
+            .bearer_auth(refreshed.access_token)
+            .json(&body)
+            .send()
+            .map_err(|error| format!("Hermes retry failed after token refresh: {error}"))?;
+    }
+    let status = response.status();
+    let text = response
+        .text()
+        .map_err(|error| format!("Could not read Hermes response: {error}"))?;
+    if !status.is_success() {
+        let detail = serde_json::from_str::<serde_json::Value>(&text)
+            .ok()
+            .and_then(|value| value.get("detail").and_then(|detail| detail.as_str()).map(str::to_string))
+            .unwrap_or_else(|| text.trim().to_string());
+        return Err(format!("Hermes rejected request (HTTP {status}): {detail}"));
     }
     Ok(text)
 }
@@ -353,6 +403,7 @@ fn hermes_cron_runs(
 
 #[tauri::command]
 fn hermes_trigger_cron(
+    app: tauri::AppHandle,
     base_url: String,
     job_id: String,
     profile: String,
@@ -365,7 +416,8 @@ fn hermes_trigger_cron(
     };
     // Desktop deliberately waits for completion here: returning only after the
     // persisted run result prevents the mobile client from presenting a false success.
-    authenticated_post_with_timeout(
+    authenticated_post_for_app_with_timeout(
+        &app,
         &origin,
         &format!(
             "/api/cron/jobs/{}/trigger{}",
@@ -397,6 +449,7 @@ fn authenticated_put(origin: &str, path: &str, body: serde_json::Value) -> Resul
 
 #[tauri::command]
 fn hermes_update_cron_prompt(
+    app: tauri::AppHandle,
     base_url: String,
     job_id: String,
     profile: String,
@@ -408,7 +461,8 @@ fn hermes_update_cron_prompt(
     } else {
         format!("?profile={}", urlencoding::encode(&profile))
     };
-    authenticated_put(
+    authenticated_put_for_app(
+        &app,
         &origin,
         &format!(
             "/api/cron/jobs/{}{}",

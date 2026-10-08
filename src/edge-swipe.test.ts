@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { EDGE_SWIPE_COMMIT_PX, EDGE_SWIPE_MAX_START_PX, shouldCommitEdgeSwipe } from './edge-swipe'
+import {
+  createEdgeSwipeController,
+  EDGE_SWIPE_COMMIT_PX,
+  EDGE_SWIPE_MAX_START_PX,
+  shouldCommitEdgeSwipe,
+} from './edge-swipe'
 
 describe('edge swipe back', () => {
   it('restricts gesture start to the leftmost screen edge', () => {
@@ -100,5 +105,99 @@ describe('edge swipe back', () => {
 
     if (prevInnerWidth !== undefined) (globalThis as any).window.innerWidth = prevInnerWidth
     vi.useRealTimers()
+  })
+
+  it('prevents default browser scrolling on touchmove and blurs active element strictly on commit', () => {
+    vi.useFakeTimers()
+    const origDoc = (globalThis as any).document
+    const origWindow = (globalThis as any).window
+    const origRaf = (globalThis as any).requestAnimationFrame
+
+    try {
+      let blurred = false
+      const mockInput = {
+        blur: () => { blurred = true },
+      }
+      ;(globalThis as any).document = {
+        activeElement: mockInput,
+      }
+      ;(globalThis as any).window = {
+        innerWidth: 390,
+        clearTimeout,
+        setTimeout,
+        requestAnimationFrame: (cb: () => void) => cb(),
+      }
+      ;(globalThis as any).requestAnimationFrame = (cb: () => void) => cb()
+
+      const listeners: Record<string, (e: any) => void> = {}
+      const classes = new Set<string>()
+      const styles: Record<string, string> = {}
+
+      const mockElement = {
+        addEventListener: (type: string, fn: any) => { listeners[type] = fn },
+        removeEventListener: (type: string) => { delete listeners[type] },
+        classList: {
+          add: (...cls: string[]) => cls.forEach(c => classes.add(c)),
+          remove: (...cls: string[]) => cls.forEach(c => classes.delete(c)),
+          contains: (c: string) => classes.has(c),
+        },
+        style: {
+          setProperty: (k: string, v: string) => { styles[k] = v },
+          removeProperty: (k: string) => { delete styles[k] },
+        },
+      }
+
+      let backCalled = false
+      const onBack = () => { backCalled = true }
+
+      // Exercise the REAL production controller directly
+      const cleanup = createEdgeSwipeController(mockElement as any, onBack)
+
+      // Case 1: Cancelled gesture should NOT blur input
+      listeners['touchstart']({ touches: [{ clientX: 20, clientY: 100 }], target: null })
+      let movePrevented = false
+      listeners['touchmove']({
+        touches: [{ clientX: 30, clientY: 100 }],
+        cancelable: true,
+        preventDefault: () => { movePrevented = true },
+      })
+      expect(movePrevented).toBe(true)
+      expect(blurred).toBe(false) // Not blurred on move!
+
+      // Reversal / cancel
+      listeners['touchmove']({
+        touches: [{ clientX: 10, clientY: 100 }],
+        cancelable: true,
+        preventDefault: () => {},
+      })
+      listeners['touchend']({ changedTouches: [{ clientX: 10, clientY: 100 }], cancelable: true, preventDefault: () => {} })
+      expect(blurred).toBe(false) // Cancelled swipe did NOT blur!
+
+      // Case 2: Committed gesture DOES blur and call onBack
+      listeners['touchstart']({ touches: [{ clientX: 10, clientY: 100 }], target: null })
+      listeners['touchmove']({
+        touches: [{ clientX: 80, clientY: 100 }],
+        cancelable: true,
+        preventDefault: () => {},
+      })
+      let endPrevented = false
+      listeners['touchend']({
+        changedTouches: [{ clientX: 80, clientY: 100 }],
+        cancelable: true,
+        preventDefault: () => { endPrevented = true },
+      })
+      expect(endPrevented).toBe(true)
+      expect(blurred).toBe(true) // Blurred on commit!
+
+      vi.advanceTimersByTime(210)
+      expect(backCalled).toBe(true)
+
+      cleanup()
+    } finally {
+      ;(globalThis as any).document = origDoc
+      ;(globalThis as any).window = origWindow
+      ;(globalThis as any).requestAnimationFrame = origRaf
+      vi.useRealTimers()
+    }
   })
 })
