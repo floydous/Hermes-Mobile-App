@@ -416,7 +416,6 @@ export function ChatImage({
 }
 
 export function FileAttachmentCard({ rawPath, kind }: { rawPath: string; kind: 'media' | 'attachment' }) {
-  const [copied, setCopied] = useState(false)
   const cleanPath = rawPath.trim()
   const fileName = cleanPath.split(/[/\\]/).filter(Boolean).pop() || cleanPath
   const ext = fileName.includes('.') ? fileName.split('.').pop()?.toLowerCase() || '' : ''
@@ -425,35 +424,17 @@ export function FileAttachmentCard({ rawPath, kind }: { rawPath: string; kind: '
   const isSheet = ['csv', 'tsv', 'xlsx', 'xls'].includes(ext)
   const isDoc = ['md', 'txt', 'pdf', 'doc', 'docx', 'rtf'].includes(ext)
 
-  const copy = async () => {
-    await navigator.clipboard.writeText(cleanPath)
-    setCopied(true)
-    window.setTimeout(() => setCopied(false), 1600)
-  }
-
-  const typeLabel = ext ? ext.toUpperCase() : kind === 'media' ? 'FILE' : 'ATTACHMENT'
+  const typeLabel = ext ? ext.toUpperCase() : 'FILE'
 
   return (
-    <div className={`media-attachment-card ${kind}`}>
-      <div className="media-card-icon-box">
-        {isImage ? <ImageIcon size={18} /> : isCode ? <FileCode size={18} /> : isSheet ? <FileSpreadsheet size={18} /> : isDoc ? <FileText size={18} /> : <File size={18} />}
+    <div className={`media-attachment-card ${kind}`} title={fileName} aria-label={`Attached file: ${fileName}`} data-path={cleanPath}>
+      <div className="media-card-icon-box" aria-hidden="true">
+        {isImage ? <ImageIcon size={14} /> : isCode ? <FileCode size={14} /> : isSheet ? <FileSpreadsheet size={14} /> : isDoc ? <FileText size={14} /> : <File size={14} />}
       </div>
       <div className="media-card-content">
-        <div className="media-card-filename" title={fileName}>{fileName}</div>
-        <div className="media-card-sub">
-          <span className="media-card-badge">{typeLabel}</span>
-          <span className="media-card-path" title={cleanPath}>{cleanPath}</span>
-        </div>
+        <span className="media-card-filename">{fileName}</span>
       </div>
-      <button
-        type="button"
-        className="media-card-copy-btn"
-        onClick={() => void copy()}
-        title="Copy path"
-        aria-label="Copy file path"
-      >
-        {copied ? <Check size={14} /> : <Copy size={14} />}
-      </button>
+      <span className="media-card-badge">{typeLabel}</span>
     </div>
   )
 }

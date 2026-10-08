@@ -797,7 +797,7 @@ export default function App() {
 
   const openBot = useCallback(async (profile: RosterProfile, existingSession: LiveSession | null) => {
     if (existingSession) {
-      await openSession(existingSession)
+      void openSession(existingSession)
       return
     }
     // Optimistically open an instant draft session so the UI transitions in 0ms
@@ -808,7 +808,7 @@ export default function App() {
       preview: '',
       last_active: Date.now(),
     }
-    await openSession(draftSession)
+    void openSession(draftSession)
     try {
       const fresh = await createSession(profile.name, 'Bot Chat', { canonical: true, hidden: true })
       setSelected(current => current?.id === draftSession.id ? {
@@ -850,20 +850,36 @@ export default function App() {
   const rosterPullActive = rosterPullDistance > 8 || rosterPullRefreshing
   const rosterTouchStart = (event: React.TouchEvent<HTMLElement>) => {
     const target = event.target as HTMLElement
-    if (target.closest('input,textarea') || rosterScrollRef.current?.scrollTop !== 0) return
+    if (target.closest('input,textarea,select') || rosterScrollRef.current?.scrollTop !== 0) return
     rosterPullStartRef.current = event.touches[0].clientY
   }
   const rosterTouchMove = (event: React.TouchEvent<HTMLElement>) => {
-    if (rosterPullStartRef.current == null || rosterScrollRef.current?.scrollTop !== 0) return
-    const distance = Math.min(76, Math.max(0, event.touches[0].clientY - rosterPullStartRef.current))
+    if (rosterPullStartRef.current == null) return
+    if (rosterScrollRef.current && rosterScrollRef.current.scrollTop > 0) {
+      rosterPullStartRef.current = null
+      setRosterPullDistance(0)
+      return
+    }
+    const rawDelta = event.touches[0].clientY - rosterPullStartRef.current
+    // Enforce 14px slop: slight finger movement never calls preventDefault (ensuring clicks fire)
+    if (rawDelta <= 14) {
+      if (rosterPullDistance > 0) setRosterPullDistance(0)
+      return
+    }
+    const distance = Math.min(76, Math.max(0, rawDelta - 14))
     if (distance > 0) event.preventDefault()
     setRosterPullDistance(distance)
   }
   const rosterTouchEnd = () => {
-    const shouldRefresh = rosterPullDistance >= 56
+    // 42px distance + 14px slop = 56px total pull required to trigger refresh
+    const shouldRefresh = rosterPullDistance >= 42
     rosterPullStartRef.current = null
     setRosterPullDistance(0)
     if (shouldRefresh) void pullRefreshRoster()
+  }
+  const rosterTouchCancel = () => {
+    rosterPullStartRef.current = null
+    setRosterPullDistance(0)
   }
 
   const swipeStartXRef = useRef<number | null>(null)
@@ -1087,6 +1103,7 @@ export default function App() {
         onTouchStart={rosterTouchStart}
         onTouchMove={rosterTouchMove}
         onTouchEnd={rosterTouchEnd}
+        onTouchCancel={rosterTouchCancel}
       >
         {rosterPullActive && <div className="roster-pull-cue" style={{ height: `${rosterPullRefreshing ? 46 : rosterPullDistance}px` }}><RefreshCw size={15} className={rosterPullRefreshing ? 'pull-refresh-spinner' : ''}/><span>{rosterPullRefreshing ? 'Refreshing…' : rosterPullDistance >= 56 ? 'Release to refresh' : 'Pull to refresh'}</span></div>}
         {error && <Notice message={error} retry={() => void refresh()}/>}
