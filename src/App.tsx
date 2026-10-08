@@ -142,7 +142,7 @@ export default function App() {
 
   useEffect(() => {
     return onGatewayGlobalEvent(event => {
-      if (event.type === 'turn.end' || event.type === 'turn.error') {
+      if (event.type === 'message.complete' || event.type === 'turn.end' || event.type === 'turn.error') {
         const sid = event.sessionId
         if (sid) {
           recentEndedTurnsRef.current.set(sid, Date.now())
@@ -150,7 +150,7 @@ export default function App() {
             let changed = false
             const next = { ...prev }
             for (const [prof, turn] of Object.entries(next)) {
-              if (turn.sessionId === sid || prof === sid) {
+              if (turn && (turn.sessionId === sid || prof === sid)) {
                 delete next[prof]
                 changed = true
               }
@@ -406,7 +406,9 @@ export default function App() {
     setSettledAssistant(null)
     setError('')
 
-    if (activeTurn) {
+    const isCachedSettled = Boolean(cached && cached.length > 0 && cached[cached.length - 1]?.role === 'assistant')
+
+    if (activeTurn && !isCachedSettled) {
       setSending(true)
       setStreaming(activeTurn.streamingText)
       setToolActivities(activeTurn.toolActivities)
@@ -438,7 +440,26 @@ export default function App() {
         messageCacheRef.current.set(safeSession.id, resolvedLoaded)
 
         const currentActive = activeTurnsRef.current[safeSession.profile]
-        if (currentActive?.userMessage) {
+        const lastLoaded = resolvedLoaded[resolvedLoaded.length - 1]
+        const isTranscriptSettled = lastLoaded?.role === 'assistant'
+
+        if (isTranscriptSettled) {
+          // If the last message is already an assistant response, this conversation turn has completed!
+          setSending(false)
+          setStreaming('')
+          setToolActivities([])
+          if (currentActive) {
+            recentEndedTurnsRef.current.set(safeSession.id, Date.now())
+            setActiveTurns(prev => {
+              if (!prev[safeSession.profile]) return prev
+              const next = { ...prev }
+              delete next[safeSession.profile]
+              return next
+            })
+          }
+        }
+
+        if (currentActive?.userMessage && !isTranscriptSettled) {
           const hasUserMsg = resolvedLoaded.some(m => m.id === currentActive.userMessage?.id || (m.role === 'user' && m.content === currentActive.userMessage?.content))
           setMessages(hasUserMsg ? resolvedLoaded : [...resolvedLoaded, currentActive.userMessage])
         } else {
@@ -446,7 +467,11 @@ export default function App() {
         }
       }
       catch (reason) {
-        if (requestId === sessionLoadRef.current) setError(reason instanceof Error ? reason.message : 'Could not load this Hermes conversation.')
+        if (requestId === sessionLoadRef.current) {
+          if (!messageCacheRef.current.get(safeSession.id)?.length) {
+            setError(reason instanceof Error ? reason.message : 'Could not load this Hermes conversation.')
+          }
+        }
       }
       finally {
         if (requestId === sessionLoadRef.current) setConversationLoading(false)
@@ -567,8 +592,9 @@ export default function App() {
           setActiveTurns(prev => {
             const current = prev[turnProfile]
             if (!current) return prev
+            const safeCurrentTools = Array.isArray(current.toolActivities) ? current.toolActivities : []
             const nextTools = [
-              ...current.toolActivities.filter(t => t.id !== id),
+              ...safeCurrentTools.filter(t => t && t.id !== id),
               { id, name: toolName, status: 'running' as const, summary: typeof payload.context === 'string' ? payload.context : undefined },
             ]
             const activeCount = nextTools.length
@@ -585,7 +611,7 @@ export default function App() {
           })
           if (selectedRef.current?.profile === turnProfile) {
             setToolActivities(items => [
-              ...items.filter(item => item.id !== id),
+              ...(Array.isArray(items) ? items : []).filter(item => item && item.id !== id),
               { id, name: toolName, status: 'running', summary: typeof payload.context === 'string' ? payload.context : undefined },
             ])
           }
@@ -596,8 +622,9 @@ export default function App() {
           setActiveTurns(prev => {
             const current = prev[turnProfile]
             if (!current) return prev
+            const safeCurrentTools = Array.isArray(current.toolActivities) ? current.toolActivities : []
             const nextTools = [
-              ...current.toolActivities.filter(t => t.id !== id),
+              ...safeCurrentTools.filter(t => t && t.id !== id),
               { id, name: toolName, status: 'done' as const, duration_s: typeof payload.duration_s === 'number' ? payload.duration_s : undefined, summary: typeof payload.summary === 'string' ? payload.summary : undefined },
             ]
             return {
@@ -610,7 +637,7 @@ export default function App() {
           })
           if (selectedRef.current?.profile === turnProfile) {
             setToolActivities(items => [
-              ...items.filter(item => item.id !== id),
+              ...(Array.isArray(items) ? items : []).filter(item => item && item.id !== id),
               { id, name: toolName, status: 'done', duration_s: typeof payload.duration_s === 'number' ? payload.duration_s : undefined, summary: typeof payload.summary === 'string' ? payload.summary : undefined },
             ])
           }
@@ -635,11 +662,15 @@ export default function App() {
       if (activeSessionId && activeSessionId !== turnSessionId) {
         setSelected(current => current?.id === turnSessionId ? { ...current, id: activeSessionId } : current)
       }
+      recentEndedTurnsRef.current.set(finalSessionId, Date.now())
+      recentEndedTurnsRef.current.set(turnSessionId, Date.now())
+
       setActiveTurns(prev => {
         const next = { ...prev }
         delete next[turnProfile]
         return next
       })
+      setToolActivities([])
 
       // Commit finalized assistant message to timeline and cache so it never vanishes
       if (finalText.trim()) {
@@ -682,11 +713,13 @@ export default function App() {
       await refresh()
       return true
     } catch (reason) {
+      recentEndedTurnsRef.current.set(turnSessionId, Date.now())
       setActiveTurns(prev => {
         const next = { ...prev }
         delete next[turnProfile]
         return next
       })
+      setToolActivities([])
       if (selectedRef.current?.profile === turnProfile) {
         setError(reason instanceof Error ? reason.message : 'Could not send to Hermes.')
         setSending(false)
@@ -694,6 +727,7 @@ export default function App() {
       }
       return false
     } finally {
+      setToolActivities([])
       if (selectedRef.current?.profile === turnProfile) {
         setSending(false)
         setStreaming('')
@@ -704,12 +738,15 @@ export default function App() {
   const stop = useCallback(async () => {
     const turnSession = selectedRef.current
     if (!turnSession || !sendingRef.current) return
+    recentEndedTurnsRef.current.set(turnSession.id, Date.now())
     setActiveTurns(prev => {
       const next = { ...prev }
       delete next[turnSession.profile]
       return next
     })
+    setToolActivities([])
     setSending(false)
+    setStreaming('')
     try { await interruptSession(turnSession.id) }
     catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not stop this Hermes turn.') }
   }, [])

@@ -69,6 +69,18 @@ describe('active chat turn guard', () => {
 
     expect(restorePersistedActiveTurns(null)).toEqual({})
     expect(restorePersistedActiveTurns('invalid json')).toEqual({})
+
+    // When toolActivities is omitted or not an array, it defaults safely to []
+    const incompleteRaw = JSON.stringify({
+      partial: {
+        profile: 'partial',
+        status: 'thinking',
+        statusText: 'Thinking…',
+        startedAt: Date.now() - 1000,
+      },
+    })
+    const incompleteRestored = restorePersistedActiveTurns(incompleteRaw)
+    expect(incompleteRestored.partial?.toolActivities).toEqual([])
   })
 
   it('reconciles active turns against gateway session.active_list', () => {
@@ -124,7 +136,18 @@ describe('active chat turn guard', () => {
   })
 
   it('prevents reviving a turn that ended while active_list was in-flight', () => {
-    const current: Record<string, ActiveBotTurn> = {}
+    const current: Record<string, ActiveBotTurn> = {
+      worker: {
+        sessionId: 'sess-worker',
+        profile: 'worker',
+        status: 'tool',
+        statusText: 'Working…',
+        streamingText: '',
+        toolActivities: [],
+        userMessage: { id: 1, role: 'user', content: 'test' },
+        startedAt: 100,
+      },
+    }
     const activeSessions = [
       { id: 'sess-worker', session_key: 'sess-worker', status: 'working', started_at: 100 },
     ]
@@ -133,5 +156,62 @@ describe('active chat turn guard', () => {
 
     const reconciled = reconcileActiveTurns(current, activeSessions, mapping, 5000, ended)
     expect(reconciled.worker).toBeUndefined()
+  })
+
+  it('prunes stale turns when the gateway reports no active sessions or omits the profile', () => {
+    const current: Record<string, ActiveBotTurn> = {
+      'Homework Manager': {
+        sessionId: 'sess-homework',
+        profile: 'Homework Manager',
+        status: 'tool',
+        statusText: 'Using search_files · 7 tool calls…',
+        streamingText: '',
+        toolActivities: [],
+        userMessage: { id: 1, role: 'user', content: 'test' },
+        startedAt: 1000, // Started 9 seconds ago
+      },
+      'Quick Bot': {
+        sessionId: 'sess-optimistic',
+        profile: 'Quick Bot',
+        status: 'thinking',
+        statusText: 'Thinking…',
+        streamingText: '',
+        toolActivities: [],
+        userMessage: { id: 2, role: 'user', content: 'recent' },
+        startedAt: 9500, // Started 500ms ago
+      },
+    }
+
+    // Gateway reports no sessions active at all
+    const reconciledEmpty = reconcileActiveTurns(current, [], {}, 10000)
+    // Stale Homework Manager turn is pruned
+    expect(reconciledEmpty['Homework Manager']).toBeUndefined()
+    // Brand new client turn (< 4s) is retained optimistically
+    expect(reconciledEmpty['Quick Bot']).toBeDefined()
+  })
+
+  it('prunes restored app-reopen turns when gateway active_list has ended the session', () => {
+    // Exactly simulates app closing with 7 tool calls active, then reopening
+    const restoredFromStorage: Record<string, ActiveBotTurn> = {
+      'Homework Manager': {
+        sessionId: 'sess-hw-7',
+        profile: 'Homework Manager',
+        status: 'tool',
+        statusText: 'Using search_files · 7 tool calls…',
+        streamingText: '',
+        toolActivities: [
+          { id: '1', name: 'search_files', status: 'running' },
+        ],
+        userMessage: { id: 10, role: 'user', content: 'Bisakah kamu list tugas2 yg aku miliki' },
+        startedAt: 1000,
+      },
+    }
+
+    // When the app reopens at time 20000, gateway reports Homework Manager as idle or reaped
+    const reconciled = reconcileActiveTurns(restoredFromStorage, [
+      { id: 'sess-hw-7', session_key: 'sess-hw-7', status: 'idle', started_at: 1 },
+    ], { 'sess-hw-7': 'Homework Manager' }, 20000)
+
+    expect(reconciled['Homework Manager']).toBeUndefined()
   })
 })

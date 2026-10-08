@@ -43,7 +43,12 @@ export function restorePersistedActiveTurns(raw: string | null, maxAgeMs = 15 * 
         typeof turn.startedAt === 'number' &&
         now - turn.startedAt < maxAgeMs
       ) {
-        valid[key] = turn
+        valid[key] = {
+          ...turn,
+          toolActivities: Array.isArray(turn.toolActivities) ? turn.toolActivities : [],
+          streamingText: typeof turn.streamingText === 'string' ? turn.streamingText : '',
+          statusText: typeof turn.statusText === 'string' ? turn.statusText : 'Working…',
+        }
       }
     }
     return valid
@@ -61,11 +66,20 @@ export function reconcileActiveTurns(
 ): Record<string, ActiveBotTurn> {
   const next: Record<string, ActiveBotTurn> = { ...currentTurns }
   const activeProfilesFromGateway = new Set<string>()
+  const explicitlyIdleProfiles = new Set<string>()
+
+  // Map session IDs present in currentTurns directly to profiles
+  const turnSessionIdToProfile: Record<string, string> = {}
+  for (const [prof, turn] of Object.entries(currentTurns)) {
+    if (turn?.sessionId) {
+      turnSessionIdToProfile[turn.sessionId] = turn.profile || prof
+    }
+  }
 
   for (const session of activeSessions) {
     const sid = session.session_key || session.id
     if (endedSessionIds?.has(sid) || endedSessionIds?.has(session.id)) continue
-    const profile = sessionToProfileMap[sid] || sessionToProfileMap[session.id]
+    const profile = sessionToProfileMap[sid] || sessionToProfileMap[session.id] || turnSessionIdToProfile[sid] || turnSessionIdToProfile[session.id]
     if (!profile) continue
 
     if (isSessionStatusWorking(session.status)) {
@@ -73,6 +87,7 @@ export function reconcileActiveTurns(
       const existing = next[profile]
       if (!existing) {
         next[profile] = {
+          sessionId: sid,
           profile,
           status: session.status === 'working' ? 'tool' : 'thinking',
           statusText: session.status === 'working' ? 'Working…' : 'Thinking…',
@@ -82,16 +97,30 @@ export function reconcileActiveTurns(
           startedAt: session.started_at ? session.started_at * 1000 : now,
         }
       }
+    } else {
+      explicitlyIdleProfiles.add(profile)
     }
   }
 
-  // If the gateway returned active sessions, any turn currently stored whose profile
-  // is known to the gateway and reported idle should be cleared.
-  for (const session of activeSessions) {
-    const sid = session.session_key || session.id
-    const profile = sessionToProfileMap[sid] || sessionToProfileMap[session.id]
-    if (profile && !isSessionStatusWorking(session.status) && !activeProfilesFromGateway.has(profile)) {
-      delete next[profile]
+  // Any turn in currentTurns that is NOT confirmed as working on the gateway must be cleared,
+  // unless it was initiated in this client session within the last 4 seconds (optimistic spin-up).
+  for (const [key, turn] of Object.entries(next)) {
+    const profile = turn?.profile || key
+    if (!turn) {
+      delete next[key]
+      continue
+    }
+    const isEnded = Boolean(
+      (turn.sessionId && (endedSessionIds?.has(turn.sessionId) || endedSessionIds?.has(profile))) ||
+      endedSessionIds?.has(profile) ||
+      endedSessionIds?.has(key)
+    )
+    const isExplicitlyIdle = explicitlyIdleProfiles.has(profile) || explicitlyIdleProfiles.has(key)
+    const isGatewayWorking = activeProfilesFromGateway.has(profile) || activeProfilesFromGateway.has(key)
+    const isVeryRecentClientTurn = turn.startedAt && (now - turn.startedAt < 4000)
+
+    if (isEnded || isExplicitlyIdle || (!isGatewayWorking && !isVeryRecentClientTurn)) {
+      delete next[key]
     }
   }
 

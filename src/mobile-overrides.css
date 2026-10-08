@@ -1227,6 +1227,93 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
   text-align: initial;
 }
 
+/* Markdown Table styling: clean horizontal scroll, robust column sizing, never break single words */
+.table-scroll {
+  width: 100%;
+  max-width: 100%;
+  margin: 14px 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x pan-y;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 11px;
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.table-scroll:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.2);
+  outline-offset: 1px;
+}
+
+.markdown-body table {
+  width: max-content !important;
+  min-width: 100% !important;
+  border-collapse: collapse !important;
+  font-size: 13px !important;
+  line-height: 1.5 !important;
+  color: #e4e4e7 !important;
+  text-align: left;
+}
+
+.markdown-body thead {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.markdown-body th {
+  padding: 10px 14px !important;
+  font-weight: 600 !important;
+  font-size: 12px !important;
+  line-height: 1.4 !important;
+  letter-spacing: 0.02em !important;
+  color: #f4f4f5 !important;
+  white-space: nowrap !important;
+  text-wrap: nowrap !important;
+  word-break: keep-all !important;
+  overflow-wrap: normal !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.06) !important;
+}
+
+.markdown-body th:last-child {
+  border-right: none !important;
+}
+
+.markdown-body td {
+  padding: 10px 14px !important;
+  min-width: 90px;
+  max-width: 420px;
+  vertical-align: top;
+  white-space: normal;
+  text-wrap: wrap;
+  word-break: normal !important;
+  overflow-wrap: break-word !important;
+  hyphens: manual;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.06) !important;
+}
+
+.markdown-body td:last-child {
+  border-right: none !important;
+}
+
+.markdown-body tr:last-child td {
+  border-bottom: none !important;
+}
+
+.markdown-body tbody tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.markdown-body tbody tr:hover {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.user-bubble .table-scroll {
+  background: rgba(0, 0, 0, 0.15);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
 .assistant-bubble .thinking-card {
   margin: 0 0 12px 0;
   border-radius: 10px;
@@ -2133,26 +2220,56 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
 [data-theme='light'] .table-scroll {
   border-color: #e4e4e7 !important;
   background: #ffffff !important;
+  scrollbar-color: rgba(0, 0, 0, 0.2) transparent !important;
+}
+[data-theme='light'] .table-scroll::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2) !important;
 }
 [data-theme='light'] .markdown-body table {
   color: #09090b !important;
+}
+[data-theme='light'] .markdown-body thead {
+  background: #f4f4f5 !important;
 }
 [data-theme='light'] .markdown-body th {
   background: #f4f4f5 !important;
   color: #09090b !important;
   border-color: #e4e4e7 !important;
   font-weight: 600 !important;
+  white-space: nowrap !important;
+  text-wrap: nowrap !important;
+  word-break: keep-all !important;
+  overflow-wrap: normal !important;
 }
 [data-theme='light'] .markdown-body td {
   background: #ffffff !important;
-  color: #09090b !important;
+  color: #18181b !important;
   border-color: #e4e4e7 !important;
+  word-break: normal !important;
+  overflow-wrap: break-word !important;
 }
 [data-theme='light'] .markdown-body tbody tr:nth-child(odd) td {
   background: #ffffff !important;
 }
 [data-theme='light'] .markdown-body tbody tr:nth-child(even) td {
   background: #f9fafb !important;
+}
+[data-theme='light'] .markdown-body tbody tr:hover td {
+  background: #f4f4f5 !important;
+}
+[data-theme='light'] .user-bubble .table-scroll {
+  background: #ffffff !important;
+  border-color: #d4d4d8 !important;
+}
+[data-theme='light'] .user-bubble .markdown-body th {
+  background: #f4f4f5 !important;
+  color: #09090b !important;
+  border-color: #e4e4e7 !important;
+}
+[data-theme='light'] .user-bubble .markdown-body td {
+  background: #ffffff !important;
+  color: #09090b !important;
+  border-color: #e4e4e7 !important;
 }
 [data-theme='light'] .markdown-body .inline-code {
   background: #f4f4f5 !important;

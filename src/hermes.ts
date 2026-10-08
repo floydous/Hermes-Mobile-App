@@ -212,23 +212,31 @@ export async function createSession(
 
 export async function loadMessages(sessionId: string, profile: string, baseUrl = activeHermes): Promise<LiveMessage[]> {
   const safeProfile = profile || 'default'
-  try {
-    const raw = await invoke<string>('hermes_session_messages', { baseUrl, sessionId, profile: safeProfile })
-    const parsed = JSON.parse(raw) as { messages?: LiveMessage[] }
-    const messages = Array.isArray(parsed?.messages) ? parsed.messages : []
-    return messages.map(msg => ({
-      ...msg,
-      content: typeof msg.content === 'string' ? msg.content : msg.content == null ? '' : String(msg.content),
-    }))
-  } catch (err) {
-    // Fresh unprompted drafts have no persisted transcript in state.db yet.
-    // Treat 404 / session not found as an empty conversation rather than an error.
-    const message = String(err)
-    if (/404|not found|not_found/i.test(message)) {
-      return []
+  let lastErr: unknown
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const raw = await invoke<string>('hermes_session_messages', { baseUrl, sessionId, profile: safeProfile })
+      const parsed = JSON.parse(raw) as { messages?: LiveMessage[] }
+      const messages = Array.isArray(parsed?.messages) ? parsed.messages : []
+      return messages.map(msg => ({
+        ...msg,
+        content: typeof msg.content === 'string' ? msg.content : msg.content == null ? '' : String(msg.content),
+      }))
+    } catch (err) {
+      lastErr = err
+      const message = String(err)
+      if (/404|not found|not_found/i.test(message)) {
+        return []
+      }
+      // If it's a momentary SQLite database lock or gateway busy response, wait briefly and retry
+      if (attempt < 2) {
+        await new Promise(resolve => window.setTimeout(resolve, 250 * (attempt + 1)))
+      }
     }
-    throw err
   }
+
+  throw lastErr
 }
 
 export async function transcribeAudio(profile: string, dataUrl: string, mimeType: string, baseUrl = activeHermes): Promise<string> {

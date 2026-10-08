@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
-import { EDGE_SWIPE_COMMIT_PX, shouldCommitEdgeSwipe } from './edge-swipe'
+import { EDGE_SWIPE_COMMIT_PX, EDGE_SWIPE_MAX_START_PX, shouldCommitEdgeSwipe } from './edge-swipe'
 
 describe('edge swipe back', () => {
+  it('restricts gesture start to the leftmost screen edge', () => {
+    expect(EDGE_SWIPE_MAX_START_PX).toBe(36)
+  })
+
   it('commits a deliberate horizontal gesture', () => {
     expect(shouldCommitEdgeSwipe(EDGE_SWIPE_COMMIT_PX, 10)).toBe(true)
   })

@@ -1,6 +1,6 @@
 import { useEffect, type RefObject } from 'react'
 
-export const EDGE_SWIPE_START_RATIO = .9
+export const EDGE_SWIPE_MAX_START_PX = 36
 export const EDGE_SWIPE_COMMIT_PX = 42
 export const EDGE_SWIPE_MAX_OFFSET_PX = 140
 
@@ -24,13 +24,14 @@ export function useEdgeSwipeBack<T extends HTMLElement>(ref: RefObject<T | null>
     let resetTimer: number | undefined
 
     const clearMotion = () => {
-      element.classList.remove('edge-swipe-active', 'edge-swipe-committed')
+      element.classList.remove('edge-swipe-active', 'edge-swipe-committed', 'edge-swipe-cancelling')
       element.style.removeProperty('--edge-swipe-offset')
       tracking = false
       committed = false
     }
     const onTouchStart = (event: TouchEvent) => {
-      if (event.touches.length !== 1 || event.touches[0].clientX > window.innerWidth * EDGE_SWIPE_START_RATIO) return
+      // Must start strictly within the leftmost 36px to prevent hijacking general in-page gestures
+      if (event.touches.length !== 1 || event.touches[0].clientX > EDGE_SWIPE_MAX_START_PX) return
       const target = event.target as HTMLElement | null
       if (target?.closest('input,textarea,select,button,[data-no-edge-swipe]')) return
       window.clearTimeout(resetTimer)
@@ -44,15 +45,22 @@ export function useEdgeSwipeBack<T extends HTMLElement>(ref: RefObject<T | null>
       if (!tracking || event.touches.length !== 1) return
       const deltaX = event.touches[0].clientX - startX
       const deltaY = event.touches[0].clientY - startY
-      // If moving backwards or distinctly vertical, stop tracking
-      if (deltaX < -20 || (Math.abs(deltaY) > 20 && Math.abs(deltaY) > Math.abs(deltaX) * 1.5)) {
+      // If moving backwards or distinctly vertical, cancel motion smoothly
+      if (deltaX < -15 || (Math.abs(deltaY) > 24 && Math.abs(deltaY) > Math.abs(deltaX) * 1.5)) {
         tracking = false
-        clearMotion()
+        element.classList.remove('edge-swipe-active', 'edge-swipe-committed')
+        element.classList.add('edge-swipe-cancelling')
+        element.style.setProperty('--edge-swipe-offset', '0px')
+        resetTimer = window.setTimeout(clearMotion, 220)
         return
       }
-      if (deltaX <= 0) return
+      if (deltaX <= 0) {
+        element.style.setProperty('--edge-swipe-offset', '0px')
+        return
+      }
       const durationMs = Date.now() - startTime
       const offset = Math.min(EDGE_SWIPE_MAX_OFFSET_PX, Math.max(0, deltaX * .55))
+      element.classList.remove('edge-swipe-cancelling')
       element.classList.add('edge-swipe-active')
       element.style.setProperty('--edge-swipe-offset', `${offset}px`)
       committed = shouldCommitEdgeSwipe(deltaX, deltaY, durationMs)
@@ -64,14 +72,27 @@ export function useEdgeSwipeBack<T extends HTMLElement>(ref: RefObject<T | null>
       const durationMs = Date.now() - startTime
       tracking = false
       if (committed || shouldCommitEdgeSwipe(deltaX, deltaY, durationMs)) {
+        element.classList.remove('edge-swipe-active', 'edge-swipe-cancelling')
         element.classList.add('edge-swipe-committed')
         element.style.setProperty('--edge-swipe-offset', '100vw')
-        resetTimer = window.setTimeout(() => { clearMotion(); onBack() }, 170)
+        resetTimer = window.setTimeout(() => { clearMotion(); onBack() }, 200)
       } else {
-        resetTimer = window.setTimeout(clearMotion, 170)
+        // Smoothly ease back to original position (0px)
+        element.classList.remove('edge-swipe-committed', 'edge-swipe-active')
+        element.classList.add('edge-swipe-cancelling')
+        element.style.setProperty('--edge-swipe-offset', '0px')
+        resetTimer = window.setTimeout(clearMotion, 220)
       }
     }
-    const onTouchCancel = () => { if (tracking) resetTimer = window.setTimeout(clearMotion, 170) }
+    const onTouchCancel = () => {
+      if (tracking) {
+        tracking = false
+        element.classList.remove('edge-swipe-committed', 'edge-swipe-active')
+        element.classList.add('edge-swipe-cancelling')
+        element.style.setProperty('--edge-swipe-offset', '0px')
+        resetTimer = window.setTimeout(clearMotion, 220)
+      }
+    }
 
     element.addEventListener('touchstart', onTouchStart, { passive: true })
     element.addEventListener('touchmove', onTouchMove, { passive: false })

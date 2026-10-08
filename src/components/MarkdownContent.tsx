@@ -114,13 +114,19 @@ export function resolveImageSrc(pathOrUrl: string): string {
   return clean
 }
 
+export function stripAttachedContextScaffolding(text: string): string {
+  if (!text) return ''
+  return text.replace(/\n*--- (?:Attached Context|Context Warnings) ---\n[\s\S]*$/, '').trim()
+}
+
 type MessageSegment =
   | { type: 'text'; content: string }
   | { type: 'media'; path: string }
   | { type: 'attachment'; path: string }
 
 function parseMessageSegments(text: string): MessageSegment[] {
-  const lines = text.split(/\r?\n/)
+  const cleaned = stripAttachedContextScaffolding(text)
+  const lines = cleaned.split(/\r?\n/)
   const segments: MessageSegment[] = []
   let currentText: string[] = []
   let inCode = false
@@ -135,6 +141,9 @@ function parseMessageSegments(text: string): MessageSegment[] {
       const mediaMatch = line.trim().match(/^\[?MEDIA:\s*([^\s\]]+)\]?$/) || line.trim().match(/^MEDIA:\s*(.+)$/)
       const attachMatch = line.trim().match(/^Attached:\s*(.+)$/)
       const userImageMatch = line.trim().match(/^\[User attached image:\s*([^\]]+)\]$/)
+      const userFileMatch = line.trim().match(/^\[User attached file:\s*([^\]]+)\]$/)
+      const fileRefMatch = line.trim().match(/^@file:`([^`]+)`$/) || line.trim().match(/^📎\s*@file:`([^`]+)`$/)
+
       if (mediaMatch) {
         if (currentText.length) {
           segments.push({ type: 'text', content: currentText.join('\n') })
@@ -151,12 +160,21 @@ function parseMessageSegments(text: string): MessageSegment[] {
         segments.push({ type: 'attachment', path: attachMatch[1].trim() })
         continue
       }
-      if (userImageMatch) {
+      if (userImageMatch || userFileMatch) {
+        const p = (userImageMatch || userFileMatch)![1].trim()
         if (currentText.length) {
           segments.push({ type: 'text', content: currentText.join('\n') })
           currentText = []
         }
-        segments.push({ type: 'attachment', path: userImageMatch[1].trim() })
+        segments.push({ type: 'attachment', path: p })
+        continue
+      }
+      if (fileRefMatch) {
+        if (currentText.length) {
+          segments.push({ type: 'text', content: currentText.join('\n') })
+          currentText = []
+        }
+        segments.push({ type: 'attachment', path: fileRefMatch[1].trim() })
         continue
       }
     }
@@ -578,7 +596,11 @@ export const MarkdownContent = memo(function MarkdownContent({ children }: { chi
                   : <code className="inline-code" {...props}>{content}</code>
               },
               pre: ({ children: content }) => <>{content}</>,
-              table: ({ children: content }) => <div className="table-scroll"><table>{content}</table></div>,
+              table: ({ children: content }) => (
+                <div className="table-scroll" tabIndex={0} role="region" aria-label="Table">
+                  <table>{content}</table>
+                </div>
+              ),
               img: ({ src, alt }) => <ChatImage src={src || ''} alt={alt || ''} kind="markdown" />,
             }}
           >
@@ -605,11 +627,12 @@ export const MessageCard = memo(function MessageCard({ message, onEdit, profile:
   const stats = formatResponseStats(message)
   const timestamp = formatMessageTime(message.timestamp)
   const textContent = typeof message.content === 'string' ? message.content : message.content == null ? '' : String(message.content)
-  const trimmed = textContent.trim()
+  const cleanContent = stripAttachedContextScaffolding(textContent)
+  const trimmed = cleanContent.trim()
   if (message.role === 'system' || message.role === 'tool' || !trimmed) return null
 
   const copy = async () => {
-    await navigator.clipboard.writeText(textContent)
+    await navigator.clipboard.writeText(cleanContent)
     setCopied(true)
     window.setTimeout(() => setCopied(false), 1400)
   }
@@ -617,7 +640,7 @@ export const MessageCard = memo(function MessageCard({ message, onEdit, profile:
     if (swipeStartX != null && swipeStartX - x > 42) onRevealTimestamp()
     setSwipeStartX(null)
   }
-  if (message.role === 'user') return <article className="message-row user-row"><div className="user-bubble"><MarkdownContent>{textContent}</MarkdownContent></div><div className="message-actions"><button onClick={() => void copy()}>{copied ? <Check size={13}/> : <Copy size={13}/>}<span>{copied ? 'Copied' : 'Copy'}</span></button><button onClick={() => onEdit(textContent, message.id)}>Edit</button></div></article>
+  if (message.role === 'user') return <article className="message-row user-row"><div className="user-bubble"><MarkdownContent>{cleanContent}</MarkdownContent></div><div className="message-actions"><button onClick={() => void copy()}>{copied ? <Check size={13}/> : <Copy size={13}/>}<span>{copied ? 'Copied' : 'Copy'}</span></button><button onClick={() => onEdit(cleanContent, message.id)}>Edit</button></div></article>
 
   return <article className={`message-row assistant-row ${revealTimestamp ? 'timestamp-visible' : ''}`} onPointerDown={event => setSwipeStartX(event.clientX)} onPointerUp={event => finishSwipe(event.clientX)} onPointerCancel={() => setSwipeStartX(null)}>
     <div className="assistant-message-layout">

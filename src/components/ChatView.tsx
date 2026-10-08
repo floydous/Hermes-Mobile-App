@@ -102,18 +102,21 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
   const activeAssistantText = settledAssistant?.content || streaming
   const settledStats = settledAssistant ? formatResponseStats({ id: -1, role: 'assistant', content: settledAssistant.content, usage: settledAssistant.usage }) : null
   const lastMessage = messages[messages.length - 1]
-  const isLastMessageAssistant = Boolean(
-    !sending &&
-    lastMessage?.role === 'assistant' &&
-    activeAssistantText &&
-    lastMessage.content === activeAssistantText
+  const lastMessageIsAssistant = lastMessage?.role === 'assistant'
+  const isLastMessageSettledAssistant = Boolean(
+    lastMessageIsAssistant &&
+    ((activeAssistantText && lastMessage.content === activeAssistantText) || (!streaming && !sending))
   )
-  const showActiveAssistant = (sending || Boolean(settledAssistant)) && !isLastMessageAssistant
+  const showActiveAssistant = Boolean(
+    (sending && !lastMessageIsAssistant) ||
+    (streaming && (!lastMessageIsAssistant || lastMessage.content !== streaming)) ||
+    (settledAssistant && !isLastMessageSettledAssistant)
+  )
   const showConversationLoading = conversationLoading && !messages.length
   const showEmptyState = !conversationLoading && !messages.length && !showActiveAssistant && !streaming && !visibleError
 
-  const runningTool = toolActivities.slice().reverse().find(t => t.status === 'running')
-  const activeToolsCount = toolActivities.length
+  const runningTool = sending ? (toolActivities || []).slice().reverse().find(t => t && t.status === 'running') : undefined
+  const activeToolsCount = sending ? (toolActivities || []).length : 0
 
   const [typingBubbleWidth, setTypingBubbleWidth] = useState<number | null>(null)
   const typingMeasureRef = useRef<HTMLDivElement | null>(null)

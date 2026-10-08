@@ -12,6 +12,7 @@ import '@fontsource/geist-mono/500.css'
 import '@fontsource/geist-mono/600.css'
 import '@fontsource/geist-mono/700.css'
 import App from './App'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import './styles.css'
 import './chat.css'
 import './wizard.css'
@@ -42,7 +43,9 @@ if (rootElement) {
   const root = createRoot(rootElement)
   root.render(
     <StrictMode>
-      <App />
+      <ErrorBoundary onReset={() => window.location.reload()}>
+        <App />
+      </ErrorBoundary>
     </StrictMode>
   )
 }

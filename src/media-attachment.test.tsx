@@ -142,4 +142,20 @@ MEDIA:/home/floydyra/.hermes/cache/scratch/sample_image.png
     expect(html).toContain('Generated Icon')
     expect(html).toContain('src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="')
   })
+
+  it('strips backend Attached Context scaffolding and renders @file: as clean attachment card', () => {
+    const rawBackendUserMessage = `@file:\`/home/floydyra/.hermes/profiles/homework-manager/attachments/Jadwal TKA Gladi dan Peserta 2026 - Final.pdf\`\n\n--- Attached Context ---\n\n📎 @file:\`/home/floydyra/.hermes/profiles/homework-manager/attachments/Jadwal TKA Gladi dan Peserta 2026 - Final.pdf\` (application/pdf, 398.3 KB) — binary file, not inlined as text. It is available on disk at \`/home/floydyra/.hermes/profiles/homework-manager/attachments/Jadwal TKA Gladi dan Peserta 2026 - Final.pdf\`. Use your tools to work with it (read or convert it, extract its text, or view/render it as needed); do not tell the user the file type is unsupported.`
+
+    const html = renderToString(<MarkdownContent>{rawBackendUserMessage}</MarkdownContent>)
+
+    // Must render the native attachment card for the PDF
+    expect(html).toContain('media-attachment-card attachment')
+    expect(html).toContain('Jadwal TKA Gladi dan Peserta 2026 - Final.pdf')
+    expect(html).toContain('PDF')
+
+    // Must NEVER leak the internal LLM scaffolding instructions
+    expect(html).not.toContain('--- Attached Context ---')
+    expect(html).not.toContain('binary file, not inlined as text')
+    expect(html).not.toContain('do not tell the user the file type is unsupported')
+  })
 })
