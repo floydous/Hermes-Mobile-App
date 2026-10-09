@@ -50,9 +50,11 @@ export function buildBotRows(
     .sort((a, b) => (b.session?.last_active || 0) - (a.session?.last_active || 0))
 }
 
+import { cleanContinuationScaffolding } from './session-cache'
+
 export function cleanPreviewSnippet(preview?: string | null): string {
   if (!preview) return ''
-  const trimmed = preview.trim()
+  const trimmed = cleanContinuationScaffolding(preview.trim())
   const match = trimmed.match(/^Message from (?:🤖\s*([^\n(@:]+?)(?:\s*\(@([A-Za-z0-9_.-]+)\))?|([^\n(@:]+?)\s*\(@([A-Za-z0-9_.-]+)\)):\s*([\s\S]*)$/i)
   if (match) {
     const handle = match[2] || match[4] || match[1] || match[3] || 'agent'

@@ -38,7 +38,7 @@
 @keyframes app-subpage-enter {
   0% {
     opacity: 0;
-    transform: translateY(14px) scale(0.99);
+    transform: translate3d(0, 10px, 0);
   }
   100% {
     opacity: 1;

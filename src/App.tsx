@@ -32,6 +32,7 @@ import {
 } from './chat-turn'
 import { errorMessage, RequestEpoch, selectRestoredEndpoint } from './connection-state'
 import {
+  calculateUnreadState,
   deduplicateConsecutiveMessages,
   getCachedSessionMessages,
   isHumanChatSession,
@@ -615,22 +616,16 @@ export default function App() {
     const cached = sid ? (messageCacheRef.current.get(sid) || getCachedSessionMessages(sid)) : null
     const latestPreview = resolveLatestSessionPreview(sid, session?.preview, cached || undefined, session?.last_active)
     const lastRead = Number(localStorage.getItem(`hermes-last-read:${sid}`) || 0)
-    const lastActive = session?.last_active ? (session.last_active > 1e11 ? session.last_active : session.last_active * 1000) : 0
-    const isUnread = Boolean(
-      session &&
-      lastActive > 0 &&
-      lastActive > lastRead &&
-      selected?.id !== sid
+    const activeTurn = activeTurns[profile.name] || Object.values(activeTurns).find(t => t?.profile === profile.name)
+    const isWaitingInput = Boolean(activeTurn && (activeTurn.status === 'waiting' || activeTurn.needsInput))
+    const { isUnread, unreadCount } = calculateUnreadState(
+      sid,
+      session?.last_active,
+      cached || undefined,
+      lastRead,
+      Boolean(selected?.id === sid),
+      isWaitingInput
     )
-    let unreadCount = 0
-    if (isUnread && cached && cached.length > 0) {
-      unreadCount = cached.filter(m => {
-        if (!m || m.role === 'system' || m.role === 'tool') return false
-        const msgTime = m.timestamp ? (m.timestamp > 1e11 ? m.timestamp : m.timestamp * 1000) : 0
-        return msgTime > lastRead
-      }).length
-    }
-    if (isUnread && unreadCount === 0) unreadCount = 1
 
     return {
       profile,
@@ -645,7 +640,7 @@ export default function App() {
         unread_count: unreadCount,
       } satisfies LiveSession : null,
     }
-  }).filter(row => `${row.profile.name} ${row.profile.display_name || ''} ${row.session?.preview || ''}`.toLowerCase().includes(query.toLowerCase())), [profiles, sessions, selected?.id, query])
+  }).filter(row => `${row.profile.name} ${row.profile.display_name || ''} ${row.session?.preview || ''}`.toLowerCase().includes(query.toLowerCase())), [profiles, sessions, activeTurns, selected?.id, query])
 
   const canonicalSessionIds = useMemo(() => {
     const set = new Set<string>()
@@ -661,21 +656,16 @@ export default function App() {
     const cached = messageCacheRef.current.get(session.id) || getCachedSessionMessages(session.id)
     const latestPreview = resolveLatestSessionPreview(session.id, session.preview, cached || undefined, session.last_active)
     const lastRead = Number(localStorage.getItem(`hermes-last-read:${session.id}`) || 0)
-    const lastActive = session?.last_active ? (session.last_active > 1e11 ? session.last_active : session.last_active * 1000) : 0
-    const isUnread = Boolean(
-      lastActive > 0 &&
-      lastActive > lastRead &&
-      selected?.id !== session.id
+    const activeTurn = isSessionRowWorking(session.id, session.profile, activeTurns)
+    const isWaitingInput = Boolean(activeTurn && (activeTurn.status === 'waiting' || activeTurn.needsInput))
+    const { isUnread, unreadCount } = calculateUnreadState(
+      session.id,
+      session.last_active,
+      cached || undefined,
+      lastRead,
+      Boolean(selected?.id === session.id),
+      isWaitingInput
     )
-    let unreadCount = 0
-    if (isUnread && cached && cached.length > 0) {
-      unreadCount = cached.filter(m => {
-        if (!m || m.role === 'system' || m.role === 'tool') return false
-        const msgTime = m.timestamp ? (m.timestamp > 1e11 ? m.timestamp : m.timestamp * 1000) : 0
-        return msgTime > lastRead
-      }).length
-    }
-    if (isUnread && unreadCount === 0) unreadCount = 1
 
     return {
       ...session,
@@ -683,7 +673,7 @@ export default function App() {
       unread: isUnread,
       unread_count: unreadCount,
     }
-  }), [sessions, canonicalSessionIds, selected?.id, query])
+  }), [sessions, canonicalSessionIds, activeTurns, selected?.id, query])
   const profileMap = useMemo(() => new Map(profiles.map(p => [p.name, p])), [profiles])
   const [openingSessionId, setOpeningSessionId] = useState<string | null>(null)
   const [sessionDisplayCount, setSessionDisplayCount] = useState(35)
@@ -1070,6 +1060,15 @@ export default function App() {
     const priorSettled = settledSnapshot?.sessionId === turnSession.id && settledSnapshot.profile === turnSession.profile ? settledSnapshot : null
     const priorAssistantMessage = priorSettled ? { id: -(Date.now() + 1), role: 'assistant' as const, content: priorSettled.content, usage: priorSettled.usage } : null
     const nowSec = Math.floor(Date.now() / 1000)
+    const nowMs = Date.now()
+    try {
+      localStorage.setItem(`hermes-last-read:${turnSessionId}`, String(nowMs))
+      localStorage.setItem(`hermes-last-read:${turnSession.id}`, String(nowMs))
+      const matchedProfile = profiles.find(p => p.name === turnProfile)
+      if (matchedProfile?.canonical_session?.id) {
+        localStorage.setItem(`hermes-last-read:${matchedProfile.canonical_session.id}`, String(nowMs))
+      }
+    } catch {}
     const localUserMessage = { id: -Date.now(), role: 'user' as const, content: attachmentSummary(text, attachmentRefs), timestamp: nowSec }
 
     const initialTurn: ActiveBotTurn = {
@@ -1649,7 +1648,7 @@ export default function App() {
   const handleRosterTouchStart = (event: React.TouchEvent<HTMLElement>) => {
     if (event.touches.length !== 1) return
     const target = event.target as HTMLElement | null
-    if (target?.closest('input, textarea, select, [type="range"], .task-detail, .task-create-sheet, .task-modal-backdrop')) return
+    if (target?.closest('input, textarea, select, [type="range"], .task-detail, .task-create-sheet, .task-modal-backdrop, .roster-nav, .roster-pinned, .nav-island')) return
     swipeStartXRef.current = event.touches[0].clientX
     swipeStartYRef.current = event.touches[0].clientY
     swipeTrackingRef.current = true
@@ -1723,6 +1722,11 @@ export default function App() {
   }
 
   const handleRosterClickCapture = (event: React.MouseEvent) => {
+    const target = event.target as HTMLElement | null
+    if (target?.closest('.roster-nav, .roster-pinned, .nav-island')) {
+      justSwipedRef.current = false
+      return
+    }
     if (justSwipedRef.current) {
       justSwipedRef.current = false
       if (swipeReleaseTimerRef.current != null) window.clearTimeout(swipeReleaseTimerRef.current)

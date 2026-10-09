@@ -245,7 +245,6 @@ Output:
     )
 
     expect(html).toContain('user-bubble')
-    expect(html).toContain('>Edit<')
     expect(html).not.toContain('agent-dispatch-bubble')
   })
 
@@ -436,9 +435,8 @@ Agama: Rangkuman Materi Moksa hal. 22-35 ke PPT [BELUM SELESAI]`,
       />
     )
 
-    // Must be rendered as regular human user bubble with Edit button
+    // Must be rendered as regular human user bubble
     expect(html).toContain('user-bubble')
-    expect(html).toContain('>Edit<')
     expect(html).not.toContain('agent-dispatch-bubble')
   })
 
@@ -465,9 +463,8 @@ Agama: Rangkuman Materi Moksa hal. 22-35 ke PPT [BELUM SELESAI]`,
       />
     )
 
-    // Must be rendered as regular human user bubble with Edit button
+    // Must be rendered as regular human user bubble
     expect(html).toContain('user-bubble')
-    expect(html).toContain('>Edit<')
     expect(html).not.toContain('agent-dispatch-bubble')
   })
 

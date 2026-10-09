@@ -12,6 +12,8 @@ import {
   FileText,
   Image as ImageIcon,
   Maximize2,
+  Pencil,
+  WifiOff,
   X,
 } from 'lucide-react'
 import { convertFileSrc } from '@tauri-apps/api/core'
@@ -24,6 +26,7 @@ import 'katex/dist/katex.min.css'
 
 import type { LiveMessage, LiveProfile } from '../hermes'
 import { fetchRemoteMedia } from '../hermes'
+import { isContinuationNudge } from '../session-cache'
 import { resolveDelegationSenderProfile } from '../chat-turn'
 import { formatMessageTime, formatResponseStats } from '../message-stats'
 import { BotAvatar } from './BotAvatar'
@@ -1137,6 +1140,12 @@ export function AgentDispatchBubble({
 
 export const MessageCard = memo(function MessageCard({ message, previousMessage, onEdit, profile: _profile, profiles, fallbackName: _fallbackName, isCompleted, isActiveTurn, activeToolStatus, revealTimestamp, onRevealTimestamp }: MessageCardProps) {
   const [copied, setCopied] = useState(false)
+  const [actionSheetOpen, setActionSheetOpen] = useState(false)
+  const [actionSheetExiting, setActionSheetExiting] = useState(false)
+  const [bubbleRect, setBubbleRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null)
+  const bubbleRef = useRef<HTMLDivElement | null>(null)
+  const longPressTimerRef = useRef<number | null>(null)
+  const touchStartPosRef = useRef<{ x: number; y: number } | null>(null)
   const [swipeStartX, setSwipeStartX] = useState<number | null>(null)
   const stats = formatResponseStats(message)
   const timestamp = formatMessageTime(message.timestamp)
@@ -1144,6 +1153,18 @@ export const MessageCard = memo(function MessageCard({ message, previousMessage,
   const cleanContent = stripAttachedContextScaffolding(textContent)
   const trimmed = cleanContent.trim()
   if (message.role === 'system' || !trimmed) return null
+
+  // If this is a synthetic network cutoff / continuation nudge, render a clean notice capsule
+  if (isContinuationNudge(trimmed)) {
+    return (
+      <div className="network-cutoff-notice-row" role="status" aria-label="Response continued after network interruption">
+        <div className="network-cutoff-capsule">
+          <WifiOff size={13} className="network-cutoff-icon" aria-hidden="true" />
+          <span>Response continued after network interruption</span>
+        </div>
+      </div>
+    )
+  }
 
   // If this is a tool message for clarify, render the ClarifyHistoryCard
   if (message.role === 'tool') {
@@ -1178,64 +1199,279 @@ export const MessageCard = memo(function MessageCard({ message, previousMessage,
     setSwipeStartX(null)
   }
 
+  const handlePointerDown = (e: React.PointerEvent) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return
+    touchStartPosRef.current = { x: e.clientX, y: e.clientY }
+    const targetEl = e.currentTarget as HTMLElement
+    if (targetEl) {
+      const rect = targetEl.getBoundingClientRect()
+      setBubbleRect({
+        top: rect.top,
+        left: rect.left,
+        width: rect.width,
+        height: rect.height,
+      })
+    }
+    if (longPressTimerRef.current != null) window.clearTimeout(longPressTimerRef.current)
+    longPressTimerRef.current = window.setTimeout(() => {
+      const el = bubbleRef.current || targetEl
+      if (el) {
+        const r = el.getBoundingClientRect()
+        setBubbleRect({
+          top: r.top,
+          left: r.left,
+          width: r.width,
+          height: r.height,
+        })
+      }
+      try { navigator.vibrate?.(15) } catch {}
+      setActionSheetOpen(true)
+    }, 460)
+  }
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (!touchStartPosRef.current) return
+    const dx = Math.abs(e.clientX - touchStartPosRef.current.x)
+    const dy = Math.abs(e.clientY - touchStartPosRef.current.y)
+    if (dx > 10 || dy > 10) {
+      if (longPressTimerRef.current != null) {
+        window.clearTimeout(longPressTimerRef.current)
+        longPressTimerRef.current = null
+      }
+    }
+  }
+
+  const handlePointerUp = () => {
+    if (longPressTimerRef.current != null) {
+      window.clearTimeout(longPressTimerRef.current)
+      longPressTimerRef.current = null
+    }
+    touchStartPosRef.current = null
+  }
+
+  const closeActionSheet = () => {
+    if (actionSheetExiting) return
+    setActionSheetExiting(true)
+    window.setTimeout(() => {
+      setActionSheetOpen(false)
+      setActionSheetExiting(false)
+    }, 160)
+  }
+
+  useEffect(() => {
+    if (!actionSheetOpen) return
+    const prevOverflow = document.body.style.overflow
+    const prevTouchAction = document.body.style.touchAction
+    document.body.style.overflow = 'hidden'
+    document.body.style.touchAction = 'none'
+    const onMobileBack = (e: Event) => {
+      e.preventDefault()
+      closeActionSheet()
+    }
+    window.addEventListener('hermes-mobile-back', onMobileBack)
+    return () => {
+      document.body.style.overflow = prevOverflow
+      document.body.style.touchAction = prevTouchAction
+      window.removeEventListener('hermes-mobile-back', onMobileBack)
+    }
+  }, [actionSheetOpen, actionSheetExiting])
+
+  const renderActionSheet = () => {
+    if (!actionSheetOpen || typeof document === 'undefined') return null
+
+    const viewportH = typeof window !== 'undefined' ? window.innerHeight : 700
+    const viewportW = typeof window !== 'undefined' ? window.innerWidth : 380
+
+    // Detect if this bubble is long or partially scrolled off-screen
+    const isTall = Boolean(
+      bubbleRect &&
+      (bubbleRect.height > viewportH * 0.48 ||
+       bubbleRect.top < 64 ||
+       bubbleRect.top + bubbleRect.height > viewportH - 70)
+    )
+
+    let bubblePositionStyle: React.CSSProperties = {}
+    let pillsPositionStyle: React.CSSProperties = {}
+
+    if (bubbleRect) {
+      if (isTall) {
+        // Long / overflowing message bubble:
+        // Gracefully contain within a clean 48vh viewport window with a bottom fade mask
+        const maxHeight = Math.min(Math.round(viewportH * 0.48), 380)
+        const top = Math.max(68, Math.min(bubbleRect.top, viewportH - maxHeight - 90))
+        bubblePositionStyle = {
+          position: 'fixed',
+          top: `${top}px`,
+          left: `${bubbleRect.left}px`,
+          width: `${bubbleRect.width}px`,
+          maxWidth: `${bubbleRect.width}px`,
+          maxHeight: `${maxHeight}px`,
+          margin: 0,
+        }
+        // Action pills float cleanly right below the clamped preview
+        pillsPositionStyle = {
+          position: 'fixed',
+          top: `${top + maxHeight + 10}px`,
+          ...(message.role === 'user' ? {
+            right: `${Math.max(16, viewportW - bubbleRect.left - bubbleRect.width)}px`,
+          } : {
+            left: `${Math.max(16, bubbleRect.left)}px`,
+          }),
+        }
+      } else {
+        // Standard in-place message:
+        const showPillsAbove = bubbleRect.top > 80
+        pillsPositionStyle = showPillsAbove ? {
+          position: 'fixed',
+          bottom: `${Math.max(16, viewportH - bubbleRect.top + 10)}px`,
+          ...(message.role === 'user' ? {
+            right: `${Math.max(16, viewportW - bubbleRect.left - bubbleRect.width)}px`,
+          } : {
+            left: `${Math.max(16, bubbleRect.left)}px`,
+          }),
+        } : {
+          position: 'fixed',
+          top: `${bubbleRect.top + bubbleRect.height + 10}px`,
+          ...(message.role === 'user' ? {
+            right: `${Math.max(16, viewportW - bubbleRect.left - bubbleRect.width)}px`,
+          } : {
+            left: `${Math.max(16, bubbleRect.left)}px`,
+          }),
+        }
+
+        bubblePositionStyle = {
+          position: 'fixed',
+          top: `${bubbleRect.top}px`,
+          left: `${bubbleRect.left}px`,
+          width: `${bubbleRect.width}px`,
+          maxWidth: `${bubbleRect.width}px`,
+          height: `${bubbleRect.height}px`,
+          margin: 0,
+        }
+      }
+    }
+
+    return createPortal(
+      <div
+        className={`message-action-modal-backdrop ${actionSheetExiting ? 'exiting' : ''}`}
+        role="presentation"
+        onClick={closeActionSheet}
+      >
+        <div
+          className={`message-action-sheet-in-place ${message.role === 'user' ? 'user-sheet' : 'assistant-sheet'}`}
+          role="dialog"
+          aria-label="Message actions"
+          onClick={e => e.stopPropagation()}
+        >
+          <div
+            className={`message-action-bubble-clone ${isTall ? 'is-tall-clamped' : ''} ${message.role === 'user' ? 'user-bubble' : 'assistant-bubble'}`}
+            style={bubblePositionStyle}
+          >
+            <MarkdownContent>{cleanContent}</MarkdownContent>
+          </div>
+          <div className="message-action-pills" style={pillsPositionStyle}>
+            <button
+              type="button"
+              className="message-action-pill-btn"
+              onClick={() => {
+                void copy()
+                closeActionSheet()
+              }}
+            >
+              <Copy size={15} />
+              <span>Copy</span>
+            </button>
+            {message.role === 'user' && (
+              <button
+                type="button"
+                className="message-action-pill-btn"
+                onClick={() => {
+                  closeActionSheet()
+                  onEdit(cleanContent, message.id)
+                }}
+              >
+                <Pencil size={15} />
+                <span>Edit</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </div>,
+      document.body
+    )
+  }
+
   const delegation = message.role === 'user' ? parseAgentDelegation(cleanContent, message, previousMessage, profiles) : null
   if (delegation) {
     const senderProfile = resolveDelegationSenderProfile(delegation.handle, delegation.senderName, profiles)
     return (
-      <article className="message-row agent-delegation-row">
-        <AgentDispatchBubble
-          delegation={delegation}
-          senderProfile={senderProfile}
-          isCompleted={isCompleted}
-        />
-        {isActiveTurn && activeToolStatus && (
-          <div className="dispatch-child-branch">
-            <div className="dispatch-branch-stem" aria-hidden="true">
-              <span className="dispatch-branch-corner">└</span>
+      <>
+        <article className="message-row agent-delegation-row">
+          <AgentDispatchBubble
+            delegation={delegation}
+            senderProfile={senderProfile}
+            isCompleted={isCompleted}
+          />
+          {isActiveTurn && activeToolStatus && (
+            <div className="dispatch-child-branch">
+              <div className="dispatch-branch-stem" aria-hidden="true">
+                <span className="dispatch-branch-corner">└</span>
+              </div>
+              <div className="dispatch-branch-pill">
+                <span className="dispatch-pulse-dot" aria-hidden="true" />
+                <span className="dispatch-branch-text">{activeToolStatus}</span>
+              </div>
             </div>
-            <div className="dispatch-branch-pill">
-              <span className="dispatch-pulse-dot" aria-hidden="true" />
-              <span className="dispatch-branch-text">{activeToolStatus}</span>
-            </div>
-          </div>
-        )}
-        <div className="message-actions">
-          <button onClick={() => void copy()}>
-            {copied ? <Check size={13}/> : <Copy size={13}/>}
-            <span>{copied ? 'Copied' : 'Copy'}</span>
-          </button>
-        </div>
-      </article>
+          )}
+        </article>
+      </>
     )
   }
 
   if (message.role === 'user') {
     return (
-      <article className="message-row user-row">
-        <div className="user-bubble">
-          <MarkdownContent>{cleanContent}</MarkdownContent>
-        </div>
-        <div className="message-actions">
-          <button onClick={() => void copy()}>
-            {copied ? <Check size={13}/> : <Copy size={13}/>}
-            <span>{copied ? 'Copied' : 'Copy'}</span>
-          </button>
-          <button onClick={() => onEdit(cleanContent, message.id)}>Edit</button>
-        </div>
-      </article>
+      <>
+        <article className="message-row user-row">
+          <div
+            className="user-bubble"
+            ref={bubbleRef}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerUp}
+          >
+            <MarkdownContent>{cleanContent}</MarkdownContent>
+          </div>
+        </article>
+        {renderActionSheet()}
+      </>
     )
   }
 
   return (
-    <article className={`message-row assistant-row ${revealTimestamp ? 'timestamp-visible' : ''}`} onPointerDown={event => setSwipeStartX(event.clientX)} onPointerUp={event => finishSwipe(event.clientX)} onPointerCancel={() => setSwipeStartX(null)}>
-      <div className="assistant-message-layout">
-        <div className="assistant-bubble">
-          {cleanContent && <MarkdownContent>{cleanContent}</MarkdownContent>}
-          {stats && <div className="response-stats" aria-label="Response generation statistics">{stats}</div>}
+    <>
+      <article
+        className={`message-row assistant-row ${revealTimestamp ? 'timestamp-visible' : ''}`}
+        onPointerDown={event => setSwipeStartX(event.clientX)}
+        onPointerUp={event => finishSwipe(event.clientX)}
+        onPointerCancel={() => setSwipeStartX(null)}
+      >
+        <div className="assistant-message-layout">
+          <div
+            className="assistant-bubble"
+            ref={bubbleRef}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerUp}
+          >
+            {cleanContent && <MarkdownContent>{cleanContent}</MarkdownContent>}
+            {stats && <div className="response-stats" aria-label="Response generation statistics">{stats}</div>}
+          </div>
         </div>
-        <div className="message-actions"><button onClick={() => void copy()}>{copied ? <Check size={13}/> : <Copy size={13}/>}<span>{copied ? 'Copied' : 'Copy'}</span></button></div>
-      </div>
-      {timestamp && <time className="message-time">{timestamp}</time>}
-    </article>
+        {timestamp && <time className="message-time">{timestamp}</time>}
+      </article>
+      {renderActionSheet()}
+    </>
   )
 })

@@ -332,7 +332,25 @@ export function TasksView({
       onTouchMove={event => { if (pullStartRef.current == null || scrollRef.current?.scrollTop !== 0) return; const distance = Math.min(76, Math.max(0, event.touches[0].clientY - pullStartRef.current)); if (distance > 0) event.preventDefault(); setPullDistance(distance) }}
       onTouchEnd={() => { const shouldRefresh = pullDistance >= 56; pullStartRef.current = null; setPullDistance(0); if (shouldRefresh) void pullRefresh() }}
     >
-    {pullActive && <div className="pull-refresh-cue" style={{ height: `${pullRefreshing ? 46 : pullDistance}px` }}><RefreshCw size={15} className={pullRefreshing ? 'pull-refresh-spinner' : ''}/><span>{pullRefreshing ? 'Refreshing…' : pullDistance >= 56 ? 'Release to refresh' : 'Pull to refresh'}</span></div>}
+    {pullActive && (
+      <div
+        className="pull-floating-overlay"
+        style={{
+          transform: `translate3d(-50%, ${pullRefreshing ? 20 : Math.min(28, pullDistance * 0.45)}px, 0)`,
+          opacity: pullRefreshing ? 1 : Math.min(1, pullDistance / 24),
+        }}
+        aria-live="polite"
+      >
+        <div
+          className={`pull-floating-indicator ${pullRefreshing ? 'refreshing' : ''} ${pullDistance >= 56 ? 'ready' : ''}`}
+          style={!pullRefreshing ? {
+            transform: `rotate(${Math.min(360, (pullDistance / 56) * 360)}deg)`,
+          } : undefined}
+        >
+          <RefreshCw size={15} className={pullRefreshing ? 'pull-refresh-spinner' : ''} />
+        </div>
+      </div>
+    )}
 
     <section className="tasks-intro">
       <h1>Tasks</h1>

@@ -313,7 +313,25 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
 
     <div className="thread-scroll" ref={threadRef} onScroll={onScroll} onTouchStart={onThreadTouchStart} onTouchMove={onThreadTouchMove} onTouchEnd={onThreadTouchEnd}>
       <div className="thread-content" ref={contentRef}>
-        {(pullDistance > 8 || pullRefreshing) && <div className="chat-pull-cue" style={{ height: `${pullRefreshing ? 34 : pullDistance}px` }}><RotateCw size={14} className={pullRefreshing ? 'pull-refresh-spinner' : ''}/><span>{pullRefreshing ? 'Refreshing…' : pullDistance >= 48 ? 'Release to refresh' : 'Pull to refresh'}</span></div>}
+        {(pullDistance > 6 || pullRefreshing) && (
+          <div
+            className="pull-floating-overlay"
+            style={{
+              transform: `translate3d(-50%, ${pullRefreshing ? 20 : Math.min(28, pullDistance * 0.45)}px, 0)`,
+              opacity: pullRefreshing ? 1 : Math.min(1, pullDistance / 24),
+            }}
+            aria-live="polite"
+          >
+            <div
+              className={`pull-floating-indicator ${pullRefreshing ? 'refreshing' : ''} ${pullDistance >= 48 ? 'ready' : ''}`}
+              style={!pullRefreshing ? {
+                transform: `rotate(${Math.min(360, (pullDistance / 48) * 360)}deg)`,
+              } : undefined}
+            >
+              <RotateCw size={15} className={pullRefreshing ? 'pull-refresh-spinner' : ''} />
+            </div>
+          </div>
+        )}
         {showConversationLoading && (
           <section className="chat-empty-state conversation-loading" aria-live="polite" aria-label={`Loading ${botName} conversation`}>
             <BotAvatar profile={botProfile} fallbackName={session.profile} variant="welcome"/>
@@ -334,6 +352,7 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
           const isLast = index === messages.length - 1
           const previousMessage = index > 0 ? messages[index - 1] : undefined
           const hasAssistantReplyAfter = messages.slice(index + 1).some(m => m.role === 'assistant')
+          const isCompleted = !sending && !isLast && hasAssistantReplyAfter
           return (
             <MessageCard
               key={message.id}

@@ -134,6 +134,7 @@ export function resolveLatestSessionPreview(
         const text = msg.content
           .replace(/\n*--- (?:Attached Context|Context Warnings) ---\n[\s\S]*$/, '')
           .replace(/(?:--\s*)?\[IMPORTANT:\s*Background process\s+[\s\S]*?\]/gi, '')
+          .replace(/\[System:\s*(?:The|Your)?\s*previous\s+(?:response|tool\s+call)\s+was\s+(?:cut\s*off|truncated)[\s\S]*?\]/gi, '')
           .trim()
         if (text) return text
       }
@@ -169,6 +170,73 @@ export function resolveLatestSessionPreview(
 
   // 3. Fallback to server-provided preview if no fresh transcript is cached yet
   return (fallbackPreview || '').trim()
+}
+
+/**
+ * Detects synthetic continuation / cutoff nudge scaffolding from the backend
+ * (e.g. [System: The previous response was cut off by a network error...]).
+ */
+export function isContinuationNudge(content: string): boolean {
+  if (!content) return false
+  const trimmed = content.trim()
+  return (
+    trimmed.startsWith('[System:') &&
+    /previous\s+(?:response|tool\s+call(?:\s*\([^)]*\))?)\s+was\s+(?:cut\s*off|truncated|too\s+large)/i.test(trimmed) &&
+    trimmed.endsWith(']')
+  )
+}
+
+export function cleanContinuationScaffolding(text: string): string {
+  if (!text) return ''
+  return text
+    .replace(/\[System:\s*(?:The|Your)?\s*previous\s+(?:response|tool\s+call(?:\s*\([^)]*\))?)\s+was\s+(?:cut\s*off|truncated|too\s+large)[\s\S]*?\]/gi, '')
+    .trim()
+}
+
+/**
+ * Calculates whether a session is unread and the exact numeric unread count.
+ * Prevents the sent message race condition: user messages (role: 'user') NEVER
+ * increment unread badges. Only incoming assistant responses arriving after
+ * lastRead mark a conversation as unread.
+ */
+export function calculateUnreadState(
+  sessionId: string,
+  rawLastActive: number | undefined,
+  cachedMessages: LiveMessage[] | null | undefined,
+  lastReadTimestamp: number,
+  isSelected: boolean,
+  isWaitingInput = false
+): { isUnread: boolean; unreadCount: number } {
+  if (isSelected || !sessionId) {
+    return { isUnread: false, unreadCount: 0 }
+  }
+
+  // If the agent is actively waiting for human input (e.g. clarify request), mark as unread
+  if (isWaitingInput) {
+    return { isUnread: true, unreadCount: 1 }
+  }
+
+  const lastActiveMs = rawLastActive
+    ? (rawLastActive > 1e11 ? rawLastActive : rawLastActive * 1000)
+    : 0
+
+  let assistantUnreadCount = 0
+  if (Array.isArray(cachedMessages) && cachedMessages.length > 0) {
+    assistantUnreadCount = cachedMessages.filter(m => {
+      if (!m || m.role !== 'assistant') return false
+      const msgTime = m.timestamp
+        ? (m.timestamp > 1e11 ? m.timestamp : m.timestamp * 1000)
+        : 0
+      return msgTime > lastReadTimestamp
+    }).length
+
+    const isUnread = assistantUnreadCount > 0
+    return { isUnread, unreadCount: assistantUnreadCount }
+  }
+
+  // If messages are not cached in memory yet, rely on server lastActive timestamp
+  const isUnread = lastActiveMs > 0 && lastActiveMs > lastReadTimestamp
+  return { isUnread, unreadCount: isUnread ? 1 : 0 }
 }
 
 /**
