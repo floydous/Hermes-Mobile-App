@@ -8,6 +8,7 @@ import type { ToolActivity } from '../chat-turn'
 import { applySlashCompletion } from '../slash-routing'
 import { SCROLL_FOLLOW_THRESHOLD, shouldStickToBottom } from '../scroll-follow'
 import { formatResponseStats } from '../message-stats'
+import { getRandomSpinnerPhrase } from '../spinner-phrases'
 import { useEdgeSwipeBack } from '../edge-swipe'
 import { Composer, type ComposerDropFilesRef, type ComposerEditRequest } from './Composer'
 import type { LiveMessage, LiveProfile, LiveSession, LiveUsage } from '../hermes'
@@ -121,8 +122,15 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
 
   const [typingBubbleWidth, setTypingBubbleWidth] = useState<number | null>(null)
   const typingMeasureRef = useRef<HTMLDivElement | null>(null)
+  const [spinnerPhrase, setSpinnerPhrase] = useState(() => getRandomSpinnerPhrase())
 
-  let liveStatus = 'Thinking…'
+  useEffect(() => {
+    if (sending && !streaming && (!toolActivities || toolActivities.length === 0)) {
+      setSpinnerPhrase(getRandomSpinnerPhrase())
+    }
+  }, [sending, streaming, toolActivities?.length])
+
+  let liveStatus = spinnerPhrase
   if (runningTool) {
     if (runningTool.name === 'Dispatched Task') {
       liveStatus = runningTool.summary ? `${runningTool.summary}…` : 'Working on dispatched task…'

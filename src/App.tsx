@@ -13,6 +13,7 @@ import { onBackButtonPress } from '@tauri-apps/api/app'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { buildAttachmentPrompt, attachmentSummary } from './attachment-routing'
 import { buildBotRows, cleanPreviewSnippet, resolveCanonicalSessionId, type RosterProfile } from './live-model'
+import { getRandomSpinnerPhrase } from './spinner-phrases'
 import { settleAssistantResponse, type SettledAssistantResponse as SettledAssistantState } from './settled-assistant'
 import {
   InFlightSubmissionTracker,
@@ -188,6 +189,17 @@ export default function App() {
   const rosterScrollRef = useRef<HTMLDivElement | null>(null)
   const rosterPullStartRef = useRef<number | null>(null)
 
+  const setRowRipplePoint = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect()
+    const x = event.clientX - rect.left
+    const y = event.clientY - rect.top
+    event.currentTarget.style.setProperty('--ripple-x', `${x}px`)
+    event.currentTarget.style.setProperty('--ripple-y', `${y}px`)
+  }
+
+  const handleRowPointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
+    setRowRipplePoint(event)
+  }
   const navigationRef = useRef({ selected: false, profileSheet: false, settings: false, createOpen: false, tab: 'bots' as Tab })
   navigationRef.current = { selected: Boolean(selected), profileSheet, settings, createOpen, tab }
 
@@ -400,6 +412,15 @@ export default function App() {
       lastActive > lastRead &&
       selected?.id !== sid
     )
+    let unreadCount = 0
+    if (isUnread && cached && cached.length > 0) {
+      unreadCount = cached.filter(m => {
+        if (!m || m.role === 'system' || m.role === 'tool') return false
+        const msgTime = m.timestamp ? (m.timestamp > 1e11 ? m.timestamp : m.timestamp * 1000) : 0
+        return msgTime > lastRead
+      }).length
+    }
+    if (isUnread && unreadCount === 0) unreadCount = 1
 
     return {
       profile,
@@ -411,6 +432,7 @@ export default function App() {
         model: profile.model,
         last_active: session.last_active,
         unread: isUnread,
+        unread_count: unreadCount,
       } satisfies LiveSession : null,
     }
   }).filter(row => `${row.profile.name} ${row.profile.display_name || ''} ${row.session?.preview || ''}`.toLowerCase().includes(query.toLowerCase())), [profiles, sessions, selected?.id, query])
@@ -428,11 +450,30 @@ export default function App() {
   const visibleSessions = useMemo(() => sessions.filter(session => isHumanChatSession(session, canonicalSessionIds) && `${session.title} ${session.profile} ${session.preview}`.toLowerCase().includes(query.toLowerCase())).map(session => {
     const cached = messageCacheRef.current.get(session.id) || getCachedSessionMessages(session.id)
     const latestPreview = resolveLatestSessionPreview(session.id, session.preview, cached || undefined, session.last_active)
+    const lastRead = Number(localStorage.getItem(`hermes-last-read:${session.id}`) || 0)
+    const lastActive = session?.last_active ? (session.last_active > 1e11 ? session.last_active : session.last_active * 1000) : 0
+    const isUnread = Boolean(
+      lastActive > 0 &&
+      lastActive > lastRead &&
+      selected?.id !== session.id
+    )
+    let unreadCount = 0
+    if (isUnread && cached && cached.length > 0) {
+      unreadCount = cached.filter(m => {
+        if (!m || m.role === 'system' || m.role === 'tool') return false
+        const msgTime = m.timestamp ? (m.timestamp > 1e11 ? m.timestamp : m.timestamp * 1000) : 0
+        return msgTime > lastRead
+      }).length
+    }
+    if (isUnread && unreadCount === 0) unreadCount = 1
+
     return {
       ...session,
       preview: latestPreview,
+      unread: isUnread,
+      unread_count: unreadCount,
     }
-  }), [sessions, canonicalSessionIds, query])
+  }), [sessions, canonicalSessionIds, selected?.id, query])
   const profileMap = useMemo(() => new Map(profiles.map(p => [p.name, p])), [profiles])
   const [openingSessionId, setOpeningSessionId] = useState<string | null>(null)
   const [sessionDisplayCount, setSessionDisplayCount] = useState(35)
@@ -453,7 +494,6 @@ export default function App() {
   }, [tab])
 
   const openSession = useCallback((session: LiveSession, latestUsage?: LiveUsage): Promise<void> => {
-    setOpeningSessionId(session.id)
     const safeSession: LiveSession = {
       ...session,
       profile: session.profile || 'default',
@@ -474,14 +514,21 @@ export default function App() {
       }
     }
 
+    // Immediately mark session as read on Frame 0
+    try {
+      const nowMs = Date.now()
+      localStorage.setItem(`hermes-last-read:${safeSession.id}`, String(nowMs))
+      const matchedProfile = profiles.find(p => p.name === safeSession.profile)
+      if (matchedProfile?.canonical_session?.id) {
+        localStorage.setItem(`hermes-last-read:${matchedProfile.canonical_session.id}`, String(nowMs))
+      }
+    } catch {}
+
+    // Synchronously mount ChatView on Frame 0 so the screen transitions in 0ms without freezing
     setSelected(safeSession)
-    setOpeningSessionId(null)
     setProfileSheet(false)
     setSettledAssistant(null)
     setError('')
-    try {
-      localStorage.setItem(`hermes-last-read:${safeSession.id}`, String(Date.now()))
-    } catch {}
 
     const isTurnInFlight = Boolean(
       activeInFlightTurnsRef.current.has(safeSession.profile) ||
@@ -630,7 +677,7 @@ export default function App() {
       sessionId: turnSessionId,
       profile: turnProfile,
       status: 'thinking',
-      statusText: 'Thinking…',
+      statusText: getRandomSpinnerPhrase(),
       streamingText: '',
       toolActivities: [],
       userMessage: localUserMessage,
@@ -882,6 +929,19 @@ export default function App() {
         }
       }
 
+      // Mark the current session as read ONLY if the user is still actively viewing this session!
+      if (selectedRef.current?.id === finalSessionId || selectedRef.current?.id === turnSessionId) {
+        try {
+          const nowMs = Date.now()
+          localStorage.setItem(`hermes-last-read:${finalSessionId}`, String(nowMs))
+          localStorage.setItem(`hermes-last-read:${turnSessionId}`, String(nowMs))
+          const matchedProfile = profiles.find(p => p.name === turnProfile)
+          if (matchedProfile?.canonical_session?.id) {
+            localStorage.setItem(`hermes-last-read:${matchedProfile.canonical_session.id}`, String(nowMs))
+          }
+        } catch {}
+      }
+
       await refresh()
       return true
     } catch (reason) {
@@ -1032,7 +1092,7 @@ export default function App() {
     } finally { setCreating(false) }
   }
 
-  const rosterPullActive = rosterPullDistance > 8 || rosterPullRefreshing
+  const rosterPullActive = rosterPullDistance > 6 || rosterPullRefreshing
   const rosterTouchStart = (event: React.TouchEvent<HTMLElement>) => {
     const target = event.target as HTMLElement
     if (target.closest('input,textarea,select') || rosterScrollRef.current?.scrollTop !== 0) return
@@ -1046,18 +1106,19 @@ export default function App() {
       return
     }
     const rawDelta = event.touches[0].clientY - rosterPullStartRef.current
-    // Enforce 14px slop: slight finger movement never calls preventDefault (ensuring clicks fire)
-    if (rawDelta <= 14) {
+    // Pulling downwards from top (scrollTop === 0)
+    if (rawDelta <= 8) {
       if (rosterPullDistance > 0) setRosterPullDistance(0)
       return
     }
-    const distance = Math.min(76, Math.max(0, rawDelta - 14))
-    if (distance > 0) event.preventDefault()
+    // Resistance curve: pull increases smoothly up to 72px
+    const distance = Math.min(72, Math.max(0, (rawDelta - 8) * 0.55))
+    if (distance > 0 && event.cancelable) event.preventDefault()
     setRosterPullDistance(distance)
   }
   const rosterTouchEnd = () => {
-    // 42px distance + 14px slop = 56px total pull required to trigger refresh
-    const shouldRefresh = rosterPullDistance >= 42
+    // Threshold is 48px to trigger refresh; swiping back up below 48px cancels it!
+    const shouldRefresh = rosterPullDistance >= 48
     rosterPullStartRef.current = null
     setRosterPullDistance(0)
     if (shouldRefresh) void pullRefreshRoster()
@@ -1132,7 +1193,7 @@ export default function App() {
         if (swipeReleaseTimerRef.current != null) window.clearTimeout(swipeReleaseTimerRef.current)
         swipeReleaseTimerRef.current = window.setTimeout(() => {
           justSwipedRef.current = false
-        }, 180)
+        }, 120)
 
         if (document.activeElement instanceof HTMLElement) {
           document.activeElement.blur()
@@ -1145,6 +1206,7 @@ export default function App() {
   const handleRosterTouchCancel = () => {
     swipeTrackingRef.current = false
     swipeIntentConfirmedRef.current = false
+    justSwipedRef.current = false
     swipeStartXRef.current = null
     swipeStartYRef.current = null
   }
@@ -1313,7 +1375,28 @@ export default function App() {
       onTouchEnd={rosterTouchEnd}
       onTouchCancel={rosterTouchCancel}
     >
-        {rosterPullActive && <div className="roster-pull-cue" style={{ height: `${rosterPullRefreshing ? 46 : rosterPullDistance}px` }}><RefreshCw size={15} className={rosterPullRefreshing ? 'pull-refresh-spinner' : ''}/><span>{rosterPullRefreshing ? 'Refreshing…' : rosterPullDistance >= 56 ? 'Release to refresh' : 'Pull to refresh'}</span></div>}
+        {rosterPullActive && (
+          <div
+            className={`roster-pull-floating-cue ${rosterPullRefreshing ? 'refreshing' : 'dragging'}`}
+            style={{
+              transform: `translate3d(-50%, ${rosterPullRefreshing ? 58 : Math.min(68, rosterPullDistance + 12)}px, 0)`,
+              opacity: rosterPullRefreshing ? 1 : Math.min(1, rosterPullDistance / 30),
+            }}
+            aria-live="polite"
+          >
+            <div
+              className={`pull-floating-indicator ${rosterPullRefreshing ? 'refreshing' : ''} ${rosterPullDistance >= 48 ? 'ready' : ''}`}
+              style={!rosterPullRefreshing ? {
+                transform: `rotate(${Math.min(360, (rosterPullDistance / 48) * 360)}deg)`,
+              } : undefined}
+            >
+              <RefreshCw size={16} className={rosterPullRefreshing ? 'pull-refresh-spinner' : ''} />
+            </div>
+            <span className="sr-only">
+              {rosterPullRefreshing ? 'Refreshing list…' : rosterPullDistance >= 48 ? 'Release to refresh' : 'Pull down to refresh'}
+            </span>
+          </div>
+        )}
         {error && <Notice message={error} retry={() => void refresh()}/>}
         {((loading && !profiles.length) || (tab === 'sessions' && loading && !sessions.length)) ? <Skeleton/> : tab === 'bots' ? (
           <section className="bot-list" key="bots-list">
@@ -1325,6 +1408,7 @@ export default function App() {
                   className={`bot-row enter ${isWorking ? 'working' : ''}`}
                   style={{ animationDelay: `${Math.min(index, 8) * 28}ms` }}
                   key={profile.name}
+                  onPointerDown={handleRowPointerDown}
                   onClick={() => void openBot(profile, session)}
                 >
                   <div className="bot-avatar-wrap">
@@ -1345,7 +1429,11 @@ export default function App() {
                   </span>
                   <span className="meta">
                     {ago(session?.last_active)}
-                    {session?.unread && <span className="unread-badge">New</span>}
+                    {session?.unread && (
+                      <span className="unread-badge">
+                        {session.unread_count && session.unread_count > 99 ? '99+' : session.unread_count || 1}
+                      </span>
+                    )}
                   </span>
                 </button>
               )
@@ -1372,6 +1460,7 @@ export default function App() {
                   className={`bot-row enter ${isWorking ? 'working' : ''} ${isOpening ? 'opening' : ''}`}
                   style={{ animationDelay: `${Math.min(index, 8) * 28}ms` }}
                   key={`${session.profile}:${session.id}`}
+                  onPointerDown={handleRowPointerDown}
                   onClick={() => void openSession(session)}
                 >
                   <div className="bot-avatar-wrap">
@@ -1396,7 +1485,11 @@ export default function App() {
                     ) : (
                       ago(session.last_active)
                     )}
-                    {session.unread && !isOpening && <span className="unread-badge">New</span>}
+                    {session.unread && !isOpening && (
+                      <span className="unread-badge">
+                        {session.unread_count && session.unread_count > 99 ? '99+' : session.unread_count || 1}
+                      </span>
+                    )}
                   </span>
                 </button>
               )

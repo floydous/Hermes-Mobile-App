@@ -89,7 +89,7 @@ describe('ChatView live animation rendering', () => {
     expect(html).toContain('Working on task from @default…')
   })
 
-  it('renders Thinking status when sending without tools even if transcript ends with earlier assistant reply', () => {
+  it('renders dynamic spinner phrase when sending without tools even if transcript ends with earlier assistant reply', () => {
     const html = renderToString(
       <ChatView
         {...defaultProps}
@@ -100,7 +100,7 @@ describe('ChatView live animation rendering', () => {
 
     expect(html).toContain('live-response')
     expect(html).toContain('typing-indicator')
-    expect(html).toContain('Thinking…')
+    expect(html).toMatch(/(?:Handling it|Cooking|Almost there|On it|Crafting|Pondering|Working on it|Crunching|Gathering thoughts|Brewing|Piecing together|Connecting dots|Polishing|Digging in|Making sense|Simmering|Looking into it|Tuning|Formulating|Spinning up|Sharpening|Untangling|Synthesizing|In the zone)…/)
   })
 
   it('suppresses live typing indicator when turn is settled (sending is false)', () => {

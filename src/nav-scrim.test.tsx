@@ -14,7 +14,7 @@ describe('Bottom navigation fade scrim', () => {
   })
 
   it('binds the gradient to the theme canvas token var(--bg)', () => {
-    expect(css).toMatch(/\.nav-bottom-scrim\s*\{[^}]*background:\s*linear-gradient\([^}]*var\(--bg\)/s)
+    expect(css).toMatch(/\.nav-bottom-scrim\s*\{[^}]*background:\s*linear-gradient\([^}]*var\(--bg/s)
   })
 
   it('provides smooth color-mix enhancement for theme transitions', () => {

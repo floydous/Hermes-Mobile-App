@@ -710,16 +710,16 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
 .nav-bottom-scrim {
   position: fixed;
   bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(540px, 100%);
-  height: calc(88px + env(safe-area-inset-bottom));
+  left: 0;
+  right: 0;
+  width: 100%;
+  height: calc(96px + env(safe-area-inset-bottom));
   pointer-events: none !important;
   z-index: 40;
   background: linear-gradient(
     to bottom,
-    transparent 0%,
-    var(--bg) 100%
+    rgba(0, 0, 0, 0) 0%,
+    var(--bg, #010102) 100%
   );
   animation: nav-scrim-appear 0.24s cubic-bezier(0.16, 1, 0.3, 1) backwards;
   user-select: none;
@@ -730,10 +730,10 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
   .nav-bottom-scrim {
     background: linear-gradient(
       to bottom,
-      transparent 0%,
-      color-mix(in srgb, var(--bg) 18%, transparent) 26%,
-      color-mix(in srgb, var(--bg) 75%, transparent) 68%,
-      var(--bg) 100%
+      rgba(0, 0, 0, 0) 0%,
+      color-mix(in srgb, var(--bg, #010102) 20%, transparent) 25%,
+      color-mix(in srgb, var(--bg, #010102) 75%, transparent) 65%,
+      var(--bg, #010102) 100%
     );
   }
 }
@@ -864,7 +864,6 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
 }
 
 /* Ensure roster and task scroll don't get obscured by the floating island */
-.roster-shell,
 .roster-list-scroll,
 .tasks-sheet {
   touch-action: pan-y;
@@ -1148,6 +1147,37 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
 
 .user-row .message-actions {
   align-self: flex-end;
+}
+
+/* Hide desktop message-action buttons on mobile by default to eliminate visual clutter */
+.message-actions {
+  display: none !important;
+}
+
+/* Reveal actions cleanly only when user interacts (active or focus) */
+.message-row:active .message-actions,
+.message-row:focus-within .message-actions {
+  display: flex !important;
+  opacity: 1 !important;
+  height: 26px !important;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  /* On desktop / mouse pointers: show smoothly on hover */
+  .message-actions {
+    display: flex !important;
+    opacity: 0 !important;
+    height: 0 !important;
+    transition: opacity 0.18s ease, height 0.18s ease !important;
+  }
+  .message-row:hover .message-actions,
+  .message-row:focus-within .message-actions {
+    opacity: 0.8 !important;
+    height: 26px !important;
+  }
+  .message-row:hover .message-actions:hover {
+    opacity: 1 !important;
+  }
 }
 
 /* Agent-to-Agent Dispatch Bubble: Modern, Integrated Mobile Messaging */
@@ -3288,48 +3318,76 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
 
 /* Immediate tactile feedback when opening a session */
 .bot-list {
-  padding: 4px 8px !important;
+  padding: 0 !important;
 }
 
+/* Native Radial Wave Ripple on Tap (Originates from touch x, y and fades outward) */
 .bot-row {
   width: 100% !important;
-  box-sizing: border-box !important;
-  padding: 11px 14px !important;
-  border-radius: 14px !important;
-  border: 1px solid transparent !important;
-  border-bottom: 1px solid color-mix(in srgb, var(--border, rgba(255, 255, 255, 0.05)) 50%, transparent) !important;
-  margin: 3px 0 !important;
-  min-height: 72px !important;
-  transition: background 0.15s ease, border-color 0.15s ease, transform 0.08s ease !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 13px !important;
+  text-align: left !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--border) !important;
+  border-radius: 0 !important;
+  margin: 0 !important;
+  padding: 13px 0 !important;
+  min-height: 74px !important;
+  position: relative !important;
+  overflow: hidden !important;
+  background-color: transparent !important;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
   user-select: none;
 }
 
-.bot-row:hover {
-  background: color-mix(in srgb, var(--surface, #18181b) 75%, var(--bg, #09090b)) !important;
-  border-color: color-mix(in srgb, var(--border, rgba(255, 255, 255, 0.08)) 70%, transparent) !important;
+/* Pseudo element wave ripple expanding from click coordinates */
+.bot-row::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: radial-gradient(
+    circle at var(--ripple-x, 50%) var(--ripple-y, 50%),
+    rgba(255, 255, 255, 0.08) 0%,
+    rgba(255, 255, 255, 0.04) 38%,
+    rgba(255, 255, 255, 0) 75%
+  );
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.45s ease-out, transform 0.45s ease-out;
+  transform: scale(0.65);
 }
 
-.bot-row:active {
-  background: color-mix(in srgb, var(--surface, #18181b) 95%, transparent) !important;
-  transform: scale(0.99) !important;
-  opacity: 0.9 !important;
+.bot-row:active::before {
+  opacity: 1;
+  transform: scale(1.4);
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.15s ease-in;
 }
 
-.bot-row.opening {
-  background: var(--surface) !important;
-  opacity: 0.92;
-  transform: scale(0.995);
+[data-theme='light'] .bot-row::before {
+  background: radial-gradient(
+    circle at var(--ripple-x, 50%) var(--ripple-y, 50%),
+    rgba(0, 0, 0, 0.07) 0%,
+    rgba(0, 0, 0, 0.035) 38%,
+    rgba(0, 0, 0, 0) 75%
+  );
 }
 
-[data-theme='light'] .bot-row:hover {
-  background: #f4f4f5 !important;
-  border-color: rgba(0, 0, 0, 0.06) !important;
+.bot-row:hover:not(:active)::before {
+  opacity: 0.55;
+  transform: scale(1.0);
+  transition: opacity 0.35s ease;
 }
 
-[data-theme='light'] .bot-row:active {
-  background: #e4e4e7 !important;
+@media (prefers-reduced-motion: reduce) {
+  .bot-row::before {
+    transition: none !important;
+    animation: none !important;
+  }
 }
 
 .row-opening-cue {
@@ -3337,6 +3395,65 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
   align-items: center;
   justify-content: center;
   color: var(--accent, #6366f1);
+}
+
+/* Floating Pull-to-Refresh Overlay (Overlays on top without moving/dragging list content) */
+.roster-pull-floating-cue {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  z-index: 60;
+  pointer-events: none !important;
+  will-change: transform, opacity;
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.22s ease;
+}
+
+.roster-pull-floating-cue.dragging {
+  /* Zero transition delay while tracking finger */
+  transition: none !important;
+}
+
+.roster-pull-floating-cue.refreshing {
+  transition: transform 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.pull-floating-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: var(--surface, #18181b);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  color: var(--text, #f4f5f7);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.2);
+  transition: color 0.18s ease, border-color 0.18s ease;
+  will-change: transform;
+}
+
+.pull-floating-indicator:not(.refreshing) {
+  /* Instant tracking of angular rotation while dragging without trailing delay */
+  transition: none !important;
+}
+
+.pull-floating-indicator.ready {
+  color: var(--accent, #8b8aff);
+  border-color: color-mix(in srgb, var(--accent, #7170ff) 40%, var(--border, rgba(255, 255, 255, 0.12)));
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5), 0 0 12px color-mix(in srgb, var(--accent, #7170ff) 25%, transparent);
+}
+
+[data-theme='light'] .pull-floating-indicator {
+  background: #ffffff;
+  border-color: rgba(0, 0, 0, 0.1);
+  color: #09090b;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12), 0 1px 4px rgba(0, 0, 0, 0.05);
+}
+
+[data-theme='light'] .pull-floating-indicator.ready {
+  color: #09090b;
+  border-color: rgba(0, 0, 0, 0.25);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16);
 }
 
 /* Sessions tab empty state */
@@ -3352,51 +3469,54 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
   animation: app-tab-enter 0.28s var(--ease-out-smooth) backwards;
 }
 
-/* Docked Unread Pip on Avatar */
+/* Docked Unread Pip on Avatar: Monochrome & Theme Harmonized */
 .bot-unread-pip {
   position: absolute;
   top: -1px;
   right: -1px;
-  width: 10px;
-  height: 10px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
-  background: #6366f1;
-  border: 2px solid color-mix(in srgb, var(--surface, #18181b) 80%, var(--bg, #09090b));
-  box-shadow: 0 0 8px rgba(99, 102, 241, 0.7);
+  background: var(--text, #f4f5f7);
+  border: 2px solid var(--surface, #141416);
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.4);
   z-index: 2;
   animation: unread-dot-enter 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 [data-theme='light'] .bot-unread-pip {
-  background: #4338ca;
+  background: #09090b;
   border-color: #ffffff;
-  box-shadow: 0 0 8px rgba(67, 56, 202, 0.45);
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.25);
 }
 
-/* Unread Badge Tag in Meta Column */
+/* Unread Count Badge Tag in Meta Column: Minimal Zinc & Monochrome */
 .meta .unread-badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 2px 7px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  box-sizing: border-box;
   border-radius: 999px;
-  background: #5254f3;
-  color: #ffffff !important;
+  background: var(--surface, #27272a);
+  color: var(--text, #f4f5f7) !important;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
   font-family: var(--font-mono, monospace);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.4px;
-  text-transform: uppercase;
-  line-height: 13px;
-  box-shadow: 0 1px 4px rgba(82, 84, 243, 0.4);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  text-align: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
   animation: unread-dot-enter 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-[data-theme='light'] .meta .unread-badge {
-  background: #4338ca;
-  color: #ffffff !important;
-  box-shadow: 0 1px 4px rgba(67, 56, 202, 0.35);
+@keyframes unread-dot-enter {
+  0% { transform: scale(0); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
 }
+
 .bot-row:has(.unread-badge) .bot-copy b {
   color: var(--text, #ffffff) !important;
   font-weight: 700 !important;
@@ -3408,9 +3528,10 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
 }
 
 [data-theme='light'] .meta .unread-badge {
-  background: #4f46e5;
+  background: #09090b;
   color: #ffffff !important;
-  box-shadow: 0 1px 4px rgba(79, 70, 229, 0.3);
+  border-color: #09090b;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 
 [data-theme='light'] .bot-row:has(.unread-badge) .bot-copy b {
