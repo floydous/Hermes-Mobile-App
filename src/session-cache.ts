@@ -170,3 +170,39 @@ export function resolveLatestSessionPreview(
   // 3. Fallback to server-provided preview if no fresh transcript is cached yet
   return (fallbackPreview || '').trim()
 }
+
+/**
+ * Collapses consecutive identical assistant messages to prevent duplicate rendering in chat,
+ * preserving authoritative timestamps, positive SQLite message IDs, and usage statistics.
+ */
+export function deduplicateConsecutiveMessages(messages: LiveMessage[]): LiveMessage[] {
+  if (!Array.isArray(messages) || messages.length <= 1) return messages
+  const result: LiveMessage[] = []
+  for (const msg of messages) {
+    const prev = result[result.length - 1]
+    if (prev && prev.role === 'assistant' && msg.role === 'assistant' && prev.content === msg.content) {
+      // Merge rich metadata from both copies (authoritative SQLite ID, timestamp, token usage)
+      result[result.length - 1] = {
+        ...prev,
+        ...msg,
+        id: (prev.id > 0 ? prev.id : msg.id > 0 ? msg.id : prev.id),
+        timestamp: prev.timestamp || msg.timestamp,
+        usage: prev.usage || msg.usage,
+      }
+      continue
+    }
+    // Also deduplicate consecutive tool messages with identical content (e.g. clarify tool output)
+    if (prev && prev.role === 'tool' && msg.role === 'tool' && (prev.tool_name === msg.tool_name || (prev as any).name === (msg as any).name) && prev.content === msg.content) {
+      result[result.length - 1] = {
+        ...prev,
+        ...msg,
+        id: (prev.id > 0 ? prev.id : msg.id > 0 ? msg.id : prev.id),
+        timestamp: prev.timestamp || msg.timestamp,
+      }
+      continue
+    }
+    result.push(msg)
+  }
+  return result
+}
+

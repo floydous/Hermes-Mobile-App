@@ -27,6 +27,7 @@ import { fetchRemoteMedia } from '../hermes'
 import { resolveDelegationSenderProfile } from '../chat-turn'
 import { formatMessageTime, formatResponseStats } from '../message-stats'
 import { BotAvatar } from './BotAvatar'
+import { ClarifyHistoryCard } from './ClarifyCard'
 import {
   computeDismissDelay,
   computeSwipeTransform,
@@ -1142,7 +1143,25 @@ export const MessageCard = memo(function MessageCard({ message, previousMessage,
   const textContent = typeof message.content === 'string' ? message.content : message.content == null ? '' : String(message.content)
   const cleanContent = stripAttachedContextScaffolding(textContent)
   const trimmed = cleanContent.trim()
-  if (message.role === 'system' || message.role === 'tool' || !trimmed) return null
+  if (message.role === 'system' || !trimmed) return null
+
+  // If this is a tool message for clarify, render the ClarifyHistoryCard
+  if (message.role === 'tool') {
+    const isClarify = message.tool_name === 'clarify' || (message as any).name === 'clarify'
+    if (isClarify) {
+      try {
+        const parsed = JSON.parse(trimmed)
+        if (parsed && Array.isArray(parsed.responses)) {
+          return (
+            <article className="message-row clarify-history-row">
+              <ClarifyHistoryCard responses={parsed.responses} outcome={parsed.outcome} />
+            </article>
+          )
+        }
+      } catch {}
+    }
+    return null
+  }
 
   // Internal runtime scaffolding (process completion signals and hidden system rows) are never rendered
   const displayKind = (message as any).display_kind

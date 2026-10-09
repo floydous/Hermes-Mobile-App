@@ -4,11 +4,12 @@ import type { DragEvent } from 'react'
 
 import { BotAvatar } from './BotAvatar'
 import { MessageCard, MarkdownContent } from './MarkdownContent'
+import { ClarifyCard, type ClarifyRequest } from './ClarifyCard'
 import type { ToolActivity } from '../chat-turn'
 import { applySlashCompletion } from '../slash-routing'
 import { SCROLL_FOLLOW_THRESHOLD, shouldStickToBottom } from '../scroll-follow'
 import { formatResponseStats } from '../message-stats'
-import { getRandomSpinnerPhrase } from '../spinner-phrases'
+import { getInitialSpinnerPhrase, getProgressiveSpinnerPhrase, getRandomToolThreshold } from '../spinner-phrases'
 import { useEdgeSwipeBack } from '../edge-swipe'
 import { Composer, type ComposerDropFilesRef, type ComposerEditRequest } from './Composer'
 import type { LiveMessage, LiveProfile, LiveSession, LiveUsage } from '../hermes'
@@ -29,6 +30,9 @@ type Props = {
   clearChat?: () => Promise<void>
   openProfile: () => void
   onSessionModelChange: (model: string) => void
+  pendingClarify?: ClarifyRequest | null
+  onAnswerClarify?: (requestId: string, answers: Record<string, string | null>) => void
+  onSkipClarify?: (requestId: string) => void
   submit: (attachments: { name: string; refText: string }[], text: string, options?: { editMessageId?: number }) => Promise<boolean>
   submitVoice: (text: string) => Promise<boolean>
   stop: () => void
@@ -36,7 +40,7 @@ type Props = {
 
 const titleize = (value?: string | null) => (value || '').split(/[-_]+/).filter(Boolean).map(part => (part[0] ? part[0].toUpperCase() + part.slice(1) : '')).join(' ') || 'Bot'
 
-export function ChatView({ session, conversationLoading, messages, settledAssistant, profiles, streaming, sending, toolActivities, error, back, refresh, clearChat, openProfile, onSessionModelChange, submit, submitVoice, stop }: Props) {
+export function ChatView({ session, conversationLoading, messages, settledAssistant, profiles, streaming, sending, toolActivities, error, back, refresh, clearChat, openProfile, onSessionModelChange, pendingClarify, onAnswerClarify, onSkipClarify, submit, submitVoice, stop }: Props) {
   const shellRef = useRef<HTMLElement>(null)
   const threadRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -110,9 +114,9 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
   )
   const hasRunningTools = Boolean(sending && toolActivities && toolActivities.length > 0)
   const showActiveAssistant = Boolean(
-    (sending && (!lastMessageIsAssistant || hasRunningTools || !activeAssistantText || (activeAssistantText && lastMessage.content !== activeAssistantText))) ||
-    (streaming && (!lastMessageIsAssistant || lastMessage.content !== streaming)) ||
-    (settledAssistant && !isLastMessageSettledAssistant)
+    (!pendingClarify && sending && (!lastMessageIsAssistant || hasRunningTools || !activeAssistantText || (activeAssistantText && lastMessage.content !== activeAssistantText))) ||
+    (!pendingClarify && streaming && (!lastMessageIsAssistant || lastMessage.content !== streaming)) ||
+    (!pendingClarify && settledAssistant && !isLastMessageSettledAssistant)
   )
   const showConversationLoading = conversationLoading && !messages.length
   const showEmptyState = !conversationLoading && !messages.length && !showActiveAssistant && !streaming && !visibleError
@@ -122,16 +126,32 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
 
   const [typingBubbleWidth, setTypingBubbleWidth] = useState<number | null>(null)
   const typingMeasureRef = useRef<HTMLDivElement | null>(null)
-  const [spinnerPhrase, setSpinnerPhrase] = useState(() => getRandomSpinnerPhrase())
+  const [spinnerPhrase, setSpinnerPhrase] = useState(() => getInitialSpinnerPhrase())
+  const lastToolCountRef = useRef(0)
+  const nextThresholdRef = useRef(getRandomToolThreshold(1, 2))
 
   useEffect(() => {
-    if (sending && !streaming && (!toolActivities || toolActivities.length === 0)) {
-      setSpinnerPhrase(getRandomSpinnerPhrase())
+    if (!sending) {
+      setSpinnerPhrase(getInitialSpinnerPhrase())
+      lastToolCountRef.current = 0
+      nextThresholdRef.current = getRandomToolThreshold(1, 2)
+      return
     }
-  }, [sending, streaming, toolActivities?.length])
+
+    const currentToolCount = toolActivities ? toolActivities.length : 0
+    if (currentToolCount > lastToolCountRef.current) {
+      lastToolCountRef.current = currentToolCount
+      if (currentToolCount >= nextThresholdRef.current) {
+        setSpinnerPhrase(prev => getProgressiveSpinnerPhrase(prev))
+        nextThresholdRef.current = currentToolCount + getRandomToolThreshold(1, 2)
+      }
+    }
+  }, [sending, toolActivities?.length])
 
   let liveStatus = spinnerPhrase
-  if (runningTool) {
+  if (pendingClarify) {
+    liveStatus = 'Needs your input…'
+  } else if (runningTool) {
     if (runningTool.name === 'Dispatched Task') {
       liveStatus = runningTool.summary ? `${runningTool.summary}…` : 'Working on dispatched task…'
     } else {
@@ -139,8 +159,6 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
         ? `Using ${runningTool.name} · ${activeToolsCount} tool calls…`
         : `Using ${runningTool.name}…`
     }
-  } else if (activeToolsCount > 0 && !streaming) {
-    liveStatus = `${activeToolsCount} tool call${activeToolsCount > 1 ? 's' : ''} completed…`
   }
 
   useLayoutEffect(() => {
@@ -377,7 +395,15 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
 
     {!following && <button className="latest-button" onClick={() => scrollToLatest()}><ArrowDown size={15}/><span>Latest{unreadBelow ? ` · ${unreadBelow}` : ''}</span></button>}
 
-    <Composer session={session} profiles={profiles} sending={sending} draggingFiles={draggingFiles} editRequest={editRequest} cancelEdit={() => setEditRequest(null)} dropFilesRef={dropFilesRef} onControlError={setControlError} onModelLabel={setModelLabel} onSessionModelChange={onSessionModelChange} submit={submit} submitVoice={submitVoice} stop={stop}/>
+    {pendingClarify ? (
+      <ClarifyCard
+        request={pendingClarify}
+        onSubmit={answers => onAnswerClarify?.(pendingClarify.requestId, answers)}
+        onSkip={() => onSkipClarify?.(pendingClarify.requestId)}
+      />
+    ) : (
+      <Composer session={session} profiles={profiles} sending={sending} draggingFiles={draggingFiles} editRequest={editRequest} cancelEdit={() => setEditRequest(null)} dropFilesRef={dropFilesRef} onControlError={setControlError} onModelLabel={setModelLabel} onSessionModelChange={onSessionModelChange} submit={submit} submitVoice={submitVoice} stop={stop}/>
+    )}
 
     {confirmClearOpen && (
       <div

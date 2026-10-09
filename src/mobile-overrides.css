@@ -37,14 +37,42 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
 .app.chat-shell .chat-dock{padding-bottom:calc(10px + env(safe-area-inset-bottom))}
 .app.chat-shell .latest-button{bottom:calc(92px + env(safe-area-inset-bottom))}
 .app.chat-shell .mention-popover,.app.chat-shell .model-popover,.app.chat-shell .reasoning-popover{bottom:calc(86px + env(safe-area-inset-bottom))}
-.app.chat-shell .model-list{scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.24) transparent}
-.app.chat-shell .model-list::-webkit-scrollbar{width:5px}
+/* Universal ultra-thin scrollbars across the entire app */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+}
+
+[data-theme='light'] * {
+  scrollbar-color: rgba(0, 0, 0, 0.16) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 3px;
+  height: 3px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+}
+
+[data-theme='light'] ::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.app.chat-shell .model-list{scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.18) transparent}
+.app.chat-shell .model-list::-webkit-scrollbar{width:3px}
 .app.chat-shell .model-list::-webkit-scrollbar-track{background:transparent}
-.app.chat-shell .model-list::-webkit-scrollbar-thumb{background:rgba(255,255,255,.24);border-radius:99px}
-.code-block pre,.table-scroll{scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.2) transparent}
-.code-block pre::-webkit-scrollbar,.table-scroll::-webkit-scrollbar{height:5px}
+.app.chat-shell .model-list::-webkit-scrollbar-thumb{background:rgba(255,255,255,.18);border-radius:99px}
+.code-block pre,.table-scroll{scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.18) transparent}
+.code-block pre::-webkit-scrollbar,.table-scroll::-webkit-scrollbar{height:3px;width:3px}
 .code-block pre::-webkit-scrollbar-track,.table-scroll::-webkit-scrollbar-track{background:transparent}
-.code-block pre::-webkit-scrollbar-thumb,.table-scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,.2);border-radius:99px}
+.code-block pre::-webkit-scrollbar-thumb,.table-scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,.18);border-radius:99px}
 
 /* Never show desktop-style vertical scrollbar chrome in mobile surfaces; scrolling remains touch/wheel/keyboard accessible. */
 .profile-sheet,.profile-model-picker,.profile-soul textarea,.management-sheet,.tasks-sheet,.task-detail,.task-create-scroll,.task-delivery-list,.thread-scroll,.mention-panel,.app.chat-shell .model-list,.app.chat-shell .slash-popover{scrollbar-width:none}
@@ -3752,6 +3780,460 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
     transform: translateX(100%);
   }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   CLARIFY TOOL GUI & PAUSED / WAITING INDICATORS (MONOCHROME THEME ALIGNED)
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* Yellow waiting status pip on avatar when agent paused for user input */
+.bot-status-pip.waiting {
+  background: #eab308 !important;
+  border-color: var(--surface, #141416) !important;
+  box-shadow: 0 0 10px rgba(234, 179, 8, 0.7) !important;
+  animation: live-pip-pulse-waiting 1.5s ease-in-out infinite !important;
+}
+
+[data-theme='light'] .bot-status-pip.waiting {
+  background: #ca8a04 !important;
+  border-color: #ffffff !important;
+  box-shadow: 0 0 8px rgba(202, 138, 4, 0.55) !important;
+}
+
+@keyframes live-pip-pulse-waiting {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+  50% {
+    transform: scale(1.25);
+    opacity: 1;
+    box-shadow: 0 0 12px rgba(234, 179, 8, 0.9) !important;
+  }
+}
+
+.bot-clarify-question {
+  display: block;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--text, #f4f5f7);
+  opacity: 0.82;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+
+[data-theme='light'] .bot-clarify-question {
+  color: #09090b;
+  opacity: 0.85;
+}
+
+/* Clarify bottom replacement container (temporarily replaces Composer) */
+.clarify-bottom-container {
+  position: relative;
+  padding: 12px 16px calc(14px + env(safe-area-inset-bottom));
+  background: var(--surface, #141416);
+  border-top: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 20;
+  animation: app-tab-enter 0.2s var(--ease-out-smooth) both;
+}
+
+[data-theme='light'] .clarify-bottom-container {
+  background: #ffffff;
+  border-top-color: rgba(0, 0, 0, 0.08);
+}
+
+.clarify-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.clarify-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.clarify-main-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text, #f4f5f7);
+  letter-spacing: -0.01em;
+}
+
+.clarify-step-badge {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted, #94a3b8);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 7px;
+  border-radius: 999px;
+}
+
+[data-theme='light'] .clarify-step-badge {
+  background: rgba(0, 0, 0, 0.05);
+  color: #71717a;
+}
+
+.clarify-skip-btn {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--muted, #94a3b8);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 6px 10px;
+  border-radius: 999px;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.clarify-skip-btn:hover,
+.clarify-skip-btn:active {
+  color: var(--text, #f4f5f7);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+[data-theme='light'] .clarify-skip-btn:hover,
+[data-theme='light'] .clarify-skip-btn:active {
+  color: #09090b;
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.clarify-question-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text, #f4f5f7);
+  line-height: 1.4;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.clarify-multi-tag {
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--muted, #94a3b8);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.clarify-options-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+  -webkit-overflow-scrolling: touch;
+}
+
+.clarify-options-container::-webkit-scrollbar {
+  width: 3px;
+}
+
+.clarify-options-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.clarify-options-container::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+}
+
+[data-theme='light'] .clarify-options-container {
+  scrollbar-color: rgba(0, 0, 0, 0.16) transparent;
+}
+
+[data-theme='light'] .clarify-options-container::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.clarify-choices-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.clarify-option-pill {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text, #f4f5f7);
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.14s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+[data-theme='light'] .clarify-option-pill {
+  background: #f4f4f5;
+  border-color: #e4e4e7;
+  color: #18181b;
+}
+
+.clarify-option-pill:active {
+  transform: scale(0.985);
+}
+
+.clarify-option-pill.selected {
+  background: var(--text, #f4f5f7);
+  color: var(--bg, #09090b);
+  border-color: var(--text, #f4f5f7);
+  font-weight: 600;
+}
+
+[data-theme='light'] .clarify-option-pill.selected {
+  background: #09090b;
+  color: #ffffff;
+  border-color: #09090b;
+}
+
+.clarify-option-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.clarify-other-pill {
+  font-style: italic;
+  opacity: 0.85;
+}
+
+.clarify-check-pip {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 8px;
+  flex-shrink: 0;
+}
+
+.clarify-check-pip.visible {
+  color: currentColor;
+}
+
+.clarify-custom-form {
+  margin-top: 4px;
+}
+
+.clarify-custom-input {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.15));
+  color: var(--text, #f4f5f7);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  box-sizing: border-box;
+}
+
+[data-theme='light'] .clarify-custom-input {
+  background: #f9f9fb;
+  border-color: #d4d4d8;
+  color: #09090b;
+}
+
+.clarify-custom-input:focus {
+  border-color: var(--text, #f4f5f7);
+}
+
+.clarify-footer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.clarify-footer-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.clarify-back-step-btn {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--muted, #94a3b8);
+  background: transparent;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  border-radius: 999px;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+
+.clarify-confirm-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--bg, #09090b);
+  background: var(--text, #f4f5f7);
+  border: none;
+  border-radius: 999px;
+  padding: 8px 16px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+[data-theme='light'] .clarify-confirm-btn {
+  color: #ffffff;
+  background: #09090b;
+}
+
+.clarify-confirm-btn:active {
+  transform: scale(0.97);
+}
+
+.clarify-confirm-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Clarify Historical Bubble in Message Transcript */
+.clarify-history-row {
+  display: flex;
+  justify-content: flex-start;
+  width: 100%;
+  margin: 3px 0 6px;
+}
+
+.clarify-history-bubble,
+.clarify-history-card {
+  min-width: 250px;
+  max-width: 85%;
+  border-radius: 16px;
+  background: #141518;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  color: #e5e7eb;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: all 0.16s ease;
+}
+
+[data-theme='light'] .clarify-history-bubble,
+[data-theme='light'] .clarify-history-card {
+  background: #ffffff;
+  color: #09090b;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.03), 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+.clarify-history-header-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 9px 13px;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+  gap: 8px;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.clarify-history-header-btn:active {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+[data-theme='light'] .clarify-history-header-btn:active {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.clarify-history-summary-wrap {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.clarify-history-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: inherit;
+  letter-spacing: -0.01em;
+  flex-shrink: 0;
+}
+
+.clarify-history-preview {
+  font-size: 12px;
+  font-weight: 400;
+  color: color-mix(in srgb, currentColor 55%, transparent);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.clarify-history-chevron {
+  color: color-mix(in srgb, currentColor 45%, transparent);
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  flex-shrink: 0;
+}
+
+.clarify-history-chevron.expanded {
+  transform: rotate(180deg);
+}
+
+.clarify-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 6px 13px 11px 13px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+[data-theme='light'] .clarify-history-list {
+  border-top-color: rgba(0, 0, 0, 0.06);
+}
+
+.clarify-history-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.clarify-history-question {
+  font-size: 13px;
+  font-weight: 500;
+  color: inherit;
+  line-height: 1.35;
+}
+
+.clarify-history-answer {
+  font-size: 12.5px;
+  font-weight: 400;
+  color: color-mix(in srgb, currentColor 55%, transparent);
+  line-height: 1.35;
+}
+
 
 
 

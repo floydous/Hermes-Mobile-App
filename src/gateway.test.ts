@@ -18,6 +18,12 @@ class MockWebSocket {
 
   send(data: string) {
     this.sent.push(data)
+    try {
+      const parsed = JSON.parse(data)
+      if (parsed.method === 'client.capabilities' && typeof parsed.id === 'number') {
+        setTimeout(() => this.receive({ jsonrpc: '2.0', id: parsed.id, result: { accepted: true } }), 0)
+      }
+    } catch {}
     for (let i = this.waiters.length - 1; i >= 0; i--) {
       if (this.waiters[i].predicate(data)) {
         const item = this.waiters[i]
@@ -194,6 +200,131 @@ describe('Desktop Gateway protocol', () => {
     expect(response).toContain('"choice":"once"')
   })
 
+  it('defers clarify server-to-client requests without sending -32601 and accepts async user answers', async () => {
+    let mockWs!: MockWebSocket
+    const client = new HermesGatewayClient(
+      async () => 'ws://127.0.0.1:9119/api/ws',
+      url => {
+        mockWs = new MockWebSocket(url)
+        return mockWs as unknown as WebSocket
+      }
+    )
+
+    const connectPromise = client.connect()
+    await Promise.resolve()
+    mockWs.receive({ method: 'event', params: { type: 'gateway.ready', payload: {} } })
+    await connectPromise
+
+    const listener = vi.fn()
+    client.setEventListener(listener)
+
+    mockWs.receive({
+      jsonrpc: '2.0',
+      id: 'srq-clarify-12345',
+      method: 'clarify',
+      params: {
+        session_id: 's-clarify',
+        questions: [{ qid: 'q1', question: 'Which DB?' }],
+      },
+    })
+
+    // Listener receives the clarify event
+    expect(listener).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'request.clarify',
+      sessionId: 's-clarify',
+      payload: expect.objectContaining({
+        requestId: 'srq-clarify-12345',
+      }),
+    }))
+
+    // Client responds with user answer
+    client.respondToServerRequest('srq-clarify-12345', {
+      answers: { q1: 'PostgreSQL' },
+    })
+
+    const response = await mockWs.waitForSent(line => line.includes('srq-clarify-12345'))
+    expect(response).toContain('"answers":{"q1":"PostgreSQL"}')
+    expect(response).not.toContain('-32601')
+  })
+
+  it('replays open_requests on resumeSession and ensures duplicate resumes are idempotent', async () => {
+    let mockWs!: MockWebSocket
+    const client = new HermesGatewayClient(
+      async () => 'ws://127.0.0.1:9119/api/ws',
+      url => {
+        mockWs = new MockWebSocket(url)
+        return mockWs as unknown as WebSocket
+      }
+    )
+
+    const connectPromise = client.connect()
+    await Promise.resolve()
+    mockWs.receive({ method: 'event', params: { type: 'gateway.ready', payload: {} } })
+    await connectPromise
+
+    const listener = vi.fn()
+    client.setEventListener(listener)
+
+    // Simulate resume response carrying an open clarify request
+    const resumePromise = client.resumeSession('session-background-1', 'default')
+    const resumeSent = await mockWs.waitForSent(line => line.includes('"session.resume"'))
+    const parsedResume = JSON.parse(resumeSent)
+
+    mockWs.receive({
+      jsonrpc: '2.0',
+      id: parsedResume.id,
+      result: {
+        session_id: 'session-background-1',
+        open_requests: [
+          {
+            id: 'srq-replayed-888',
+            method: 'clarify',
+            params: {
+              session_id: 'session-background-1',
+              questions: [{ qid: 'q_db', question: 'Select DB' }],
+            },
+          },
+        ],
+      },
+    })
+
+    await resumePromise
+
+    // Verify open_requests was replayed to listener
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(listener).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'request.clarify',
+      payload: expect.objectContaining({
+        requestId: 'srq-replayed-888',
+      }),
+    }))
+
+    // Second resume of the same session: must NOT re-dispatch the same request twice
+    const secondResumePromise = client.resumeSession('session-background-1', 'default')
+    const secondSent = await mockWs.waitForSent(line => line.includes(`"id":${parsedResume.id + 1}`))
+    mockWs.receive({
+      jsonrpc: '2.0',
+      id: parsedResume.id + 1,
+      result: {
+        session_id: 'session-background-1',
+        open_requests: [
+          {
+            id: 'srq-replayed-888',
+            method: 'clarify',
+            params: {
+              session_id: 'session-background-1',
+              questions: [{ qid: 'q_db', question: 'Select DB' }],
+            },
+          },
+        ],
+      },
+    })
+    await secondResumePromise
+
+    // Idempotency: listener was not called a second time
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
   it('passes confirm_empty_truncate on prompt.submit when truncating at ordinal 0/1', async () => {
     let mockWs!: MockWebSocket
     const client = new HermesGatewayClient(
@@ -228,5 +359,49 @@ describe('Desktop Gateway protocol', () => {
       params: { type: 'message.complete', session_id: 's-1', payload: { status: 'complete', text: 'Answer' } },
     })
     await submitPromise
+  })
+
+  it('dispatches terminal message.complete event to active turn listener even if event carries remapped runtime session_id', async () => {
+    let mockWs!: MockWebSocket
+    const client = new HermesGatewayClient(
+      async () => 'ws://127.0.0.1:9119/api/ws',
+      url => {
+        mockWs = new MockWebSocket(url)
+        return mockWs as unknown as WebSocket
+      }
+    )
+
+    const connectPromise = client.connect()
+    await Promise.resolve()
+    mockWs.receive({ method: 'event', params: { type: 'gateway.ready', payload: {} } })
+    await connectPromise
+
+    const listener = vi.fn()
+    const submitPromise = client.submitPrompt(
+      'stored-canonical-id',
+      'Can you try use clarify tool?',
+      listener
+    )
+
+    const promptFrame = await mockWs.waitForSent(line => line.includes('"prompt.submit"'))
+    const promptCall = JSON.parse(promptFrame.trim())
+    mockWs.receive({ jsonrpc: '2.0', id: promptCall.id, result: { status: 'streaming' } })
+
+    // Gateway server emits message.complete with internal runtime session_id instead of stored-canonical-id!
+    mockWs.receive({
+      method: 'event',
+      params: {
+        type: 'message.complete',
+        session_id: 'runtime-internal-session-key-999',
+        payload: { text: 'The clarify tool worked.' },
+      },
+    })
+
+    // submitPromise must settle and NOT get stuck indefinitely!
+    await submitPromise
+    expect(listener).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'message.complete',
+      payload: expect.objectContaining({ text: 'The clarify tool worked.' }),
+    }))
   })
 })

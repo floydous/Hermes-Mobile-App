@@ -104,6 +104,7 @@ export type TurnSubmissionPipelineArgs = {
   onComplete: (text: string, usage?: LiveUsage) => void
   onToolStart: (id: string, name: string, context?: string, parameters?: Record<string, unknown>) => void
   onToolComplete: (id: string, name: string, durationS?: number, summary?: string) => void
+  onClarifyRequest?: (requestId: string, questions: Array<{ qid: string; question: string; choices?: string[] | null; multi_select?: boolean }>) => void
   onTitleUpdate: (title: string) => void
   onSessionsUpdate: (updater: (items: LiveSession[]) => LiveSession[]) => void
   onSelectedIdUpdate: (newId: string) => void
@@ -136,16 +137,23 @@ export async function executeTurnSubmissionPipeline(
         completionUsage = payload.usage && typeof payload.usage === 'object' ? payload.usage as LiveUsage : undefined
         args.onComplete(finalText, completionUsage)
       }
-      if (type === 'tool.start') {
-        const id = String(payload.tool_id || payload.name || `tool-${Date.now()}`)
-        const toolName = String(payload.name || 'tool')
+      if (type === 'tool.start' || type === 'tool.started' || type === 'tool.generating') {
+        const id = String(payload.tool_id || payload.name || payload.tool_name || `tool-${Date.now()}`)
+        const toolName = String(payload.name || payload.tool_name || payload.tool || 'tool')
         const rawParams = payload.parameters || payload.args || {}
         const params = (rawParams && typeof rawParams === 'object' ? rawParams : {}) as Record<string, unknown>
         args.onToolStart(id, toolName, typeof payload.context === 'string' ? payload.context : undefined, params)
       }
-      if (type === 'tool.complete') {
-        const id = String(payload.tool_id || payload.name || `tool-${Date.now()}`)
-        const toolName = String(payload.name || 'tool')
+      if (type === 'request.clarify') {
+        const reqId = String(payload.requestId || payload.id || '')
+        const questions = Array.isArray(payload.questions) ? payload.questions : []
+        if (reqId && questions.length > 0) {
+          args.onClarifyRequest?.(reqId, questions as any)
+        }
+      }
+      if (type === 'tool.complete' || type === 'tool.completed') {
+        const id = String(payload.tool_id || payload.name || payload.tool_name || `tool-${Date.now()}`)
+        const toolName = String(payload.name || payload.tool_name || payload.tool || 'tool')
         args.onToolComplete(
           id,
           toolName,

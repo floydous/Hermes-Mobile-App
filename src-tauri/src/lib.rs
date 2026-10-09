@@ -48,8 +48,9 @@ fn is_loopback(origin: &str) -> bool {
 
 fn authenticated_get(app: &tauri::AppHandle, origin: &str, path: &str) -> Result<String, String> {
     let client = &*HTTP_CLIENT;
-    let request = client.get(format!("{origin}{path}"));
+    let url = format!("{origin}{path}");
     if is_loopback(origin) {
+        let request = client.get(&url);
         request
             .header("X-Hermes-Session-Token", session_token(client, origin)?)
             .send()
@@ -59,24 +60,91 @@ fn authenticated_get(app: &tauri::AppHandle, origin: &str, path: &str) -> Result
             .text()
             .map_err(|error| format!("Could not read Hermes response: {error}"))
     } else {
-        let mut response = request
-            .bearer_auth(remote_auth::load(app, origin)?.access_token)
-            .send()
-            .map_err(|error| format!("Hermes request failed: {error}"))?;
-        if response.status().as_u16() == 401 {
-            let refreshed = remote_auth::refresh(app, origin)?;
-            response = client
-                .get(format!("{origin}{path}"))
-                .bearer_auth(refreshed.access_token)
-                .send()
-                .map_err(|error| format!("Hermes retry failed after token refresh: {error}"))?;
+        let mut attempts = 0;
+        let mut last_err = String::new();
+        while attempts < 2 {
+            attempts += 1;
+            let request = client.get(&url);
+            let send_res = request
+                .bearer_auth(remote_auth::load(app, origin)?.access_token)
+                .send();
+            match send_res {
+                Ok(mut response) => {
+                    if response.status().as_u16() == 401 {
+                        let refreshed = remote_auth::refresh(app, origin)?;
+                        response = client
+                            .get(&url)
+                            .bearer_auth(refreshed.access_token)
+                            .send()
+                            .map_err(|error| format!("Hermes retry failed after token refresh: {error}"))?;
+                    }
+                    return response
+                        .error_for_status()
+                        .map_err(|error| format!("Hermes rejected the request: {error}"))?
+                        .text()
+                        .map_err(|error| format!("Could not read Hermes response: {error}"));
+                }
+                Err(error) => {
+                    last_err = format!("Hermes request failed: {error}");
+                    // Transient network hiccup on mobile mesh tunnel (stale socket): yield briefly and retry once
+                    std::thread::sleep(Duration::from_millis(200));
+                }
+            }
         }
-        response
-            .error_for_status()
-            .map_err(|error| format!("Hermes rejected the request: {error}"))?
-            .text()
-            .map_err(|error| format!("Could not read Hermes response: {error}"))
+        Err(last_err)
     }
+}
+
+fn authenticated_delete_for_app(
+    app: &tauri::AppHandle,
+    origin: &str,
+    path: &str,
+) -> Result<String, String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|error| error.to_string())?;
+    let mut response = client
+        .delete(format!("{origin}{path}"))
+        .bearer_auth(remote_auth::load(app, origin)?.access_token)
+        .send()
+        .map_err(|error| format!("Hermes request failed: {error}"))?;
+    if response.status().as_u16() == 401 {
+        let refreshed = remote_auth::refresh(app, origin)?;
+        response = client
+            .delete(format!("{origin}{path}"))
+            .bearer_auth(refreshed.access_token)
+            .send()
+            .map_err(|error| format!("Hermes retry failed after token refresh: {error}"))?;
+    }
+    let status = response.status();
+    let text = response
+        .text()
+        .map_err(|error| format!("Could not read Hermes response: {error}"))?;
+    if !status.is_success() && status.as_u16() != 404 {
+        let detail = serde_json::from_str::<serde_json::Value>(&text)
+            .ok()
+            .and_then(|value| value.get("detail").and_then(|detail| detail.as_str()).map(str::to_string))
+            .unwrap_or_else(|| text.trim().to_string());
+        return Err(format!("Hermes rejected request (HTTP {status}): {detail}"));
+    }
+    Ok(text)
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+fn hermes_delete_session(
+    app: tauri::AppHandle,
+    baseUrl: String,
+    sessionId: String,
+    profile: Option<String>,
+) -> Result<String, String> {
+    let origin = server_origin(&baseUrl);
+    let path = match profile {
+        Some(p) if !p.trim().is_empty() => format!("/api/sessions/{}?profile={}", urlencoding::encode(&sessionId), urlencoding::encode(p.trim())),
+        _ => format!("/api/sessions/{}", urlencoding::encode(&sessionId)),
+    };
+    authenticated_delete_for_app(&app, &origin, &path)
 }
 
 #[tauri::command]
@@ -651,7 +719,8 @@ pub fn run() {
             hermes_create_cron,
             hermes_instantiate_cron_blueprint,
             open_microphone_settings,
-            hermes_ws_url
+            hermes_ws_url,
+            hermes_delete_session
         ])
         .run(tauri::generate_context!())
         .expect("error while running Hermes Mobile");

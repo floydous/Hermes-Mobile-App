@@ -42,8 +42,7 @@ export function buildBotRows(
           }
         }
       } else if (!activeSession && sessions && Array.isArray(sessions)) {
-        const fallback = sessions.find(s => s.profile === profile.name && (s.title === 'Bot Chat' || !s.title))
-          || sessions.find(s => s.profile === profile.name)
+        const fallback = sessions.find(s => s.profile === profile.name && s.title === 'Bot Chat')
         if (fallback) activeSession = fallback
       }
       return { profile, session: activeSession }

@@ -13,12 +13,14 @@ import { onBackButtonPress } from '@tauri-apps/api/app'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { buildAttachmentPrompt, attachmentSummary } from './attachment-routing'
 import { buildBotRows, cleanPreviewSnippet, resolveCanonicalSessionId, type RosterProfile } from './live-model'
-import { getRandomSpinnerPhrase } from './spinner-phrases'
+import { getInitialSpinnerPhrase, getProgressiveSpinnerPhrase } from './spinner-phrases'
 import { settleAssistantResponse, type SettledAssistantResponse as SettledAssistantState } from './settled-assistant'
 import {
   InFlightSubmissionTracker,
   isActiveChatTurn,
+  isBotRowWorking,
   isOptimisticUserMessageAlreadyCached,
+  isSessionRowWorking,
   isTurnSettledByTranscript,
   reconcileActiveTurns,
   resolveDelegationTargetProfile,
@@ -30,6 +32,7 @@ import {
 } from './chat-turn'
 import { errorMessage, RequestEpoch, selectRestoredEndpoint } from './connection-state'
 import {
+  deduplicateConsecutiveMessages,
   getCachedSessionMessages,
   isHumanChatSession,
   removeCachedSessionMessages,
@@ -44,11 +47,14 @@ import {
   connectAndSubmit,
   createProfile,
   createSession,
+  getResolvedSessionId,
   interruptSession,
   loadActiveSessions,
   loadMessages,
   loadSnapshot,
   onGatewayGlobalEvent,
+  respondClarify,
+  resumeSession,
   savedHermesEndpoint,
   setActiveHermesEndpoint,
   updateSessionTitle,
@@ -57,6 +63,15 @@ import {
   type LiveSession,
   type LiveUsage,
 } from './hermes'
+import { type ClarifyRequest } from './components/ClarifyCard'
+import {
+  clearPersistedClarify,
+  doesSessionMatchTurn,
+  getPersistedClarify,
+  isSessionCanonical,
+  persistClarify,
+  resolveMatchingClarify,
+} from './clarify-isolation'
 
 import { computeNextSwipeTab, isHorizontalSwipeIntent, type Tab } from './tab-swipe'
 type DraftBot = { role: string; name: string; description: string; soul: string; model: string; provider: string; shape: string }
@@ -91,6 +106,31 @@ const roles: Record<string, [string, string]> = {
 }
 
 export { type ActiveBotTurn, type ToolActivity }
+
+function resolveProfileForSessionId(
+  sid: string,
+  profiles: LiveProfile[],
+  sessions: LiveSession[],
+  activeTurns: Record<string, ActiveBotTurn | undefined>
+): string | null {
+  if (!sid) return null
+  for (const [prof, turn] of Object.entries(activeTurns)) {
+    if (turn && turn.sessionId === sid) return turn.profile || prof
+  }
+  for (const p of profiles) {
+    if (
+      p.canonical_session?.id === sid ||
+      p.canonical_session?.resolved_id === sid ||
+      sid === `draft:${p.name}` ||
+      sid.startsWith(`dispatched:${p.name}`)
+    ) {
+      return p.name
+    }
+  }
+  const foundSession = sessions.find(s => s.id === sid)
+  if (foundSession?.profile) return foundSession.profile
+  return null
+}
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('bots')
@@ -140,6 +180,9 @@ export default function App() {
   const sendingRef = useRef(false)
   sendingRef.current = sending
   const [toolActivities, setToolActivities] = useState<ToolActivity[]>([])
+  const [pendingClarify, setPendingClarify] = useState<ClarifyRequest | null>(null)
+  const pendingClarifyRef = useRef<Record<string, ClarifyRequest>>({})
+  const pendingClarifyByProfileRef = useRef<Record<string, ClarifyRequest>>({})
   const inFlightDelegationByToolId = useRef<Map<string, string>>(new Map())
   const [activeTurns, setActiveTurns] = useState<Record<string, ActiveBotTurn>>(() => {
     return restorePersistedActiveTurns(typeof localStorage !== 'undefined' ? localStorage.getItem('hermes-mobile-active-turns') : null)
@@ -148,12 +191,32 @@ export default function App() {
   activeTurnsRef.current = activeTurns
   const activeInFlightTurnsRef = useRef<InFlightSubmissionTracker>(new InFlightSubmissionTracker())
 
+  const lastPersistedTurnJsonRef = useRef<string>('')
   useEffect(() => {
     try {
       if (Object.keys(activeTurns).length === 0) {
-        localStorage.removeItem('hermes-mobile-active-turns')
+        if (lastPersistedTurnJsonRef.current !== '') {
+          localStorage.removeItem('hermes-mobile-active-turns')
+          lastPersistedTurnJsonRef.current = ''
+        }
       } else {
-        localStorage.setItem('hermes-mobile-active-turns', JSON.stringify(activeTurns))
+        // Only persist to localStorage when turn structure changes (exclude transient rotating statusText)
+        const structuralFingerprint = JSON.stringify(
+          Object.entries(activeTurns).map(([key, t]) => [
+            key,
+            t.sessionId,
+            t.profile,
+            t.status,
+            t.streamingText,
+            t.toolActivities?.length,
+            t.startedAt,
+            t.pendingClarify?.requestId,
+          ])
+        )
+        if (structuralFingerprint !== lastPersistedTurnJsonRef.current) {
+          lastPersistedTurnJsonRef.current = structuralFingerprint
+          localStorage.setItem('hermes-mobile-active-turns', JSON.stringify(activeTurns))
+        }
       }
     } catch {}
   }, [activeTurns])
@@ -320,7 +383,14 @@ export default function App() {
       if (refreshEpochRef.current.isCurrent(epoch)) {
         const message = errorMessage(reason, 'Could not connect to Hermes Desktop.')
         lastConnectionErrorRef.current = message
-        setError(message)
+        // If we already have loaded cached profiles or sessions, do not flash a jarring error banner
+        // on transient background poll timeouts; only set error if the screen is completely empty
+        setProfiles(prevProfiles => {
+          if (prevProfiles.length === 0) {
+            setError(message)
+          }
+          return prevProfiles
+        })
         setConnectionStatus('disconnected')
       }
       return null
@@ -338,24 +408,164 @@ export default function App() {
 
   useEffect(() => {
     return onGatewayGlobalEvent(event => {
+      if (event.type === 'message.delta') {
+        const sid = event.sessionId || ''
+        const prof = resolveProfileForSessionId(sid, profiles, sessions, activeTurnsRef.current)
+        if (sid && typeof event.payload.text === 'string') {
+          if (doesSessionMatchTurn(selectedRef.current, sid, prof || '', profiles, id => getResolvedSessionId(id, activeEndpointRef.current))) {
+            setStreaming(event.payload.text)
+          }
+        }
+      }
+      if (event.type === 'tool.start' || event.type === 'tool.started' || event.type === 'tool.generating') {
+        const sid = event.sessionId || ''
+        const prof = resolveProfileForSessionId(sid, profiles, sessions, activeTurnsRef.current)
+        const id = String(event.payload.tool_id || event.payload.name || event.payload.tool_name || `tool-${Date.now()}`)
+        const toolName = String(event.payload.name || event.payload.tool_name || event.payload.tool || 'tool')
+        const summary = typeof event.payload.context === 'string' ? event.payload.context : undefined
+        if (doesSessionMatchTurn(selectedRef.current, sid, prof || '', profiles, id => getResolvedSessionId(id, activeEndpointRef.current))) {
+          setToolActivities(items => [
+            ...(Array.isArray(items) ? items : []).filter(item => item && item.id !== id),
+            { id, name: toolName, status: 'running', summary },
+          ])
+        }
+      }
+      if (event.type === 'tool.complete' || event.type === 'tool.completed') {
+        const sid = event.sessionId || ''
+        const prof = resolveProfileForSessionId(sid, profiles, sessions, activeTurnsRef.current)
+        const id = String(event.payload.tool_id || event.payload.name || event.payload.tool_name || `tool-${Date.now()}`)
+        const toolName = String(event.payload.name || event.payload.tool_name || event.payload.tool || 'tool')
+        const duration_s = typeof event.payload.duration_s === 'number' ? event.payload.duration_s : undefined
+        const summary = typeof event.payload.summary === 'string' ? event.payload.summary : undefined
+        if (doesSessionMatchTurn(selectedRef.current, sid, prof || '', profiles, id => getResolvedSessionId(id, activeEndpointRef.current))) {
+          setToolActivities(items => [
+            ...(Array.isArray(items) ? items : []).filter(item => item && item.id !== id),
+            { id, name: toolName, status: 'done', duration_s, summary },
+          ])
+        }
+      }
+      if (event.type === 'request.clarify') {
+        const reqId = String(event.payload.requestId || event.payload.id || '')
+        const rawQuestions = event.payload.questions
+        const questions = (Array.isArray(rawQuestions) ? rawQuestions : []).map((q: any, idx: number) => ({
+          qid: String(q?.qid || `q_${idx + 1}`),
+          question: String(q?.question || 'Please clarify:'),
+          choices: Array.isArray(q?.choices) ? q.choices.map(String) : null,
+          multi_select: Boolean(q?.multi_select),
+        }))
+        const sid = event.sessionId || ''
+        const prof = resolveProfileForSessionId(sid, profiles, sessions, activeTurnsRef.current)
+          || (selectedRef.current && doesSessionMatchTurn(selectedRef.current, sid, '', profiles) ? selectedRef.current.profile : null)
+
+        console.log('[Hermes Debug] onGatewayGlobalEvent request.clarify:', reqId, 'sid:', sid, 'resolved profile:', prof)
+
+        if (!prof) {
+          console.warn('[Hermes Debug] request.clarify arrived for unknown profile/session:', sid)
+          return
+        }
+
+        const req: ClarifyRequest = { requestId: reqId, sessionId: sid, questions }
+        pendingClarifyRef.current[sid] = req
+        const isCanonical = isSessionCanonical({ id: sid, profile: prof }, profiles)
+        if (isCanonical) {
+          pendingClarifyByProfileRef.current[prof] = req
+        }
+        persistClarify(req, prof, isCanonical)
+        if (doesSessionMatchTurn(selectedRef.current, sid, prof, profiles, id => getResolvedSessionId(id, activeEndpointRef.current))) {
+          setPendingClarify(req)
+          setSending(true)
+        }
+        setActiveTurns(prev => ({
+          ...prev,
+          [prof]: {
+            ...(prev[prof] || {
+              sessionId: sid,
+              profile: prof,
+              status: 'thinking',
+              statusText: 'Thinking…',
+              streamingText: '',
+              toolActivities: [],
+              userMessage: { id: 0, role: 'user', content: '' },
+              startedAt: Date.now(),
+            }),
+            sessionId: sid,
+            status: 'waiting',
+            statusText: 'Needs your input…',
+            needsInput: true,
+            pendingClarify: req,
+          },
+        }))
+      }
       if (event.type === 'message.complete' || event.type === 'turn.end' || event.type === 'turn.error') {
-        const sid = event.sessionId
-        if (sid) {
-          recentEndedTurnsRef.current.set(sid, Date.now())
-          activeInFlightTurnsRef.current.end(sid)
+        const sid = event.sessionId || ''
+        const prof = resolveProfileForSessionId(sid, profiles, sessions, activeTurnsRef.current)
+          || (selectedRef.current && doesSessionMatchTurn(selectedRef.current, sid, '', profiles, id => getResolvedSessionId(id, activeEndpointRef.current)) ? selectedRef.current.profile : null)
+
+        if (sid || prof) {
+          if (sid) recentEndedTurnsRef.current.set(sid, Date.now())
+          if (prof) recentEndedTurnsRef.current.set(prof, Date.now())
+          if (sid) activeInFlightTurnsRef.current.end(sid)
+          if (prof) activeInFlightTurnsRef.current.end(prof)
+
+          const isMatchingSelected = doesSessionMatchTurn(
+            selectedRef.current,
+            sid,
+            prof || '',
+            profiles,
+            id => getResolvedSessionId(id, activeEndpointRef.current)
+          )
+
+          if (isMatchingSelected) {
+            setSending(false)
+            setStreaming('')
+            setToolActivities([])
+            setPendingClarify(null)
+            if (typeof event.payload.text === 'string' && event.payload.text.trim()) {
+              const completeMsg: LiveMessage = {
+                id: -Date.now(),
+                role: 'assistant',
+                content: event.payload.text,
+                timestamp: Math.floor(Date.now() / 1000),
+              }
+              setMessages(prev => deduplicateConsecutiveMessages([...prev, completeMsg]))
+              const curId = selectedRef.current?.id
+              if (curId) {
+                const cached = messageCacheRef.current.get(curId) || []
+                const nextCached = deduplicateConsecutiveMessages([...cached, completeMsg])
+                messageCacheRef.current.set(curId, nextCached)
+                setCachedSessionMessages(curId, nextCached)
+              }
+            }
+          }
+
+          // Clear any persisted clarify for this session or profile
+          clearPersistedClarify(sid, prof)
+          if (selectedRef.current?.id) clearPersistedClarify(selectedRef.current.id, selectedRef.current.profile)
+
           setActiveTurns(prev => {
             let changed = false
             const next = { ...prev }
-            for (const [prof, turn] of Object.entries(next)) {
-              if (turn && (turn.sessionId === sid || prof === sid)) {
-                activeInFlightTurnsRef.current.end(prof)
-                delete next[prof]
+            for (const [key, turn] of Object.entries(next)) {
+              const turnMatches = Boolean(
+                key === sid ||
+                key === prof ||
+                (turn && (
+                  turn.sessionId === sid ||
+                  turn.profile === prof ||
+                  doesSessionMatchTurn(turn.sessionId ? { id: turn.sessionId, profile: turn.profile || prof || '', title: 'Bot Chat', preview: '' } : null, sid, turn.profile || prof || '', profiles, id => getResolvedSessionId(id, activeEndpointRef.current))
+                ))
+              )
+              if (turnMatches) {
+                activeInFlightTurnsRef.current.end(key)
+                if (turn?.profile) activeInFlightTurnsRef.current.end(turn.profile)
+                if (turn?.sessionId) activeInFlightTurnsRef.current.end(turn.sessionId)
+                delete next[key]
                 changed = true
               }
             }
             return changed ? next : prev
           })
-          // Automatically refresh so any new message preview/unread updates immediately!
+
           void refresh()
         }
       }
@@ -501,8 +711,14 @@ export default function App() {
       preview: session.preview || '',
     }
     const requestId = ++sessionLoadRef.current
-    const activeTurn = activeTurnsRef.current[safeSession.profile]
-      || Object.values(activeTurnsRef.current).find(t => t?.sessionId === safeSession.id)
+    const isCanonical = isSessionCanonical(safeSession, profiles)
+    const activeTurn = Object.values(activeTurnsRef.current).find(t =>
+      t && doesSessionMatchTurn(safeSession, t.sessionId || '', t.profile, profiles, id => getResolvedSessionId(id, activeEndpointRef.current))
+    ) || (
+      isCanonical
+        ? (activeTurnsRef.current[safeSession.profile] || Object.values(activeTurnsRef.current).find(t => t?.profile === safeSession.profile))
+        : undefined
+    )
 
     // Fast-path: check in-memory cache, then fallback to persistent localStorage cache for instant 0ms restoration
     let cached = messageCacheRef.current.get(safeSession.id)
@@ -526,6 +742,17 @@ export default function App() {
 
     // Synchronously mount ChatView on Frame 0 so the screen transitions in 0ms without freezing
     setSelected(safeSession)
+    const adhocSet = new Set(sessions.map(s => s.id))
+    const matchingClarify = resolveMatchingClarify({
+      session: safeSession,
+      profiles,
+      activeTurn,
+      pendingClarifyBySession: pendingClarifyRef.current,
+      pendingClarifyByProfile: pendingClarifyByProfileRef.current,
+      getPersistedClarify,
+      adhocSessionIds: adhocSet,
+    })
+    setPendingClarify(matchingClarify)
     setProfileSheet(false)
     setSettledAssistant(null)
     setError('')
@@ -536,12 +763,12 @@ export default function App() {
     )
     const isCachedSettled = isTurnSettledByTranscript(activeTurn, cached, isTurnInFlight)
 
-    if (shouldShowWorkingIndicator(activeTurn, isCachedSettled)) {
+    if (matchingClarify || shouldShowWorkingIndicator(activeTurn, isCachedSettled)) {
       setSending(true)
-      setStreaming(activeTurn.streamingText)
-      setToolActivities(activeTurn.toolActivities)
+      setStreaming(activeTurn?.streamingText || '')
+      setToolActivities(activeTurn?.toolActivities || [])
       setConversationLoading(false)
-      if (activeTurn.userMessage) {
+      if (activeTurn?.userMessage) {
         if (isOptimisticUserMessageAlreadyCached(cached, activeTurn.userMessage)) {
           setMessages(cached || [])
         } else {
@@ -564,6 +791,9 @@ export default function App() {
       setConversationLoading(!safeSession.id.startsWith('draft:'))
     }
 
+    // Rebind session on gateway to retrieve any in-flight open_requests (e.g. clarify from background run)
+    void resumeSession(safeSession.id, safeSession.profile, activeEndpointRef.current).catch(() => {})
+
     return (async () => {
       try {
         const loaded = await loadMessages(safeSession.id, safeSession.profile, activeEndpointRef.current)
@@ -571,7 +801,13 @@ export default function App() {
         const latestAssistant = latestUsage ? [...loaded].reverse().findIndex(message => message.role === 'assistant') : -1
         const resolvedLoaded = latestAssistant >= 0 ? loaded.map((message, index) => index === loaded.length - latestAssistant - 1 ? { ...message, usage: latestUsage } : message) : loaded
 
-        const isTurnActive = Boolean(activeTurnsRef.current[safeSession.profile] || activeInFlightTurnsRef.current.has(safeSession.profile))
+        const isTurnActive = Boolean(
+          Object.values(activeTurnsRef.current).some(t =>
+            t && doesSessionMatchTurn(safeSession, t.sessionId || '', t.profile, profiles, id => getResolvedSessionId(id, activeEndpointRef.current))
+          ) ||
+          activeInFlightTurnsRef.current.has(safeSession.id) ||
+          (isCanonical && (activeTurnsRef.current[safeSession.profile] || activeInFlightTurnsRef.current.has(safeSession.profile)))
+        )
         const existingMessages = messageCacheRef.current.get(safeSession.id) || []
         if (shouldRetainLocalMessages(resolvedLoaded, existingMessages, isTurnActive)) {
           // Do not overwrite optimistic user messages with empty array from unset SQLite backend
@@ -586,11 +822,12 @@ export default function App() {
 
         if (requestId !== sessionLoadRef.current || selectedRef.current?.id !== safeSession.id) return
 
-        const currentActive = activeTurnsRef.current[safeSession.profile]
-          || Object.values(activeTurnsRef.current).find(t => t?.sessionId === safeSession.id)
+        const currentActive = Object.values(activeTurnsRef.current).find(t =>
+          t && doesSessionMatchTurn(safeSession, t.sessionId || '', t.profile, profiles, id => getResolvedSessionId(id, activeEndpointRef.current))
+        ) || (isCanonical ? activeTurnsRef.current[safeSession.profile] : undefined)
         const isTurnInFlightAsync = Boolean(
-          activeInFlightTurnsRef.current.has(safeSession.profile) ||
-          activeInFlightTurnsRef.current.has(safeSession.id)
+          activeInFlightTurnsRef.current.has(safeSession.id) ||
+          (isCanonical && activeInFlightTurnsRef.current.has(safeSession.profile))
         )
         const isTranscriptSettled = isTurnSettledByTranscript(currentActive, resolvedLoaded, isTurnInFlightAsync)
 
@@ -617,9 +854,10 @@ export default function App() {
 
         if (currentActive?.userMessage && !isTranscriptSettled) {
           const hasUserMsg = resolvedLoaded.some(m => m.id === currentActive.userMessage?.id || (m.role === 'user' && m.content === currentActive.userMessage?.content))
-          setMessages(hasUserMsg ? resolvedLoaded : [...resolvedLoaded, currentActive.userMessage])
+          const merged = hasUserMsg ? resolvedLoaded : [...resolvedLoaded, currentActive.userMessage]
+          setMessages(deduplicateConsecutiveMessages(merged))
         } else {
-          setMessages(resolvedLoaded)
+          setMessages(deduplicateConsecutiveMessages(resolvedLoaded))
         }
       }
       catch (reason) {
@@ -653,6 +891,167 @@ export default function App() {
     }
   }, [creatingSession, profiles, openSession])
 
+  const handleAnswerClarify = useCallback((requestId: string, answers: Record<string, string | null>) => {
+    const currentSessionId = selectedRef.current?.id
+    const currentProfile = selectedRef.current?.profile
+    console.log('[Hermes Debug] handleAnswerClarify:', requestId, 'currentSessionId:', currentSessionId, 'currentProfile:', currentProfile, answers)
+    
+    // Construct and optimistically commit the historical Clarify tool message so the bubble renders immediately
+    const questions = pendingClarify?.questions || []
+    const responses = questions.map(q => {
+      const ans = answers[q.qid]
+      return {
+        question: q.question,
+        choices_offered: q.choices || [],
+        status: (ans !== null && ans !== undefined && ans !== '') ? 'answered' : 'skipped',
+        user_response: ans || null,
+      }
+    })
+    const toolMsgContent = JSON.stringify({
+      responses,
+      outcome: 'answered',
+    })
+    const optimisticToolMessage: LiveMessage = {
+      id: -Date.now(),
+      role: 'tool',
+      tool_name: 'clarify',
+      content: toolMsgContent,
+      timestamp: Math.floor(Date.now() / 1000),
+    }
+
+    if (currentSessionId) {
+      setMessages(prev => [...prev, optimisticToolMessage])
+      const cached = messageCacheRef.current.get(currentSessionId) || []
+      const nextCached = [...cached, optimisticToolMessage]
+      messageCacheRef.current.set(currentSessionId, nextCached)
+      setCachedSessionMessages(currentSessionId, nextCached)
+      delete pendingClarifyRef.current[currentSessionId]
+    }
+    if (currentProfile) {
+      delete pendingClarifyByProfileRef.current[currentProfile]
+    }
+    clearPersistedClarify(currentSessionId, currentProfile)
+    setPendingClarify(null)
+    setSending(true)
+    setToolActivities(items => (Array.isArray(items) ? items : []).map(t =>
+      t && t.name === 'clarify' ? { ...t, status: 'done' as const } : t
+    ))
+    respondClarify(requestId, answers, activeEndpointRef.current)
+    if (currentProfile) {
+      activeInFlightTurnsRef.current.start(currentProfile)
+    }
+    if (currentSessionId) {
+      activeInFlightTurnsRef.current.start(currentSessionId)
+    }
+    setActiveTurns(prev => {
+      const next = { ...prev }
+      const targetKeys = new Set([currentProfile, currentSessionId].filter(Boolean) as string[])
+      for (const [k, t] of Object.entries(prev)) {
+        if (t && (t.profile === currentProfile || t.sessionId === currentSessionId)) {
+          targetKeys.add(k)
+        }
+      }
+      for (const key of targetKeys) {
+        const cur = next[key] || {
+          sessionId: currentSessionId,
+          profile: currentProfile || 'default',
+          userMessage: { id: 0, role: 'user', content: '' },
+          startedAt: Date.now(),
+        }
+        next[key] = {
+          ...cur,
+          status: 'thinking',
+          statusText: 'Processing response…',
+          needsInput: false,
+          pendingClarify: null,
+          toolActivities: (cur.toolActivities || []).map(t =>
+            t && t.name === 'clarify' ? { ...t, status: 'done' as const } : t
+          ),
+        }
+      }
+      return next
+    })
+  }, [pendingClarify])
+
+  const handleSkipClarify = useCallback((requestId: string) => {
+    const currentSessionId = selectedRef.current?.id
+    const currentProfile = selectedRef.current?.profile
+    const emptyAnswers: Record<string, string | null> = {}
+    if (pendingClarify?.questions) {
+      for (const q of pendingClarify.questions) emptyAnswers[q.qid] = null
+    }
+
+    // Construct and optimistically commit the historical Clarify tool message with skipped status
+    const questions = pendingClarify?.questions || []
+    const responses = questions.map(q => ({
+      question: q.question,
+      choices_offered: q.choices || [],
+      status: 'skipped',
+      user_response: null,
+    }))
+    const toolMsgContent = JSON.stringify({
+      responses,
+      outcome: 'skipped',
+    })
+    const optimisticToolMessage: LiveMessage = {
+      id: -Date.now(),
+      role: 'tool',
+      tool_name: 'clarify',
+      content: toolMsgContent,
+      timestamp: Math.floor(Date.now() / 1000),
+    }
+
+    if (currentSessionId) {
+      setMessages(prev => [...prev, optimisticToolMessage])
+      const cached = messageCacheRef.current.get(currentSessionId) || []
+      const nextCached = [...cached, optimisticToolMessage]
+      messageCacheRef.current.set(currentSessionId, nextCached)
+      setCachedSessionMessages(currentSessionId, nextCached)
+      delete pendingClarifyRef.current[currentSessionId]
+    }
+    if (currentProfile) {
+      delete pendingClarifyByProfileRef.current[currentProfile]
+    }
+    clearPersistedClarify(currentSessionId, currentProfile)
+    setPendingClarify(null)
+    setSending(true)
+    respondClarify(requestId, emptyAnswers, activeEndpointRef.current)
+    if (currentProfile) {
+      activeInFlightTurnsRef.current.start(currentProfile)
+    }
+    if (currentSessionId) {
+      activeInFlightTurnsRef.current.start(currentSessionId)
+    }
+    setActiveTurns(prev => {
+      const next = { ...prev }
+      const targetKeys = new Set([currentProfile, currentSessionId].filter(Boolean) as string[])
+      for (const [k, t] of Object.entries(prev)) {
+        if (t && (t.profile === currentProfile || t.sessionId === currentSessionId)) {
+          targetKeys.add(k)
+        }
+      }
+      for (const key of targetKeys) {
+        const cur = next[key] || {
+          sessionId: currentSessionId,
+          profile: currentProfile || 'default',
+          userMessage: { id: 0, role: 'user', content: '' },
+          startedAt: Date.now(),
+        }
+        next[key] = {
+          ...cur,
+          status: 'thinking',
+          statusText: 'Continuing without clarification…',
+          needsInput: false,
+          pendingClarify: null,
+          toolActivities: (cur.toolActivities || []).map(t =>
+            t && t.name === 'clarify' ? { ...t, status: 'done' as const } : t
+          ),
+        }
+      }
+      return next
+    })
+  }, [pendingClarify])
+
   const submit = useCallback(async (
     attachmentRefs: { name: string; refText: string }[] = [],
     rawText = '',
@@ -677,7 +1076,7 @@ export default function App() {
       sessionId: turnSessionId,
       profile: turnProfile,
       status: 'thinking',
-      statusText: getRandomSpinnerPhrase(),
+      statusText: getInitialSpinnerPhrase(),
       streamingText: '',
       toolActivities: [],
       userMessage: localUserMessage,
@@ -703,7 +1102,19 @@ export default function App() {
         const idx = items.findIndex(m => m.id === options.editMessageId)
         if (idx >= 0) baseItems = items.slice(0, idx)
       }
-      const nextMessages = [...baseItems, ...(priorAssistantMessage ? [priorAssistantMessage] : []), localUserMessage]
+      const lastItem = baseItems[baseItems.length - 1]
+      const hasExistingAssistantAtTail = Boolean(
+        lastItem &&
+        lastItem.role === 'assistant' &&
+        (!priorSettled || lastItem.content === priorSettled.content)
+      )
+      const assistantToInject = (!hasExistingAssistantAtTail && priorAssistantMessage)
+        ? [priorAssistantMessage]
+        : []
+      const rawNext = [...baseItems, ...assistantToInject, localUserMessage]
+
+      const nextMessages = deduplicateConsecutiveMessages(rawNext)
+
       messageCacheRef.current.set(turnSessionId, nextMessages)
       setCachedSessionMessages(turnSessionId, nextMessages)
       return nextMessages
@@ -732,7 +1143,7 @@ export default function App() {
               },
             }
           })
-          if (selectedRef.current?.profile === turnProfile) {
+          if (doesSessionMatchTurn(selectedRef.current, turnSessionId, turnProfile, profiles, id => getResolvedSessionId(id, activeEndpointRef.current))) {
             setStreaming(text)
           }
         },
@@ -750,7 +1161,7 @@ export default function App() {
               },
             }
           })
-          if (selectedRef.current?.profile === turnProfile) {
+          if (doesSessionMatchTurn(selectedRef.current, turnSessionId, turnProfile, profiles, id => getResolvedSessionId(id, activeEndpointRef.current))) {
             setStreaming(text)
           }
         },
@@ -775,7 +1186,7 @@ export default function App() {
               },
             }
           })
-          if (selectedRef.current?.profile === turnProfile) {
+          if (doesSessionMatchTurn(selectedRef.current, turnSessionId, turnProfile, profiles, id => getResolvedSessionId(id, activeEndpointRef.current))) {
             setToolActivities(items => [
               ...(Array.isArray(items) ? items : []).filter(item => item && item.id !== id),
               { id, name: toolName, status: 'running', summary },
@@ -819,10 +1230,13 @@ export default function App() {
               ...safeCurrentTools.filter(t => t && t.id !== id),
               { id, name: toolName, status: 'done' as const, duration_s, summary },
             ]
+            const progressiveStatus = getProgressiveSpinnerPhrase(current.statusText)
             return {
               ...prev,
               [turnProfile]: {
                 ...current,
+                status: 'thinking',
+                statusText: progressiveStatus,
                 toolActivities: nextTools,
               },
             }
@@ -853,15 +1267,68 @@ export default function App() {
             void refresh()
           }
         },
+        onClarifyRequest: (requestId, rawQuestions) => {
+          const questions = (Array.isArray(rawQuestions) ? rawQuestions : []).map((q: any, idx: number) => ({
+            qid: String(q?.qid || `q_${idx + 1}`),
+            question: String(q?.question || 'Please clarify:'),
+            choices: Array.isArray(q?.choices) ? q.choices.map(String) : null,
+            multi_select: Boolean(q?.multi_select),
+          }))
+          const req: ClarifyRequest = { requestId, sessionId: turnSessionId, questions }
+          pendingClarifyRef.current[turnSessionId] = req
+          const isCanonical = isSessionCanonical({ id: turnSessionId, profile: turnProfile }, profiles)
+          if (isCanonical) {
+            pendingClarifyByProfileRef.current[turnProfile] = req
+          }
+          persistClarify(req, turnProfile, isCanonical)
+          if (
+            doesSessionMatchTurn(
+              selectedRef.current,
+              turnSessionId,
+              turnProfile,
+              profiles,
+              id => getResolvedSessionId(id, activeEndpointRef.current)
+            )
+          ) {
+            setPendingClarify(req)
+          }
+          setActiveTurns(prev => {
+            const current = prev[turnProfile] || {
+              sessionId: turnSessionId,
+              profile: turnProfile,
+              status: 'thinking',
+              statusText: 'Thinking…',
+              streamingText: '',
+              toolActivities: [],
+              userMessage: { id: 0, role: 'user', content: '' },
+              startedAt: Date.now(),
+            }
+            return {
+              ...prev,
+              [turnProfile]: {
+                ...current,
+                sessionId: turnSessionId,
+                status: 'waiting',
+                statusText: 'Needs your input…',
+                needsInput: true,
+                pendingClarify: req,
+              },
+            }
+          })
+        },
         onTitleUpdate: title => {
           setSelected(current => current ? { ...current, title } : current)
         },
         onSessionsUpdate: setSessions,
         onSelectedIdUpdate: newId => {
           setSelected(current => current?.id === turnSessionId ? { ...current, id: newId } : current)
+          const req = pendingClarifyRef.current[turnSessionId]
+          if (req) {
+            pendingClarifyRef.current[newId] = { ...req, sessionId: newId }
+          }
         },
         onError: msg => {
-          if (selectedRef.current?.profile === turnProfile) {
+          if (doesSessionMatchTurn(selectedRef.current, turnSessionId, turnProfile, profiles, id => getResolvedSessionId(id, activeEndpointRef.current))) {
             setError(msg)
           }
         },
@@ -871,12 +1338,23 @@ export default function App() {
       recentEndedTurnsRef.current.set(finalSessionId, Date.now())
       recentEndedTurnsRef.current.set(turnSessionId, Date.now())
 
+      delete pendingClarifyRef.current[turnSessionId]
+      delete pendingClarifyRef.current[finalSessionId]
+      delete pendingClarifyByProfileRef.current[turnProfile]
+      clearPersistedClarify(turnSessionId, turnProfile)
+      clearPersistedClarify(finalSessionId, turnProfile)
+      if (doesSessionMatchTurn(selectedRef.current, turnSessionId, turnProfile, profiles, id => getResolvedSessionId(id, activeEndpointRef.current))) {
+        setPendingClarify(null)
+      }
+
       setActiveTurns(prev => {
         const next = { ...prev }
         delete next[turnProfile]
         return next
       })
-      setToolActivities([])
+      if (doesSessionMatchTurn(selectedRef.current, turnSessionId, turnProfile, profiles, id => getResolvedSessionId(id, activeEndpointRef.current))) {
+        setToolActivities([])
+      }
 
       // Commit finalized assistant message to timeline and cache so it never vanishes
       if (finalText.trim()) {
@@ -888,18 +1366,20 @@ export default function App() {
           usage: completionUsage,
           timestamp: nowSec,
         }
-        setMessages(prev => {
-          const last = prev[prev.length - 1]
-          if (last && last.id === terminalMessage.id) {
-            return prev
-          }
-          return [...prev, terminalMessage]
-        })
+        if (doesSessionMatchTurn(selectedRef.current, turnSessionId, turnProfile, profiles, id => getResolvedSessionId(id, activeEndpointRef.current))) {
+          setMessages(prev => {
+            const last = prev[prev.length - 1]
+            if (last && (last.id === terminalMessage.id || (last.role === 'assistant' && last.content === terminalMessage.content))) {
+              return prev
+            }
+            return [...prev, terminalMessage]
+          })
+        }
         const sids = new Set([finalSessionId, turnSessionId].filter(Boolean))
         for (const sid of sids) {
           const cached = messageCacheRef.current.get(sid) || []
           const last = cached[cached.length - 1]
-          const nextCached = (last && last.id === terminalMessage.id)
+          const nextCached = (last && (last.id === terminalMessage.id || (last.role === 'assistant' && last.content === terminalMessage.content)))
             ? cached
             : [...cached, terminalMessage]
           messageCacheRef.current.set(sid, nextCached)
@@ -908,7 +1388,7 @@ export default function App() {
       }
 
       const terminalAssistant = settleAssistantResponse(finalSessionId, turnProfile, finalText, completionUsage)
-      if (selectedRef.current?.profile === turnProfile) {
+      if (doesSessionMatchTurn(selectedRef.current, turnSessionId, turnProfile, profiles, id => getResolvedSessionId(id, activeEndpointRef.current))) {
         if (terminalAssistant) {
           setSettledAssistant(terminalAssistant)
           setSending(false)
@@ -1002,6 +1482,7 @@ export default function App() {
   }, [])
 
   const handleClearChat = useCallback(async (session: LiveSession): Promise<void> => {
+    console.log('[Hermes Debug] handleClearChat invoked for:', session.id, session.profile)
     setActiveTurns(prev => {
       const next = { ...prev }
       delete next[session.profile]
@@ -1013,32 +1494,62 @@ export default function App() {
     setToolActivities([])
     setSettledAssistant(null)
     setError('')
-    messageCacheRef.current.delete(session.id)
-    removeCachedSessionMessages(session.id)
+
+    const botProfile = profiles.find(p => p.name === session.profile)
+    const isCanonical = Boolean(
+      botProfile && (
+        (botProfile.canonical_session && (
+          session.id === resolveCanonicalSessionId(botProfile.canonical_session) ||
+          session.id === botProfile.canonical_session.id
+        )) ||
+        session.id === `draft:${botProfile.name}` ||
+        session.title === 'Bot Chat' ||
+        session.title === (botProfile.display_name || titleize(botProfile.name)) ||
+        !sessions.some(s => s.id === session.id && s.title !== 'Bot Chat')
+      )
+    )
+
+    const extraIds: string[] = []
+    if (botProfile?.canonical_session?.id) extraIds.push(botProfile.canonical_session.id)
+    if (botProfile?.canonical_session?.resolved_id) extraIds.push(botProfile.canonical_session.resolved_id)
+
+    for (const id of [session.id, ...extraIds]) {
+      if (id) {
+        messageCacheRef.current.delete(id)
+        removeCachedSessionMessages(id)
+      }
+    }
+    delete pendingClarifyRef.current[session.id]
+    for (const extra of extraIds) delete pendingClarifyRef.current[extra]
+    if (isCanonical) delete pendingClarifyByProfileRef.current[session.profile]
+    clearPersistedClarify(session.id, isCanonical ? session.profile : null)
+    for (const extra of extraIds) clearPersistedClarify(extra)
+    setPendingClarify(null)
 
     try {
-      const botProfile = profiles.find(p => p.name === session.profile)
-      const isCanonical = botProfile && (
-        !botProfile.canonical_session ||
-        session.id === resolveCanonicalSessionId(botProfile.canonical_session) ||
-        session.id === botProfile.canonical_session.id ||
-        session.title === 'Bot Chat' ||
-        session.title === (botProfile.display_name || titleize(botProfile.name))
-      )
       const fresh = await clearSession(session.id, session.profile, {
         canonical: Boolean(isCanonical),
         title: isCanonical ? 'Bot Chat' : session.title,
+        additionalDeleteIds: extraIds,
       })
       setSelected({
         ...fresh,
         title: isCanonical && botProfile ? (botProfile.display_name || titleize(botProfile.name)) : fresh.title,
       })
       messageCacheRef.current.set(fresh.id, [])
+      setCachedSessionMessages(fresh.id, [])
+      if (isCanonical) {
+        setProfiles(prev => prev.map(p => p.name === session.profile ? {
+          ...p,
+          canonical_session: fresh,
+        } : p))
+      }
+      setSessions(prev => [fresh, ...prev.filter(s => s.id !== session.id && !extraIds.includes(s.id))])
       void refresh()
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not clear chat history.')
     }
-  }, [profiles, refresh])
+  }, [profiles, sessions, refresh])
 
   const openBot = useCallback(async (profile: RosterProfile, existingSession: LiveSession | null) => {
     if (existingSession) {
@@ -1223,7 +1734,9 @@ export default function App() {
   if (createOpen) return <CreateWizard step={createStep} setStep={setCreateStep} draft={botDraft} setDraft={setBotDraft} creating={creating} error={error} close={() => { setCreateOpen(false); setCreateStep(0); setError('') }} finish={() => void finishCreate()}/>
   if (settings) return <ConnectionSettings profiles={profiles.length} sessions={sessions.length} connected={connectionStatus === 'connected'} endpoint={activeEndpoint !== 'http://127.0.0.1:9119' ? activeEndpoint : undefined} theme={theme} setTheme={setTheme} uiScale={uiScale} setUiScale={setUiScale} close={() => setSettings(false)} refresh={() => refresh()} onPairingBusy={setPairingBusyState} onPaired={async endpoint => { const normalized = activateEndpoint(endpoint); const data = await refresh(normalized, true); if (!data) throw new Error(lastConnectionErrorRef.current || 'Signed in, but authenticated Hermes REST or live WebSocket verification failed.'); localStorage.setItem('hermes-mobile-active-endpoint', normalized) }}/>
   if (selected && profileSheet) return <BotProfileSheet profile={profiles.find(profile => profile.name === selected.profile)} session={selected} onClose={() => setProfileSheet(false)} onUpdated={() => void refresh()}/>
-  if (selected) return <ErrorBoundary onReset={() => setSelected(null)}><ChatView session={selected} conversationLoading={conversationLoading} messages={messages} settledAssistant={settledAssistant?.sessionId === selected.id && settledAssistant.profile === selected.profile ? settledAssistant : null} profiles={profiles} streaming={streaming} sending={sending} toolActivities={toolActivities} error={error} back={() => setSelected(null)} refresh={() => void openSession(selected)} clearChat={() => handleClearChat(selected)} openProfile={() => setProfileSheet(true)} onSessionModelChange={handleSessionModelChange} submit={submit} submitVoice={submitVoice} stop={stop}/></ErrorBoundary>
+  if (selected) return <ErrorBoundary onReset={() => setSelected(null)}><ChatView session={selected} conversationLoading={conversationLoading} messages={messages} settledAssistant={settledAssistant?.sessionId === selected.id && settledAssistant.profile === selected.profile ? settledAssistant : null} profiles={profiles} streaming={streaming} sending={sending} toolActivities={toolActivities} error={error} back={() => setSelected(null)} refresh={() => void openSession(selected)} clearChat={() => handleClearChat(selected)} openProfile={() => setProfileSheet(true)} onSessionModelChange={handleSessionModelChange} pendingClarify={pendingClarify} onAnswerClarify={handleAnswerClarify} onSkipClarify={handleSkipClarify} submit={submit} submitVoice={submitVoice} stop={stop}/></ErrorBoundary>
+
+  const adhocSessionIds = new Set(visibleSessions.map(s => s.id))
 
   return <main
     className={`app roster-shell tab-slide-${slideDirection}`}
@@ -1401,11 +1914,12 @@ export default function App() {
         {((loading && !profiles.length) || (tab === 'sessions' && loading && !sessions.length)) ? <Skeleton/> : tab === 'bots' ? (
           <section className="bot-list" key="bots-list">
             {rows.map(({ profile, session }, index) => {
-              const activeTurn = activeTurns[profile.name]
+              const activeTurn = isBotRowWorking(profile.name, session || profile.canonical_session, activeTurns, adhocSessionIds)
               const isWorking = Boolean(activeTurn)
+              const isWaitingInput = Boolean(activeTurn && (activeTurn.status === 'waiting' || activeTurn.needsInput))
               return (
                 <button
-                  className={`bot-row enter ${isWorking ? 'working' : ''}`}
+                  className={`bot-row enter ${isWorking ? 'working' : ''} ${isWaitingInput ? 'waiting' : ''}`}
                   style={{ animationDelay: `${Math.min(index, 8) * 28}ms` }}
                   key={profile.name}
                   onPointerDown={handleRowPointerDown}
@@ -1413,16 +1927,24 @@ export default function App() {
                 >
                   <div className="bot-avatar-wrap">
                     <BotAvatar profile={profile} fallbackName={profile.name}/>
-                    {isWorking && <span className="bot-status-pip" aria-hidden="true"/>}
+                    {isWorking && (
+                      <span className={`bot-status-pip ${isWaitingInput ? 'waiting' : ''}`} aria-hidden="true"/>
+                    )}
                     {session?.unread && !isWorking && <span className="bot-unread-pip" aria-hidden="true"/>}
                   </div>
                   <span className="bot-copy">
                     <b>{profile.display_name || titleize(profile.name)}</b>
-                    {isWorking ? (
-                      <small className="bot-in-progress">
-                        <span className="live-wave" aria-hidden="true"><i/><i/><i/></span>
-                        <span className="live-status-text">{activeTurn.statusText}</span>
-                      </small>
+                    {activeTurn ? (
+                      isWaitingInput ? (
+                        <small className="bot-clarify-question">
+                          {activeTurn.pendingClarify?.questions?.[0]?.question || 'Clarification needed'}
+                        </small>
+                      ) : (
+                        <small className="bot-in-progress">
+                          <span className="live-wave" aria-hidden="true"><i/><i/><i/></span>
+                          <span className="live-status-text">{activeTurn.statusText}</span>
+                        </small>
+                      )
                     ) : (
                       <small>{cleanPreviewSnippet(session?.preview) || profile.description || 'No messages yet'} </small>
                     )}
@@ -1451,13 +1973,14 @@ export default function App() {
         ) : (
           <section className="bot-list" key="sessions-list">
             {visibleSessions.slice(0, sessionDisplayCount).map((session, index) => {
-              const activeTurn = activeTurns[session.profile]
-              const isWorking = Boolean(activeTurn && activeTurn.sessionId === session.id)
+              const activeTurn = isSessionRowWorking(session.id, session.profile, activeTurns)
+              const isWorking = Boolean(activeTurn)
+              const isWaitingInput = Boolean(activeTurn && (activeTurn.status === 'waiting' || activeTurn.needsInput))
               const isOpening = openingSessionId === session.id
               const profile = profileMap.get(session.profile)
               return (
                 <button
-                  className={`bot-row enter ${isWorking ? 'working' : ''} ${isOpening ? 'opening' : ''}`}
+                  className={`bot-row enter ${isWorking ? 'working' : ''} ${isOpening ? 'opening' : ''} ${isWaitingInput ? 'waiting' : ''}`}
                   style={{ animationDelay: `${Math.min(index, 8) * 28}ms` }}
                   key={`${session.profile}:${session.id}`}
                   onPointerDown={handleRowPointerDown}
@@ -1465,16 +1988,24 @@ export default function App() {
                 >
                   <div className="bot-avatar-wrap">
                     <BotAvatar profile={profile} fallbackName={session.profile} variant="session"/>
-                    {isWorking && <span className="bot-status-pip" aria-hidden="true"/>}
+                    {isWorking && (
+                      <span className={`bot-status-pip ${isWaitingInput ? 'waiting' : ''}`} aria-hidden="true"/>
+                    )}
                     {session.unread && !isWorking && <span className="bot-unread-pip" aria-hidden="true"/>}
                   </div>
                   <span className="bot-copy">
                     <b>{session.title || 'Untitled session'}</b>
-                    {isWorking ? (
-                      <small className="bot-in-progress">
-                        <span className="live-wave" aria-hidden="true"><i/><i/><i/></span>
-                        <span className="live-status-text">{activeTurn.statusText}</span>
-                      </small>
+                    {activeTurn ? (
+                      isWaitingInput ? (
+                        <small className="bot-clarify-question">
+                          {activeTurn.pendingClarify?.questions?.[0]?.question || 'Clarification needed'}
+                        </small>
+                      ) : (
+                        <small className="bot-in-progress">
+                          <span className="live-wave" aria-hidden="true"><i/><i/><i/></span>
+                          <span className="live-status-text">{activeTurn.statusText}</span>
+                        </small>
+                      )
                     ) : (
                       <small>{titleize(session.profile || 'default')} · {cleanPreviewSnippet(session.preview)}</small>
                     )}

@@ -3,7 +3,9 @@ import { describe, expect, it } from 'vitest'
 import {
   InFlightSubmissionTracker,
   isActiveChatTurn,
+  isBotRowWorking,
   isOptimisticUserMessageAlreadyCached,
+  isSessionRowWorking,
   isSessionStatusWorking,
   isTurnSettledByTranscript,
   reconcileActiveTurns,
@@ -693,4 +695,136 @@ describe('active chat turn guard', () => {
     ]
     expect(shouldRetainLocalMessages(backendMsgs, localMsgs, false)).toBe(false)
   })
+
+  it('isBotRowWorking only lights up the bot on the Bots page for canonical, draft, or dispatched sessions', () => {
+    const canonicalSession = { id: 'canonical-coder-id', resolved_id: 'canonical-coder-id' }
+    const customTurn: ActiveBotTurn = {
+      sessionId: 'session-custom-tasks',
+      profile: 'coder',
+      status: 'thinking',
+      statusText: 'Thinking…',
+      streamingText: '',
+      toolActivities: [],
+      userMessage: { id: 1, role: 'user', content: 'Do tasks' },
+      startedAt: 1000,
+    }
+
+    // Turn in a custom Sessions-tab session: bot on Bots page must NOT be working!
+    const activeTurnsWithCustom: Record<string, ActiveBotTurn> = {
+      coder: customTurn,
+    }
+    expect(isBotRowWorking('coder', canonicalSession, activeTurnsWithCustom)).toBeUndefined()
+
+    // Turn in canonical session: bot on Bots page MUST be working!
+    const canonicalTurn: ActiveBotTurn = {
+      ...customTurn,
+      sessionId: 'canonical-coder-id',
+    }
+    const activeTurnsWithCanonical: Record<string, ActiveBotTurn> = {
+      coder: canonicalTurn,
+    }
+    expect(isBotRowWorking('coder', canonicalSession, activeTurnsWithCanonical)).toBeDefined()
+    expect(isBotRowWorking('coder', canonicalSession, activeTurnsWithCanonical)?.sessionId).toBe('canonical-coder-id')
+
+    // Turn in draft session: bot on Bots page MUST be working!
+    const draftTurn: ActiveBotTurn = {
+      ...customTurn,
+      sessionId: 'draft:coder',
+    }
+    expect(isBotRowWorking('coder', canonicalSession, { coder: draftTurn })).toBeDefined()
+
+    // Dispatched delegation: bot on Bots page MUST be working!
+    const dispatchedTurn: ActiveBotTurn = {
+      ...customTurn,
+      sessionId: 'dispatched:coder',
+    }
+    expect(isBotRowWorking('coder', canonicalSession, { coder: dispatchedTurn })).toBeDefined()
+
+    // Waiting turn on canonical session: MUST light up bot with needsInput!
+    const waitingTurn: ActiveBotTurn = {
+      ...customTurn,
+      sessionId: 'canonical-coder-id',
+      status: 'waiting',
+      statusText: 'Needs your input…',
+      needsInput: true,
+    }
+    const workingBot = isBotRowWorking('coder', canonicalSession, { coder: waitingTurn })
+    expect(workingBot).toBeDefined()
+    expect(workingBot?.status).toBe('waiting')
+    expect(workingBot?.needsInput).toBe(true)
+
+    // Waiting turn requiring human input: MUST light up bot with needsInput!
+    const waitingCustomTurn: ActiveBotTurn = {
+      ...customTurn,
+      sessionId: 'session-custom-tasks',
+      status: 'waiting',
+      statusText: 'Needs your input…',
+      needsInput: true,
+    }
+    expect(isBotRowWorking('coder', canonicalSession, { coder: waitingCustomTurn })).toBeDefined()
+  })
+
+  it('isSessionRowWorking only lights up the exact session matching sessionId, never sibling sessions', () => {
+    const customTurn: ActiveBotTurn = {
+      sessionId: 'session-custom-tasks',
+      profile: 'coder',
+      status: 'thinking',
+      statusText: 'Thinking…',
+      streamingText: '',
+      toolActivities: [],
+      userMessage: { id: 1, role: 'user', content: 'Do tasks' },
+      startedAt: 1000,
+    }
+    const turns: Record<string, ActiveBotTurn> = {
+      'session-custom-tasks': customTurn,
+      coder: customTurn,
+    }
+
+    // Matching session on Sessions page: is working!
+    expect(isSessionRowWorking('session-custom-tasks', 'coder', turns)).toBeDefined()
+
+    // Sibling session with same profile: is NOT working!
+    expect(isSessionRowWorking('session-other-tasks', 'coder', turns)).toBeUndefined()
+
+    // Canonical session on Sessions page: is NOT working!
+    expect(isSessionRowWorking('canonical-coder-id', 'coder', turns)).toBeUndefined()
+
+    // Waiting turn on custom session: lights up on that session with status 'waiting'
+    const waitingTurn: ActiveBotTurn = {
+      ...customTurn,
+      status: 'waiting',
+      statusText: 'Needs your input…',
+      needsInput: true,
+    }
+    const waitingSession = isSessionRowWorking('session-custom-tasks', 'coder', { 'session-custom-tasks': waitingTurn })
+    expect(waitingSession).toBeDefined()
+    expect(waitingSession?.status).toBe('waiting')
+    expect(waitingSession?.needsInput).toBe(true)
+
+    // But sibling session STILL does not light up!
+    expect(isSessionRowWorking('session-other-tasks', 'coder', { 'session-custom-tasks': waitingTurn })).toBeUndefined()
+  })
+
+  it('reconcileActiveTurns never prunes a turn that is waiting for human input', () => {
+    const waitingTurn: Record<string, ActiveBotTurn> = {
+      coder: {
+        sessionId: 'sess-waiting-test',
+        profile: 'coder',
+        status: 'waiting',
+        statusText: 'Needs your input…',
+        needsInput: true,
+        streamingText: '',
+        toolActivities: [],
+        userMessage: { id: 1, role: 'user', content: 'Run query' },
+        startedAt: 1000,
+      },
+    }
+
+    // 10 seconds later, gateway returns empty active list: MUST NOT prune waiting turn!
+    const reconciled = reconcileActiveTurns(waitingTurn, [], {}, 11000)
+    expect(reconciled.coder).toBeDefined()
+    expect(reconciled.coder.status).toBe('waiting')
+    expect(reconciled.coder.needsInput).toBe(true)
+  })
 })
+

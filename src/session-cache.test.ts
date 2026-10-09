@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach } from 'vitest'
 import {
+  deduplicateConsecutiveMessages,
   getCachedSessionMessages,
   isHumanChatSession,
   removeCachedSessionMessages,
@@ -201,5 +202,24 @@ describe('session-cache message caching and eviction', () => {
       Math.floor(Date.now() / 1000)
     )
     expect(preview8).toBe('Optimistic reply without timestamp')
+  })
+
+  it('deduplicateConsecutiveMessages collapses identical adjacent assistant messages and preserves rich metadata', () => {
+    const duplicated: LiveMessage[] = [
+      { id: 1, role: 'user', content: 'hello' },
+      // First copy has usage but negative optimistic ID and no timestamp:
+      { id: -99, role: 'assistant', content: 'I am here', usage: { total: 150 } },
+      // Second copy has authoritative positive SQLite ID and timestamp:
+      { id: 42, role: 'assistant', content: 'I am here', timestamp: 1720000 },
+      { id: 3, role: 'user', content: 'cool' },
+      { id: 4, role: 'assistant', content: 'glad it works' },
+    ]
+
+    const deduped = deduplicateConsecutiveMessages(duplicated)
+    expect(deduped).toHaveLength(4)
+    expect(deduped.map(m => m.id)).toEqual([1, 42, 3, 4])
+    // Verify merged metadata survived
+    expect(deduped[1].timestamp).toBe(1720000)
+    expect(deduped[1].usage).toEqual({ total: 150 })
   })
 })

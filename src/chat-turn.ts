@@ -11,12 +11,14 @@ export type ToolActivity = {
 export type ActiveBotTurn = {
   sessionId?: string
   profile: string
-  status: 'thinking' | 'streaming' | 'tool'
+  status: 'thinking' | 'streaming' | 'tool' | 'waiting'
   statusText: string
   streamingText: string
   toolActivities: ToolActivity[]
   userMessage: { id: number; role: 'user' | 'assistant' | 'tool' | 'system'; content: string }
   startedAt: number
+  needsInput?: boolean
+  pendingClarify?: any
   /** True only for turns rebuilt from localStorage after an app restart. */
   restored?: boolean
 }
@@ -182,6 +184,9 @@ export function isTurnSettledByTranscript(
 ): boolean {
   if (!turn) return false
   if (isInFlight) return false
+  if (turn.status === 'waiting' || turn.needsInput === true || Boolean(turn.pendingClarify)) {
+    return false
+  }
   if (!transcript || transcript.length === 0) return false
 
   const last = transcript[transcript.length - 1]
@@ -269,16 +274,32 @@ export function reconcileActiveTurns(
     if (isSessionStatusWorking(session.status)) {
       activeProfilesFromGateway.add(profile)
       const existing = next[profile]
+      const isGatewayWaiting = session.status === 'waiting'
       if (!existing) {
         next[profile] = {
           sessionId: sid,
           profile,
-          status: session.status === 'working' ? 'tool' : 'thinking',
-          statusText: session.status === 'working' ? 'Working…' : 'Thinking…',
+          status: isGatewayWaiting ? 'waiting' : session.status === 'working' ? 'tool' : 'thinking',
+          statusText: isGatewayWaiting ? 'Needs your input…' : session.status === 'working' ? 'Working…' : 'Thinking…',
+          needsInput: isGatewayWaiting,
           streamingText: '',
           toolActivities: [],
           userMessage: { id: 0, role: 'user', content: '' },
           startedAt: session.started_at ? session.started_at * 1000 : now,
+        }
+      } else if (isGatewayWaiting && existing.status !== 'waiting') {
+        next[profile] = {
+          ...existing,
+          status: 'waiting',
+          statusText: 'Needs your input…',
+          needsInput: true,
+        }
+      } else if (!isGatewayWaiting && existing.status === 'waiting' && !existing.pendingClarify) {
+        next[profile] = {
+          ...existing,
+          status: session.status === 'working' ? 'tool' : 'thinking',
+          statusText: session.status === 'working' ? 'Working…' : 'Thinking…',
+          needsInput: false,
         }
       }
     } else {
@@ -308,11 +329,93 @@ export function reconcileActiveTurns(
       (turn.sessionId && inFlightClientProfiles?.has(turn.sessionId))
     )
     const isExplicitlyIdle = (explicitlyIdleProfiles.has(profile) || explicitlyIdleProfiles.has(key)) && !isGatewayWorking && !isInFlightClientTurn
+    const isTurnWaitingInput = turn.status === 'waiting' || turn.needsInput === true
 
-    if (isEnded || isExplicitlyIdle || (!isGatewayWorking && !isVeryRecentClientTurn && !isInFlightClientTurn)) {
+    if (isEnded || (!isTurnWaitingInput && (isExplicitlyIdle || (!isGatewayWorking && !isVeryRecentClientTurn && !isInFlightClientTurn)))) {
       delete next[key]
     }
   }
 
   return next
 }
+
+/**
+ * Determines whether a bot on the Bots roster should display an active working indicator.
+ * Only returns true if an active turn belongs to this bot's canonical session,
+ * a local draft session for this bot, or a dispatched delegation to this bot.
+ * Unrelated sessions created in the Sessions tab will NOT trigger the bot's working state.
+ */
+export function isBotRowWorking(
+  profileName: string,
+  canonicalSession: { id?: string; resolved_id?: string } | null | undefined,
+  activeTurns: Record<string, ActiveBotTurn | undefined>,
+  adhocSessionIds?: Set<string>
+): ActiveBotTurn | undefined {
+  const canonicalIds = new Set<string>()
+  if (canonicalSession?.id) canonicalIds.add(canonicalSession.id)
+  if (canonicalSession?.resolved_id) canonicalIds.add(canonicalSession.resolved_id)
+
+  const direct = activeTurns[profileName]
+  if (direct) {
+    const sid = direct.sessionId || ''
+    const isExplicitAdhocSession = Boolean(adhocSessionIds && sid && adhocSessionIds.has(sid) && !canonicalIds.has(sid))
+    if (!isExplicitAdhocSession) {
+      if (direct.status === 'waiting' || direct.needsInput === true) {
+        return direct
+      }
+      const isThisBotSession =
+        canonicalIds.size === 0 ||
+        (sid && canonicalIds.has(sid)) ||
+        sid === `draft:${profileName}` ||
+        sid.startsWith(`dispatched:${profileName}`)
+      if (isThisBotSession) {
+        return direct
+      }
+    }
+  }
+
+  for (const turn of Object.values(activeTurns)) {
+    if (!turn) continue
+    if (turn.profile === profileName) {
+      const sid = turn.sessionId || ''
+      const isExplicitAdhocSession = Boolean(adhocSessionIds && sid && adhocSessionIds.has(sid) && !canonicalIds.has(sid))
+      if (!isExplicitAdhocSession) {
+        if (turn.status === 'waiting' || turn.needsInput === true) {
+          return turn
+        }
+        const isThisBotSession =
+          canonicalIds.size === 0 ||
+          (sid && canonicalIds.has(sid)) ||
+          sid === `draft:${profileName}` ||
+          sid.startsWith(`dispatched:${profileName}`)
+        if (isThisBotSession) {
+          return turn
+        }
+      }
+    }
+  }
+
+  return undefined
+}
+
+/**
+ * Determines whether a session row on the Sessions roster should display an active working indicator.
+ * Only returns true if an active turn matches this exact session ID.
+ */
+export function isSessionRowWorking(
+  sessionId: string,
+  _sessionProfile: string,
+  activeTurns: Record<string, ActiveBotTurn | undefined>
+): ActiveBotTurn | undefined {
+  const direct = activeTurns[sessionId]
+  if (direct && direct.sessionId === sessionId) return direct
+
+  for (const turn of Object.values(activeTurns)) {
+    if (turn && turn.sessionId === sessionId) {
+      return turn
+    }
+  }
+
+  return undefined
+}
+

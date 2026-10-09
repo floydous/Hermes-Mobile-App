@@ -89,4 +89,29 @@ describe('live Hermes Bot roster', () => {
     expect(cleanPreviewSnippet('')).toBe('')
     expect(cleanPreviewSnippet(null)).toBe('')
   })
+
+  it('never attaches an arbitrary session from Sessions tab when canonical_session is null', () => {
+    const profiles = [
+      { name: 'coder', canonical_session: null },
+    ]
+    const liveSessions = [
+      { id: 'custom-session-123', profile: 'coder', title: 'Ad-hoc bug fix', preview: 'Bug fix text', last_active: 500 },
+    ]
+
+    const rows = buildBotRows(profiles, liveSessions)
+    expect(rows[0].session).toBeNull()
+  })
+
+  it('attaches a newly created Bot Chat session when canonical_session was null', () => {
+    const profiles = [
+      { name: 'coder', canonical_session: null },
+    ]
+    const liveSessions = [
+      { id: 'fresh-bot-chat', profile: 'coder', title: 'Bot Chat', preview: 'Hello', last_active: 500 },
+    ]
+
+    const rows = buildBotRows(profiles, liveSessions)
+    expect(rows[0].session?.id).toBe('fresh-bot-chat')
+    expect(rows[0].session?.title).toBe('Bot Chat')
+  })
 })

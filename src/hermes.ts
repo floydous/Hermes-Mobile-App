@@ -63,6 +63,11 @@ export function getActiveHermesEndpoint(): string { return activeHermes }
 const gateways = new Map<string, HermesGatewayClient>()
 const resolvedSessions = new Map<string, string>()
 
+export function getResolvedSessionId(sessionId: string, baseUrl = activeHermes): string {
+  const normBase = (baseUrl || activeHermes).replace(/\/$/, '')
+  return resolvedSessions.get(`${normBase}:${sessionId}`) || sessionId
+}
+
 function gateway(baseUrl = activeHermes) {
   let client = gateways.get(baseUrl)
   if (!client) {
@@ -516,6 +521,25 @@ export async function connectAndSubmit(
   return { sessionId: resolvedSessionId }
 }
 
+export async function resumeSession(sessionId: string, profile?: string, baseUrl = activeHermes): Promise<string> {
+  const normBase = (baseUrl || activeHermes).replace(/\/$/, '')
+  const sid = await gateway(normBase).resumeSession(sessionId, profile)
+  if (sid) {
+    resolvedSessions.set(`${normBase}:${sessionId}`, sid)
+    resolvedSessions.set(`${normBase}:${sid}`, sessionId)
+  }
+  return sid
+}
+
+export function respondClarify(
+  requestId: string,
+  answers: Record<string, string | null>,
+  baseUrl = activeHermes
+) {
+  const normBase = (baseUrl || activeHermes).replace(/\/$/, '')
+  gateway(normBase).respondToServerRequest(requestId, { answers })
+}
+
 export async function interruptSession(sessionId: string, baseUrl = activeHermes): Promise<void> {
   const normBase = (baseUrl || activeHermes).replace(/\/$/, '')
   await gateway(normBase).interruptSession(resolvedSessions.get(`${normBase}:${sessionId}`) || sessionId)
@@ -524,6 +548,7 @@ export async function interruptSession(sessionId: string, baseUrl = activeHermes
 export type ClearSessionOptions = {
   canonical?: boolean
   title?: string
+  additionalDeleteIds?: string[]
 }
 
 export async function clearSession(
@@ -536,6 +561,8 @@ export async function clearSession(
   const client = gateway(normBase)
   const resolved = resolvedSessions.get(`${normBase}:${sessionId}`) || sessionId
 
+  console.log('[Hermes Debug] clearSession starting for:', sessionId, 'resolved:', resolved, 'profile:', profile)
+
   try {
     await client.interruptSession(resolved)
   } catch {}
@@ -544,18 +571,50 @@ export async function clearSession(
     await client.call('session.close', { session_id: resolved })
   } catch {}
 
-  try {
-    await client.call('session.delete', { session_id: sessionId, profile })
-  } catch {}
+  if (sessionId && sessionId !== resolved) {
+    try {
+      await client.call('session.close', { session_id: sessionId })
+    } catch {}
+  }
 
-  resolvedSessions.delete(`${normBase}:${sessionId}`)
-  resolvedSessions.delete(`${normBase}:${resolved}`)
+  // Small delay to let worker thread pop session from memory before SQLite delete
+  await new Promise(r => setTimeout(r, 60))
+
+  const deleteIds = new Set<string>([sessionId, resolved, ...(options?.additionalDeleteIds || [])].filter(Boolean))
+  for (const targetId of deleteIds) {
+    // 1. Try REST delete endpoint (which resolves aliases and deletes from SQLite SessionDB)
+    try {
+      await invoke('hermes_delete_session', { baseUrl: normBase, sessionId: targetId, profile })
+      console.log('[Hermes Debug] REST hermes_delete_session succeeded for', targetId)
+    } catch (err) {
+      console.log('[Hermes Debug] REST hermes_delete_session error for', targetId, ':', err)
+    }
+
+    // 2. Also try JSON-RPC session.delete
+    try {
+      const delRes = await client.call('session.delete', { session_id: targetId, profile })
+      console.log('[Hermes Debug] session.delete result for', targetId, ':', delRes)
+    } catch (err) {
+      console.log('[Hermes Debug] session.delete error for', targetId, ':', err)
+    }
+  }
+
+  for (const targetId of deleteIds) {
+    resolvedSessions.delete(`${normBase}:${targetId}`)
+  }
 
   const isCanonical = options?.canonical ?? true
-  return createSession(
+  const fresh = await createSession(
     profile,
     isCanonical ? 'Bot Chat' : (options?.title || 'New chat'),
     { canonical: isCanonical, hidden: isCanonical },
     normBase
   )
+  if (isCanonical && fresh.id) {
+    try {
+      await client.call('session.title', { session_id: fresh.id, title: 'Bot Chat' })
+    } catch {}
+  }
+  console.log('[Hermes Debug] clearSession created fresh session:', fresh.id, 'title:', fresh.title)
+  return fresh
 }

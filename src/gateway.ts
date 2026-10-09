@@ -85,6 +85,7 @@ export class HermesGatewayClient {
   private readonly sessionListeners = new Map<string, Set<(event: GatewayEvent) => void>>()
   private readonly requestHandlers = new Map<string, (params: GatewayPayload) => unknown>()
   private readonly activeTurnCancels = new Map<string, () => void>()
+  private readonly replayedRequestIds = new Set<string>()
   private globalListener?: (event: GatewayEvent) => void
 
   constructor(
@@ -142,12 +143,17 @@ export class HermesGatewayClient {
         const event = parseGatewayEvent(frame.params)
         if (!event) continue
         if (event.type === 'gateway.ready') {
-          this.readyResolve?.()
-          void this.advertiseCapabilities().catch(() => {})
+          void this.advertiseCapabilities().finally(() => {
+            this.readyResolve?.()
+          })
         }
         this.globalListener?.(event)
-        if (event.sessionId) {
+        if (event.sessionId && this.sessionListeners.has(event.sessionId)) {
           for (const listener of this.sessionListeners.get(event.sessionId) ?? []) listener(event)
+        } else {
+          for (const listeners of this.sessionListeners.values()) {
+            for (const listener of listeners) listener(event)
+          }
         }
         continue
       }
@@ -165,18 +171,29 @@ export class HermesGatewayClient {
           terminal: false,
         }
         this.globalListener?.(reqEvent)
-        if (reqEvent.sessionId) {
+        if (reqEvent.sessionId && this.sessionListeners.has(reqEvent.sessionId)) {
           for (const listener of this.sessionListeners.get(reqEvent.sessionId) ?? []) listener(reqEvent)
+        } else {
+          for (const listeners of this.sessionListeners.values()) {
+            for (const listener of listeners) listener(reqEvent)
+          }
         }
         const handler = this.requestHandlers.get(frame.method)
         if (handler) {
           try {
             const res = handler(frame.params || {})
-            this.respondToServerRequest(frame.id, res)
+            if (res instanceof Promise) {
+              res.then(
+                val => { if (val !== undefined) this.respondToServerRequest(frame.id as string, val) },
+                err => this.respondToServerRequest(frame.id as string, null, { code: -32603, message: String(err) })
+              )
+            } else if (res !== undefined) {
+              this.respondToServerRequest(frame.id, res)
+            }
           } catch (err) {
             this.respondToServerRequest(frame.id, null, { code: -32603, message: String(err) })
           }
-        } else {
+        } else if (frame.method !== 'clarify') {
           this.respondToServerRequest(frame.id, null, {
             code: -32601,
             message: `Method ${frame.method} not implemented on this client`,
@@ -228,8 +245,25 @@ export class HermesGatewayClient {
   }
 
   async resumeSession(sessionId: string, profile?: string): Promise<string> {
-    const result = await this.call<{ session_id?: string }>('session.resume', buildSessionResumeParams(sessionId, profile))
-    return result.session_id || sessionId
+    const result = await this.call<{
+      session_id?: string
+      open_requests?: Array<{ id: string; method: string; params: Record<string, unknown> }>
+    }>('session.resume', buildSessionResumeParams(sessionId, profile))
+    const sid = result.session_id || sessionId
+    if (Array.isArray(result.open_requests)) {
+      for (const openReq of result.open_requests) {
+        if (openReq && openReq.id && openReq.method && !this.replayedRequestIds.has(openReq.id)) {
+          this.replayedRequestIds.add(openReq.id)
+          this.handleMessage(JSON.stringify({
+            jsonrpc: '2.0',
+            id: openReq.id,
+            method: openReq.method,
+            params: { session_id: sid, ...(openReq.params || {}) },
+          }), this.generation)
+        }
+      }
+    }
+    return sid
   }
 
   async submitPrompt(
@@ -317,12 +351,35 @@ export class HermesGatewayClient {
     return this.call('config.set', { session_id: sessionId, key: 'reasoning', value: effort })
   }
 
-  private async advertiseCapabilities(): Promise<void> {
-    try {
-      await this.call('client.capabilities', { server_requests: true }, 5_000)
-    } catch {
-      // Graceful fallback for older backends without client.capabilities
-    }
+  private advertiseCapabilities(): Promise<void> {
+    const socket = this.socket
+    if (!socket || socket.readyState !== WebSocket.OPEN) return Promise.resolve()
+    const id = this.nextId++
+    return new Promise<void>(resolve => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id)
+        resolve()
+      }, 5_000)
+      this.pending.set(id, {
+        method: 'client.capabilities',
+        resolve: () => {
+          clearTimeout(timer)
+          resolve()
+        },
+        reject: () => {
+          clearTimeout(timer)
+          resolve()
+        },
+        timer,
+      })
+      try {
+        socket.send(`${JSON.stringify({ jsonrpc: '2.0', id, method: 'client.capabilities', params: { server_requests: true } })}\n`)
+      } catch {
+        clearTimeout(timer)
+        this.pending.delete(id)
+        resolve()
+      }
+    })
   }
 
   registerRequestHandler(method: string, handler: (params: GatewayPayload) => unknown): () => void {
@@ -335,6 +392,7 @@ export class HermesGatewayClient {
   }
 
   respondToServerRequest(id: string, result: unknown, error?: { code: number; message: string }) {
+    this.replayedRequestIds.delete(id)
     const socket = this.socket
     if (!socket || socket.readyState !== WebSocket.OPEN) return
     const frame = error
