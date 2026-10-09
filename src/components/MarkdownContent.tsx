@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import {
   Bot,
   Check,
+  ChevronDown,
   Copy,
   Download,
   File,
@@ -128,12 +129,20 @@ export function resolveImageSrc(pathOrUrl: string): string {
 export function stripBackgroundProcessNotices(text: string): { clean: string; notices: string[] } {
   if (!text) return { clean: '', notices: [] }
   const notices: string[] = []
-  const pattern = /(?:--\s*)?\[IMPORTANT:\s*Background process\s+proc_[a-zA-Z0-9_-]+\s+completed[\s\S]*?\]/gi
+  // Matches [IMPORTANT: Background process ...] envelopes, handling nested brackets (such as [exit code 0], [BELUM SELESAI])
+  const pattern = /(?:--\s*)?\[IMPORTANT:\s*Background process\s+proc_[a-zA-Z0-9_-]+[\s\S]*?\n\]/gi
   let match: RegExpExecArray | null
   while ((match = pattern.exec(text)) !== null) {
     notices.push(match[0])
   }
-  const clean = text.replace(pattern, '').trim()
+  let clean = text.replace(pattern, '').replace(/\n{3,}/g, '\n\n').trim()
+  if (!notices.length) {
+    const fallbackPattern = /(?:--\s*)?\[IMPORTANT:\s*Background process\s+proc_[a-zA-Z0-9_-]+[\s\S]*?\](?=\s*$|\n\n)/gi
+    while ((match = fallbackPattern.exec(text)) !== null) {
+      notices.push(match[0])
+    }
+    clean = text.replace(fallbackPattern, '').replace(/\n{3,}/g, '\n\n').trim()
+  }
   return { clean, notices }
 }
 
@@ -141,21 +150,81 @@ export type AgentDelegation = {
   senderName: string
   handle: string
   body: string
+  kind?: 'task' | 'reply' | 'result'
 }
 
-export function parseAgentDelegation(text: string): AgentDelegation | null {
+export function parseAgentDelegation(
+  text: string,
+  message?: LiveMessage & { local?: boolean },
+  previousMessage?: LiveMessage,
+  profiles?: LiveProfile[]
+): AgentDelegation | null {
   if (!text) return null
+  // Only incoming user-role messages can be delegations; assistant responses are never delegations
+  if (message && message.role !== 'user') return null
+  // Messages typed locally by the human user in this app are NEVER agent delegations
+  if (message?.local) return null
+
   const trimmed = text.trim()
-  // Requires either 🤖 emoji or explicit handle (@...) to prevent false positives on plain text
-  const match = trimmed.match(/^Message from (?:🤖\s*([^\n(@:]+?)(?:\s*\(@([^\n)]+)\))?|([^\n(@:]+?)\s*\(@([^\n)]+)\)):\s*([\s\S]*)$/i)
-  if (!match) return null
 
-  const senderName = (match[1] || match[3] || '').trim()
-  const handle = (match[2] || match[4] || senderName).trim()
-  const body = (match[5] || '').trim()
-  if (!senderName || !body) return null
+  // 1. Explicit delegation prefix (authoritative Hermes stamp):
+  // Format: "Message from 🤖 <name> (@<handle>): ..." or "Message from <name> (@<handle>): ..."
+  const matchExplicit = trimmed.match(/^Message from (?:🤖\s*([^\n(@:]+?)(?:\s*\(@([A-Za-z0-9_.-]+)\))?|([^\n(@:]+?)\s*\(@([A-Za-z0-9_.-]+)\)):\s*([\s\S]*)$/i)
+  if (matchExplicit) {
+    const senderName = (matchExplicit[1] || matchExplicit[3] || '').trim()
+    const handle = (matchExplicit[2] || matchExplicit[4] || senderName).trim()
+    const body = (matchExplicit[5] || '').trim()
+    if (senderName && body) {
+      return { senderName, handle, body, kind: 'task' }
+    }
+  }
 
-  return { senderName, handle, body }
+  // 2. Multilingual reply headers from known bots:
+  // Format: "Balasan dari @<handle>:" or "Balasan dari **@<handle>**:"
+  const matchReply = trimmed.match(/^(?:Balasan|Pesan|Reply|Response)\s+dari\s+(?:\*\*@?|@)([a-zA-Z0-9_-]+)\*\*?:\s*([\s\S]*)$/i)
+  if (matchReply) {
+    const handle = matchReply[1].trim()
+    const body = matchReply[2].trim()
+    const isKnown = !profiles || profiles.some(p => p.name.toLowerCase() === handle.toLowerCase() || p.display_name?.toLowerCase() === handle.toLowerCase()) || handle.toLowerCase() === 'hermes' || handle.toLowerCase() === 'default'
+    if (isKnown && handle && body) {
+      return { senderName: handle, handle, body, kind: 'reply' }
+    }
+  }
+
+  // 3. Process completion metadata from background delegation are internal runtime signals (never render as chat turns):
+  if (message) {
+    const displayKind = (message as any).display_kind
+    if (displayKind === 'process_complete' || displayKind === 'async_delegation_complete' || displayKind === 'hidden') {
+      return null
+    }
+  }
+
+  // 4. Preceding delegation context: if previous assistant turn dispatched to a known bot in roster
+  if (previousMessage && previousMessage.role === 'assistant') {
+    const prevContent = typeof previousMessage.content === 'string' ? previousMessage.content : ''
+    const prevHadDelegation =
+      previousMessage.tool_name === 'message_agent' ||
+      previousMessage.tool_name === 'delegate_task' ||
+      /(?:message_agent|delegate_task|request to|tugas ke|sent a request to|dispatched to|pesan ke)\s*@?([a-zA-Z0-9_-]+)/i.test(prevContent)
+
+    if (prevHadDelegation) {
+      const targetMatch = prevContent.match(/(?:request to|tugas ke|sent a request to|dispatched to|message_agent.*?target=["']?|pesan ke)\s*@?([a-zA-Z0-9_-]+)/i)
+      const targetName = targetMatch ? targetMatch[1].trim().toLowerCase() : ''
+      // Strictly match a real bot in the roster
+      const matchedProfile = profiles?.find(p => p.name.toLowerCase() === targetName || p.display_name?.toLowerCase() === targetName)
+      if (matchedProfile && (
+        trimmed.includes('[BELUM SELESAI]') ||
+        trimmed.includes('[SELESAI]') ||
+        trimmed.includes('Daftar Tugas') ||
+        trimmed.includes('Status Keseluruhan') ||
+        /^[A-Za-z0-9 ./-]+:\s+[^\n]+\[(?:BELUM SELESAI|SELESAI|DONE|TODO)\]/m.test(trimmed)
+      )) {
+        return { senderName: matchedProfile.name, handle: matchedProfile.name, body: trimmed, kind: 'result' }
+      }
+    }
+  }
+
+  return null
 }
 
 export function stripAttachedContextScaffolding(text: string): string {
@@ -288,10 +357,19 @@ export function ImageLightbox({
   const [isDragging, setIsDragging] = useState(false)
   const [isEntering, setIsEntering] = useState(true)
   const [isClosing, setIsClosing] = useState(false)
+  const [isGlidingOut, setIsGlidingOut] = useState(false)
+  const [zoomScale, setZoomScale] = useState(1)
+  const [pan, setPan] = useState({ x: 0, y: 0 })
+
   const closeTimerRef = useRef<number | null>(null)
   const startYRef = useRef<number | null>(null)
   const startXRef = useRef<number | null>(null)
   const isSwipeDownRef = useRef(false)
+  const initialPinchDistRef = useRef<number | null>(null)
+  const initialPinchScaleRef = useRef(1)
+  const lastTapTimeRef = useRef(0)
+  const panStartRef = useRef<{ x: number; y: number } | null>(null)
+  const initialPanRef = useRef({ x: 0, y: 0 })
 
   const isData = src.startsWith('data:')
   const rawFileName = rawPath
@@ -307,8 +385,9 @@ export function ImageLightbox({
     }
   }
 
+  // Dismissal from top-bar X button or Escape key (subtle scale-down exit)
   const dismiss = useCallback(() => {
-    if (isClosing) return
+    if (isClosing || isGlidingOut) return
     const delay = computeDismissDelay(prefersReducedMotion())
     if (delay === 0) {
       onClose()
@@ -320,7 +399,25 @@ export function ImageLightbox({
     closeTimerRef.current = window.setTimeout(() => {
       onClose()
     }, delay)
-  }, [isClosing, onClose])
+  }, [isClosing, isGlidingOut, onClose])
+
+  // Dismissal from swipe-down gesture: continues gliding smoothly downwards off-screen
+  const dismissViaSwipeDown = useCallback((finalDragY: number) => {
+    if (isClosing || isGlidingOut) return
+    const delay = computeDismissDelay(prefersReducedMotion())
+    if (delay === 0) {
+      onClose()
+      return
+    }
+    setIsGlidingOut(true)
+    setIsEntering(false)
+    setIsDragging(false)
+    setDragY(finalDragY + 600)
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
+    closeTimerRef.current = window.setTimeout(() => {
+      onClose()
+    }, delay)
+  }, [isClosing, isGlidingOut, onClose])
 
   // Unconditional unmount cleanup for dismissal timers
   useEffect(() => {
@@ -363,34 +460,124 @@ export function ImageLightbox({
     }
   }
 
+  // Double-tap or double-click to toggle zoom (1x <-> 2.5x)
+  const toggleZoom = (e: React.MouseEvent | React.TouchEvent) => {
+    e.stopPropagation()
+    if (zoomScale > 1.05) {
+      setZoomScale(1)
+      setPan({ x: 0, y: 0 })
+    } else {
+      setZoomScale(2.5)
+      setPan({ x: 0, y: 0 })
+    }
+  }
+
   const handleTouchStart = (e: React.TouchEvent) => {
-    if (e.touches.length !== 1 || isClosing) return
+    if (isClosing || isGlidingOut) return
     setIsEntering(false)
-    startYRef.current = e.touches[0].clientY
-    startXRef.current = e.touches[0].clientX
-    isSwipeDownRef.current = false
-    setIsDragging(false)
+
+    // Two-finger pinch-to-zoom
+    if (e.touches.length === 2) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      )
+      initialPinchDistRef.current = dist
+      initialPinchScaleRef.current = zoomScale
+      setIsDragging(false)
+      isSwipeDownRef.current = false
+      return
+    }
+
+    if (e.touches.length === 1) {
+      const touchX = e.touches[0].clientX
+      const touchY = e.touches[0].clientY
+      const now = Date.now()
+
+      // Double-tap detection (<300ms)
+      if (now - lastTapTimeRef.current < 300) {
+        lastTapTimeRef.current = 0
+        toggleZoom(e)
+        return
+      }
+      lastTapTimeRef.current = now
+
+      startYRef.current = touchY
+      startXRef.current = touchX
+
+      if (zoomScale > 1.05) {
+        // In zoomed mode: start panning
+        panStartRef.current = { x: touchX, y: touchY }
+        initialPanRef.current = { ...pan }
+        setIsDragging(true)
+      } else {
+        // In 1x mode: ready for swipe-down to dismiss
+        isSwipeDownRef.current = false
+        setIsDragging(false)
+      }
+    }
   }
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    if (isClosing || startYRef.current == null || startXRef.current == null) return
-    const currentY = e.touches[0].clientY
-    const currentX = e.touches[0].clientX
-    const res = processSwipeMove(startXRef.current, startYRef.current, currentX, currentY, isSwipeDownRef.current)
-    if (res.active) {
-      isSwipeDownRef.current = true
-      setIsDragging(true)
-      setDragY(res.dragY)
-      if (res.shouldPreventDefault) e.preventDefault()
+    if (isClosing || isGlidingOut) return
+
+    // Two-finger pinch-to-zoom handling
+    if (e.touches.length === 2 && initialPinchDistRef.current != null) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      )
+      const ratio = dist / initialPinchDistRef.current
+      const nextScale = Math.min(4, Math.max(1, initialPinchScaleRef.current * ratio))
+      setZoomScale(nextScale)
+      if (nextScale <= 1.05) {
+        setPan({ x: 0, y: 0 })
+      }
+      if (e.cancelable) e.preventDefault()
+      return
+    }
+
+    if (e.touches.length === 1) {
+      const currentX = e.touches[0].clientX
+      const currentY = e.touches[0].clientY
+
+      if (zoomScale > 1.05 && panStartRef.current) {
+        // Zoomed in: pan image freely within bounds
+        const deltaX = currentX - panStartRef.current.x
+        const deltaY = currentY - panStartRef.current.y
+        const maxPanX = (window.innerWidth * (zoomScale - 1)) / 1.8
+        const maxPanY = (window.innerHeight * (zoomScale - 1)) / 1.8
+        setPan({
+          x: Math.max(-maxPanX, Math.min(maxPanX, initialPanRef.current.x + deltaX)),
+          y: Math.max(-maxPanY, Math.min(maxPanY, initialPanRef.current.y + deltaY)),
+        })
+        if (e.cancelable) e.preventDefault()
+        return
+      }
+
+      // Not zoomed in: swipe-down to dismiss
+      if (startYRef.current != null && startXRef.current != null) {
+        const res = processSwipeMove(startXRef.current, startYRef.current, currentX, currentY, isSwipeDownRef.current)
+        if (res.active) {
+          isSwipeDownRef.current = true
+          setIsDragging(true)
+          setDragY(res.dragY)
+          if (res.shouldPreventDefault && e.cancelable) e.preventDefault()
+        }
+      }
     }
   }
 
   const handleTouchEnd = () => {
-    if (isClosing) return
-    if (isSwipeDownRef.current && shouldDismissOnRelease(dragY)) {
-      dismiss()
+    if (isClosing || isGlidingOut) return
+    initialPinchDistRef.current = null
+    panStartRef.current = null
+
+    if (zoomScale <= 1.05 && isSwipeDownRef.current && shouldDismissOnRelease(dragY)) {
+      dismissViaSwipeDown(dragY)
       return
     }
+
     setIsDragging(false)
     setDragY(0)
     startYRef.current = null
@@ -399,7 +586,9 @@ export function ImageLightbox({
   }
 
   const handleTouchCancel = () => {
-    if (isClosing) return
+    if (isClosing || isGlidingOut) return
+    initialPinchDistRef.current = null
+    panStartRef.current = null
     setIsDragging(false)
     setDragY(0)
     startYRef.current = null
@@ -413,29 +602,46 @@ export function ImageLightbox({
     'image-lightbox-backdrop',
     isEntering && 'is-entering',
     isClosing && 'is-closing',
+    isGlidingOut && 'is-gliding-out',
   ].filter(Boolean).join(' ')
 
   const topBarClass = [
     'image-lightbox-top-bar',
     isEntering && 'is-entering',
-    isClosing && 'is-closing',
+    (isClosing || isGlidingOut) && 'is-closing',
   ].filter(Boolean).join(' ')
 
   const stageClass = [
     'image-lightbox-stage',
     isEntering && 'is-entering',
     isClosing && 'is-closing',
+    isGlidingOut && 'is-gliding-out',
   ].filter(Boolean).join(' ')
 
-  const stageStyle: React.CSSProperties = isEntering || isClosing
+  const stageStyle: React.CSSProperties = isClosing
     ? {}
+    : isGlidingOut
+    ? {
+        transform: `translate3d(0, ${dragY}px, 0) scale(${scale * 0.9})`,
+        opacity: 0,
+        transition: 'transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.20s ease',
+      }
     : {
-        transform: `translate3d(0, ${dragY}px, 0) scale(${scale})`,
-        transition: isDragging ? 'none' : 'transform 0.24s cubic-bezier(0.16, 1, 0.3, 1)',
+        transform: zoomScale > 1.05
+          ? `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoomScale})`
+          : `translate3d(0, ${dragY}px, 0) scale(${scale})`,
+        transition: isDragging
+          ? 'none'
+          : 'transform 0.24s cubic-bezier(0.16, 1, 0.3, 1)',
       }
 
-  const backdropStyle: React.CSSProperties = isEntering || isClosing
+  const backdropStyle: React.CSSProperties = isClosing
     ? {}
+    : isGlidingOut
+    ? {
+        backgroundColor: 'rgba(0, 0, 0, 0)',
+        transition: 'background-color 0.20s ease',
+      }
     : {
         backgroundColor: `rgba(0, 0, 0, ${backdropOpacity})`,
         transition: isDragging ? 'none' : 'background-color 0.22s ease',
@@ -452,6 +658,7 @@ export function ImageLightbox({
       onTouchCancel={handleTouchCancel}
       role="dialog"
       aria-modal="true"
+      aria-label="Image preview"
     >
       <header className={topBarClass} onClick={e => e.stopPropagation()}>
         <button
@@ -482,12 +689,11 @@ export function ImageLightbox({
           className="image-lightbox-img"
           src={src}
           alt={alt || fileName}
-          onClick={e => e.stopPropagation()}
+          onClick={toggleZoom}
         />
       </div>
     </div>
   )
-
   if (typeof document !== 'undefined' && document.body) {
     return createPortal(content, document.body)
   }
@@ -850,15 +1056,85 @@ export const MarkdownContent = memo(function MarkdownContent({ children }: { chi
 
 type MessageCardProps = {
   message: LiveMessage & { local?: boolean }
+  previousMessage?: LiveMessage
   onEdit: (text: string, id: number) => void
   profile?: LiveProfile
   profiles?: LiveProfile[]
   fallbackName: string
+  isCompleted?: boolean
+  isActiveTurn?: boolean
+  activeToolStatus?: string
   revealTimestamp: boolean
   onRevealTimestamp: () => void
 }
 
-export const MessageCard = memo(function MessageCard({ message, onEdit, profile: _profile, profiles, fallbackName: _fallbackName, revealTimestamp, onRevealTimestamp }: MessageCardProps) {
+export function AgentDispatchBubble({
+  delegation,
+  senderProfile,
+  isCompleted,
+}: {
+  delegation: AgentDelegation
+  senderProfile?: LiveProfile
+  isCompleted?: boolean
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const isCollapsible = (delegation.body.split('\n').length > 4 || delegation.body.length > 200)
+
+  const label = delegation.kind === 'result'
+    ? 'Response'
+    : delegation.kind === 'reply'
+    ? 'Reply'
+    : 'Dispatched'
+
+  return (
+    <div className="agent-dispatch-bubble">
+      <header className="agent-dispatch-header">
+        <div className="agent-dispatch-avatar" aria-hidden="true">
+          <BotAvatar
+            profile={senderProfile}
+            fallbackName={delegation.handle || delegation.senderName}
+            variant="dispatch"
+          />
+        </div>
+        <div className="agent-dispatch-meta">
+          <span className="agent-dispatch-handle">{`@${delegation.handle}`}</span>
+        </div>
+      </header>
+
+      <div className={`agent-dispatch-body ${isCollapsible && !expanded ? 'is-collapsed' : ''}`}>
+        <MarkdownContent>{delegation.body}</MarkdownContent>
+        {isCollapsible && !expanded && (
+          <div className="agent-dispatch-fade" aria-hidden="true" />
+        )}
+      </div>
+
+      {(isCollapsible || isCompleted) && (
+        <footer className="agent-dispatch-footer">
+          {isCollapsible ? (
+            <button
+              type="button"
+              className="agent-dispatch-toggle"
+              aria-expanded={expanded}
+              onClick={() => setExpanded(prev => !prev)}
+            >
+              <span>{expanded ? 'Show less' : 'Show more'}</span>
+              <ChevronDown size={12} className={expanded ? 'is-expanded' : ''} />
+            </button>
+          ) : <span />}
+
+          {isCompleted && (
+            <div className="agent-dispatch-status completed" title="Completed">
+              <Check size={11} strokeWidth={2.5} />
+              <span>Completed</span>
+            </div>
+          )}
+        </footer>
+      )}
+    </div>
+  )
+}
+
+export const MessageCard = memo(function MessageCard({ message, previousMessage, onEdit, profile: _profile, profiles, fallbackName: _fallbackName, isCompleted, isActiveTurn, activeToolStatus, revealTimestamp, onRevealTimestamp }: MessageCardProps) {
   const [copied, setCopied] = useState(false)
   const [swipeStartX, setSwipeStartX] = useState<number | null>(null)
   const stats = formatResponseStats(message)
@@ -867,6 +1143,11 @@ export const MessageCard = memo(function MessageCard({ message, onEdit, profile:
   const cleanContent = stripAttachedContextScaffolding(textContent)
   const trimmed = cleanContent.trim()
   if (message.role === 'system' || message.role === 'tool' || !trimmed) return null
+
+  // Internal runtime scaffolding (process completion signals and hidden system rows) are never rendered
+  const displayKind = (message as any).display_kind
+  if (displayKind === 'hidden' || displayKind === 'process_complete' || displayKind === 'async_delegation_complete') return null
+  if (/^\[IMPORTANT:\s*Background process\s+/i.test(textContent.trim()) && textContent.trim().endsWith(']')) return null
 
   const copy = async () => {
     await navigator.clipboard.writeText(cleanContent)
@@ -878,30 +1159,27 @@ export const MessageCard = memo(function MessageCard({ message, onEdit, profile:
     setSwipeStartX(null)
   }
 
-  const delegation = parseAgentDelegation(cleanContent)
+  const delegation = message.role === 'user' ? parseAgentDelegation(cleanContent, message, previousMessage, profiles) : null
   if (delegation) {
     const senderProfile = resolveDelegationSenderProfile(delegation.handle, delegation.senderName, profiles)
     return (
       <article className="message-row agent-delegation-row">
-        <div className="agent-dispatch-bubble">
-          <header className="agent-dispatch-header">
-            <div className="agent-dispatch-avatar" aria-hidden="true">
-              <BotAvatar
-                profile={senderProfile}
-                fallbackName={delegation.handle || delegation.senderName}
-                variant="dispatch"
-              />
+        <AgentDispatchBubble
+          delegation={delegation}
+          senderProfile={senderProfile}
+          isCompleted={isCompleted}
+        />
+        {isActiveTurn && activeToolStatus && (
+          <div className="dispatch-child-branch">
+            <div className="dispatch-branch-stem" aria-hidden="true">
+              <span className="dispatch-branch-corner">└</span>
             </div>
-            <div className="agent-dispatch-meta">
-              <span className="agent-dispatch-handle">{`@${delegation.handle}`}</span>
-              <span className="agent-dispatch-dot" aria-hidden="true">·</span>
-              <span className="agent-dispatch-label">Dispatched task</span>
+            <div className="dispatch-branch-pill">
+              <span className="dispatch-pulse-dot" aria-hidden="true" />
+              <span className="dispatch-branch-text">{activeToolStatus}</span>
             </div>
-          </header>
-          <div className="agent-dispatch-body">
-            <MarkdownContent>{delegation.body}</MarkdownContent>
           </div>
-        </div>
+        )}
         <div className="message-actions">
           <button onClick={() => void copy()}>
             {copied ? <Check size={13}/> : <Copy size={13}/>}

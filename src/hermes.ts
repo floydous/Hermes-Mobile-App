@@ -4,7 +4,7 @@ import { HermesGatewayClient, type GatewayEvent } from './gateway'
 import type { RosterProfile } from './live-model'
 
 export type LiveProfile = RosterProfile
-export type LiveSession = { id: string; title: string; preview: string; profile: string; model?: string; unread?: boolean; last_active?: number }
+export type LiveSession = { id: string; title: string; preview: string; profile: string; source?: string; model?: string; unread?: boolean; last_active?: number }
 export type LiveUsage = { model?: string; input?: number; output?: number; reasoning?: number; prompt?: number; completion?: number; total?: number; calls?: number; avg_tps?: number; avg_latency_s?: number }
 export type LiveMessage = { id: number; role: 'user' | 'assistant' | 'tool' | 'system'; content: string; tool_name?: string | null; tool_status?: 'running' | 'done' | 'failed'; duration_s?: number; reasoning?: string | null; timestamp?: number; token_count?: number | null; usage?: LiveUsage }
 export type ModelProvider = { name: string; slug: string; models?: string[]; featured_models?: string[]; authenticated?: boolean }

@@ -1,7 +1,9 @@
 import { describe, expect, it, beforeEach } from 'vitest'
 import {
   getCachedSessionMessages,
+  isHumanChatSession,
   removeCachedSessionMessages,
+  resolveLatestSessionPreview,
   setCachedSessionMessages,
 } from './session-cache'
 import type { LiveMessage } from './hermes'
@@ -72,5 +74,132 @@ describe('session-cache message caching and eviction', () => {
     // Recent sessions should still be cached
     expect(getCachedSessionMessages('session-17')).toHaveLength(1)
     expect(getCachedSessionMessages('session-16')).toHaveLength(1)
+  })
+
+  it('identifies human chat sessions vs automated task and cron runs via isHumanChatSession', () => {
+    // Human sessions: should return true
+    expect(isHumanChatSession({ id: 's1', title: 'Normal conversation', profile: 'default' })).toBe(true)
+    expect(isHumanChatSession({ id: 's2', title: 'Research on quantum physics', profile: 'researcher' })).toBe(true)
+    expect(isHumanChatSession({ id: 's3', title: 'New chat', profile: 'homework-manager' })).toBe(true)
+
+    // Cron job sessions by source: should return false
+    expect(isHumanChatSession({ id: 'c1', title: 'Daily summary', source: 'cron' })).toBe(false)
+    expect(isHumanChatSession({ id: 'c2', title: 'Nightly backup', source: 'CRON' })).toBe(false)
+    expect(isHumanChatSession({ id: 't1', title: 'Task run', source: 'task' })).toBe(false)
+    expect(isHumanChatSession({ id: 'k1', title: 'Board automation', source: 'kanban' })).toBe(false)
+    expect(isHumanChatSession({ id: 'o1', title: 'One shot execution', source: 'oneshot' })).toBe(false)
+
+    // Cron and task sessions identified by title prefixes: should return false
+    expect(isHumanChatSession({ id: 'x1', title: 'Cron: Morning Briefing' })).toBe(false)
+    expect(isHumanChatSession({ id: 'x2', title: '[cron] System healthcheck' })).toBe(false)
+    expect(isHumanChatSession({ id: 'x3', title: 'Task: Data sync' })).toBe(false)
+    expect(isHumanChatSession({ id: 'x4', title: '[task] Database vacuum' })).toBe(false)
+    expect(isHumanChatSession({ id: 'x5', title: 'Daily cron job' })).toBe(false)
+    expect(isHumanChatSession({ id: 'x6', title: 'Scheduled Task: Weekly review' })).toBe(false)
+
+    // ID prefixes: should return false
+    expect(isHumanChatSession({ id: 'cron:12345', title: 'Untitled' })).toBe(false)
+    expect(isHumanChatSession({ id: 'task:job_88', title: 'Run' })).toBe(false)
+
+    // Canonical Bot Chat sessions: should return false (they belong to Bots tab, not Sessions)
+    expect(isHumanChatSession({ id: 'b1', title: 'Bot Chat', profile: 'homework-manager' })).toBe(false)
+    expect(isHumanChatSession({ id: 'b2', title: 'bot chat', profile: 'default' })).toBe(false)
+
+    // Canonical session IDs in canonicalSessionIds set: should return false
+    const canonicalSet = new Set(['canonical-hm-42', 'canonical-def-1'])
+    expect(isHumanChatSession({ id: 'canonical-hm-42', title: 'Custom Title', profile: 'homework-manager' }, canonicalSet)).toBe(false)
+    expect(isHumanChatSession({ id: 'other-session', title: 'Custom Title', profile: 'homework-manager' }, canonicalSet)).toBe(true)
+  })
+
+  it('resolves the true most recent message preview instead of the initial prompt', () => {
+    const historicalMessages: LiveMessage[] = [
+      { id: 1, role: 'user', content: 'Initial opening prompt from days ago' },
+      { id: 2, role: 'assistant', content: 'Initial reply' },
+      { id: 3, role: 'user', content: 'Follow-up question' },
+      { id: 4, role: 'assistant', content: 'Proses pengiriman ke @hermes telah selesai (status settled).' },
+    ]
+
+    // Case 1: In-memory cached messages provide the true latest message
+    const preview1 = resolveLatestSessionPreview(
+      'sess-hm',
+      'Initial opening prompt from days ago',
+      historicalMessages
+    )
+    expect(preview1).toBe('Proses pengiriman ke @hermes telah selesai (status settled).')
+
+    // Case 2: Persistent localStorage cache provides the true latest message
+    setCachedSessionMessages('sess-persisted', historicalMessages)
+    const preview2 = resolveLatestSessionPreview(
+      'sess-persisted',
+      'Initial opening prompt from days ago'
+    )
+    expect(preview2).toBe('Proses pengiriman ke @hermes telah selesai (status settled).')
+
+    // Case 3: Empty cache falls back to server preview
+    const preview3 = resolveLatestSessionPreview(
+      'sess-empty',
+      'Fallback server preview'
+    )
+    expect(preview3).toBe('Fallback server preview')
+
+    // Case 4: Recent user prompt followed by assistant reply correctly resolves the assistant reply
+    const recentTurnMessages: LiveMessage[] = [
+      { id: 1, role: 'user', content: 'Oke' },
+      { id: 2, role: 'assistant', content: 'Siap! Kapan pun kamu butuh bantuan, langsung panggil saja. Selamat beraktivitas!' },
+    ]
+    setCachedSessionMessages('sess-default', recentTurnMessages)
+    const preview4 = resolveLatestSessionPreview(
+      'sess-default',
+      'Oke'
+    )
+    expect(preview4).toBe('Siap! Kapan pun kamu butuh bantuan, langsung panggil saja. Selamat beraktivitas!')
+
+    // Case 5: Stale cache fallback when server has significantly newer activity (>30s)
+    const oldMessages: LiveMessage[] = [
+      { id: 1, role: 'assistant', content: 'Ancient reply', timestamp: 100 },
+    ]
+    setCachedSessionMessages('sess-ancient', oldMessages)
+    const preview5 = resolveLatestSessionPreview(
+      'sess-ancient',
+      'Remote turn from another client',
+      oldMessages,
+      999999 // Server last_active is far newer than 100 + 30s
+    )
+    expect(preview5).toBe('Remote turn from another client')
+
+    // Case 6: Within 30-second boundary (25s difference) -> considered fresh
+    const freshMessages: LiveMessage[] = [
+      { id: 10, role: 'assistant', content: 'Fresh answer', timestamp: 100 },
+    ]
+    setCachedSessionMessages('sess-fresh', freshMessages)
+    const preview6 = resolveLatestSessionPreview(
+      'sess-fresh',
+      'Old opening prompt',
+      freshMessages,
+      125 // 125s - 100s = 25s <= 30s
+    )
+    expect(preview6).toBe('Fresh answer')
+
+    // Case 7: Past 30-second boundary (35s difference) -> considered stale, uses server fallback
+    const preview7 = resolveLatestSessionPreview(
+      'sess-fresh',
+      'Remote update from server',
+      freshMessages,
+      135 // 135s - 100s = 35s > 30s
+    )
+    expect(preview7).toBe('Remote update from server')
+
+    // Case 8: Missing message timestamp (optimistic client turn) -> considered fresh
+    const optimisticMessages: LiveMessage[] = [
+      { id: -99, role: 'assistant', content: 'Optimistic reply without timestamp' },
+    ]
+    setCachedSessionMessages('sess-opt', optimisticMessages)
+    const preview8 = resolveLatestSessionPreview(
+      'sess-opt',
+      'Old prompt',
+      optimisticMessages,
+      Math.floor(Date.now() / 1000)
+    )
+    expect(preview8).toBe('Optimistic reply without timestamp')
   })
 })

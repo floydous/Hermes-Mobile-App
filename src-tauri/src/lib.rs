@@ -141,7 +141,7 @@ fn hermes_snapshot(app: tauri::AppHandle, base_url: String) -> Result<String, St
     // Sessions are a REST projection. Bot roster rows are intentionally NOT
     // read here: the Desktop contract's profiles.list RPC owns canonical
     // hidden Bot Chat identity, preview, ui_meta, and activity.
-    let sessions = authenticated_get(&app, &origin, "/api/profiles/sessions?limit=100&offset=0&min_messages=1&archived=exclude&order=recent&profile=all")?;
+    let sessions = authenticated_get(&app, &origin, "/api/profiles/sessions?limit=100&offset=0&min_messages=1&archived=exclude&order=recent&profile=all&exclude_sources=cron,kanban,tool,oneshot")?;
     Ok(format!(r#"{{"sessions":{sessions}}}"#))
 }
 

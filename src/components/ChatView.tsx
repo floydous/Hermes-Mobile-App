@@ -304,7 +304,27 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
           </section>
         )}
         {showEmptyState && <section className="chat-empty-state" aria-label={`Start a conversation with ${botName}`}><BotAvatar profile={botProfile} fallbackName={session.profile} variant="welcome"/><h1>{botName.toUpperCase()}</h1><p>Say something to get started.</p></section>}
-        {messages.map(message => <MessageCard key={message.id} message={message} onEdit={editMessage} profile={botProfile} profiles={profiles} fallbackName={session.profile} revealTimestamp={message.role === 'assistant' && revealedTimestampId === message.id} onRevealTimestamp={() => setRevealedTimestampId(current => current === message.id ? null : message.id)}/>)}
+        {messages.map((message, index) => {
+          const isLast = index === messages.length - 1
+          const previousMessage = index > 0 ? messages[index - 1] : undefined
+          const hasAssistantReplyAfter = messages.slice(index + 1).some(m => m.role === 'assistant')
+          return (
+            <MessageCard
+              key={message.id}
+              message={message}
+              previousMessage={previousMessage}
+              onEdit={editMessage}
+              profile={botProfile}
+              profiles={profiles}
+              fallbackName={session.profile}
+              isCompleted={hasAssistantReplyAfter}
+              isActiveTurn={isLast && sending}
+              activeToolStatus={isLast && sending ? liveStatus : undefined}
+              revealTimestamp={message.role === 'assistant' && revealedTimestampId === message.id}
+              onRevealTimestamp={() => setRevealedTimestampId(current => current === message.id ? null : message.id)}
+            />
+          )
+        })}
         {showActiveAssistant && (
           <article className="message-row assistant-row live-response">
             <div className="assistant-message-layout">

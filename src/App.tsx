@@ -12,7 +12,7 @@ import HermesHostIcon from './assets/hermes-agent-icon-transparent.svg'
 import { onBackButtonPress } from '@tauri-apps/api/app'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { buildAttachmentPrompt, attachmentSummary } from './attachment-routing'
-import { buildBotRows, resolveCanonicalSessionId, type RosterProfile } from './live-model'
+import { buildBotRows, cleanPreviewSnippet, resolveCanonicalSessionId, type RosterProfile } from './live-model'
 import { settleAssistantResponse, type SettledAssistantResponse as SettledAssistantState } from './settled-assistant'
 import {
   InFlightSubmissionTracker,
@@ -30,7 +30,9 @@ import {
 import { errorMessage, RequestEpoch, selectRestoredEndpoint } from './connection-state'
 import {
   getCachedSessionMessages,
+  isHumanChatSession,
   removeCachedSessionMessages,
+  resolveLatestSessionPreview,
   setCachedSessionMessages,
 } from './session-cache'
 import {
@@ -55,7 +57,7 @@ import {
   type LiveUsage,
 } from './hermes'
 
-type Tab = 'bots' | 'sessions' | 'tasks'
+import { computeNextSwipeTab, isHorizontalSwipeIntent, type Tab } from './tab-swipe'
 type DraftBot = { role: string; name: string; description: string; soul: string; model: string; provider: string; shape: string }
 type Theme = 'dark' | 'light' | 'grey' | 'aurora'
 type SettledAssistantResponse = { sessionId: string; profile: string; content: string; usage?: LiveUsage }
@@ -108,6 +110,7 @@ export default function App() {
   const [selected, setSelected] = useState<LiveSession | null>(null)
   const selectedRef = useRef<LiveSession | null>(selected)
   selectedRef.current = selected
+  const messageCacheRef = useRef<Map<string, LiveMessage[]>>(new Map())
   const chatTurnGenerationRef = useRef(0)
   const [conversationLoading, setConversationLoading] = useState(false)
   const sessionLoadRef = useRef(0)
@@ -136,6 +139,7 @@ export default function App() {
   const sendingRef = useRef(false)
   sendingRef.current = sending
   const [toolActivities, setToolActivities] = useState<ToolActivity[]>([])
+  const inFlightDelegationByToolId = useRef<Map<string, string>>(new Map())
   const [activeTurns, setActiveTurns] = useState<Record<string, ActiveBotTurn>>(() => {
     return restorePersistedActiveTurns(typeof localStorage !== 'undefined' ? localStorage.getItem('hermes-mobile-active-turns') : null)
   })
@@ -154,30 +158,6 @@ export default function App() {
   }, [activeTurns])
 
   const recentEndedTurnsRef = useRef<Map<string, number>>(new Map())
-
-  useEffect(() => {
-    return onGatewayGlobalEvent(event => {
-      if (event.type === 'message.complete' || event.type === 'turn.end' || event.type === 'turn.error') {
-        const sid = event.sessionId
-        if (sid) {
-          recentEndedTurnsRef.current.set(sid, Date.now())
-          activeInFlightTurnsRef.current.end(sid)
-          setActiveTurns(prev => {
-            let changed = false
-            const next = { ...prev }
-            for (const [prof, turn] of Object.entries(next)) {
-              if (turn && (turn.sessionId === sid || prof === sid)) {
-                activeInFlightTurnsRef.current.end(prof)
-                delete next[prof]
-                changed = true
-              }
-            }
-            return changed ? next : prev
-          })
-        }
-      }
-    }, activeEndpoint)
-  }, [activeEndpoint])
   const [query, setQuery] = useState('')
   const [searching, setSearching] = useState(false)
   const [settings, setSettings] = useState(false)
@@ -345,6 +325,32 @@ export default function App() {
   }
 
   useEffect(() => {
+    return onGatewayGlobalEvent(event => {
+      if (event.type === 'message.complete' || event.type === 'turn.end' || event.type === 'turn.error') {
+        const sid = event.sessionId
+        if (sid) {
+          recentEndedTurnsRef.current.set(sid, Date.now())
+          activeInFlightTurnsRef.current.end(sid)
+          setActiveTurns(prev => {
+            let changed = false
+            const next = { ...prev }
+            for (const [prof, turn] of Object.entries(next)) {
+              if (turn && (turn.sessionId === sid || prof === sid)) {
+                activeInFlightTurnsRef.current.end(prof)
+                delete next[prof]
+                changed = true
+              }
+            }
+            return changed ? next : prev
+          })
+          // Automatically refresh so any new message preview/unread updates immediately!
+          void refresh()
+        }
+      }
+    }, activeEndpoint)
+  }, [activeEndpoint, refresh])
+
+  useEffect(() => {
     let active = true
     let timer: number | undefined
     const bootstrap = async () => {
@@ -382,20 +388,51 @@ export default function App() {
     return () => document.removeEventListener('visibilitychange', resumeSavedConnection)
   }, [])
 
-  const rows = useMemo(() => buildBotRows(profiles).map(({ profile, session }) => ({
-    profile,
-    session: session ? {
-      id: resolveCanonicalSessionId(session),
-      title: profile.display_name || titleize(profile.name),
-      preview: session.preview || '',
-      profile: profile.name,
-      model: profile.model,
-      last_active: session.last_active,
-      unread: false,
-    } satisfies LiveSession : null,
-  })).filter(row => `${row.profile.name} ${row.profile.display_name || ''} ${row.session?.preview || ''}`.toLowerCase().includes(query.toLowerCase())), [profiles, query])
+  const rows = useMemo(() => buildBotRows(profiles, sessions).map(({ profile, session }) => {
+    const sid = session ? resolveCanonicalSessionId(session) : ''
+    const cached = sid ? (messageCacheRef.current.get(sid) || getCachedSessionMessages(sid)) : null
+    const latestPreview = resolveLatestSessionPreview(sid, session?.preview, cached || undefined, session?.last_active)
+    const lastRead = Number(localStorage.getItem(`hermes-last-read:${sid}`) || 0)
+    const lastActive = session?.last_active ? (session.last_active > 1e11 ? session.last_active : session.last_active * 1000) : 0
+    const isUnread = Boolean(
+      session &&
+      lastActive > 0 &&
+      lastActive > lastRead &&
+      selected?.id !== sid
+    )
 
-  const visibleSessions = useMemo(() => sessions.filter(session => `${session.title} ${session.profile} ${session.preview}`.toLowerCase().includes(query.toLowerCase())), [sessions, query])
+    return {
+      profile,
+      session: session ? {
+        id: sid,
+        title: profile.display_name || titleize(profile.name),
+        preview: latestPreview,
+        profile: profile.name,
+        model: profile.model,
+        last_active: session.last_active,
+        unread: isUnread,
+      } satisfies LiveSession : null,
+    }
+  }).filter(row => `${row.profile.name} ${row.profile.display_name || ''} ${row.session?.preview || ''}`.toLowerCase().includes(query.toLowerCase())), [profiles, sessions, selected?.id, query])
+
+  const canonicalSessionIds = useMemo(() => {
+    const set = new Set<string>()
+    for (const p of profiles) {
+      if (p.canonical_session?.id) set.add(p.canonical_session.id)
+      if (p.canonical_session?.resolved_id) set.add(p.canonical_session.resolved_id)
+      if (p.last_session?.id && p.last_session.title === 'Bot Chat') set.add(p.last_session.id)
+    }
+    return set
+  }, [profiles])
+
+  const visibleSessions = useMemo(() => sessions.filter(session => isHumanChatSession(session, canonicalSessionIds) && `${session.title} ${session.profile} ${session.preview}`.toLowerCase().includes(query.toLowerCase())).map(session => {
+    const cached = messageCacheRef.current.get(session.id) || getCachedSessionMessages(session.id)
+    const latestPreview = resolveLatestSessionPreview(session.id, session.preview, cached || undefined, session.last_active)
+    return {
+      ...session,
+      preview: latestPreview,
+    }
+  }), [sessions, canonicalSessionIds, query])
   const profileMap = useMemo(() => new Map(profiles.map(p => [p.name, p])), [profiles])
   const [openingSessionId, setOpeningSessionId] = useState<string | null>(null)
   const [sessionDisplayCount, setSessionDisplayCount] = useState(35)
@@ -414,8 +451,6 @@ export default function App() {
       setSessionDisplayCount(35)
     }
   }, [tab])
-
-  const messageCacheRef = useRef<Map<string, LiveMessage[]>>(new Map())
 
   const openSession = useCallback((session: LiveSession, latestUsage?: LiveUsage): Promise<void> => {
     setOpeningSessionId(session.id)
@@ -444,6 +479,9 @@ export default function App() {
     setProfileSheet(false)
     setSettledAssistant(null)
     setError('')
+    try {
+      localStorage.setItem(`hermes-last-read:${safeSession.id}`, String(Date.now()))
+    } catch {}
 
     const isTurnInFlight = Boolean(
       activeInFlightTurnsRef.current.has(safeSession.profile) ||
@@ -585,7 +623,8 @@ export default function App() {
     const settledSnapshot = settledAssistantRef.current
     const priorSettled = settledSnapshot?.sessionId === turnSession.id && settledSnapshot.profile === turnSession.profile ? settledSnapshot : null
     const priorAssistantMessage = priorSettled ? { id: -(Date.now() + 1), role: 'assistant' as const, content: priorSettled.content, usage: priorSettled.usage } : null
-    const localUserMessage = { id: -Date.now(), role: 'user' as const, content: attachmentSummary(text, attachmentRefs) }
+    const nowSec = Math.floor(Date.now() / 1000)
+    const localUserMessage = { id: -Date.now(), role: 'user' as const, content: attachmentSummary(text, attachmentRefs), timestamp: nowSec }
 
     const initialTurn: ActiveBotTurn = {
       sessionId: turnSessionId,
@@ -699,6 +738,7 @@ export default function App() {
           // Multi-agent task delegation: immediately activate working status on the receiving bot
           const targetProf = resolveDelegationTargetProfile(toolName, params, profiles)
           if (targetProf) {
+            inFlightDelegationByToolId.current.set(id, targetProf)
             const matchedTarget = profiles.find(p => p.name === targetProf)
             const targetSid = matchedTarget?.canonical_session?.id || `dispatched:${targetProf}`
             setActiveTurns(prev => ({
@@ -746,6 +786,25 @@ export default function App() {
               { id, name: toolName, status: 'done', duration_s, summary },
             ])
           }
+
+          // Complete delegated turn and refresh roster
+          const targetProf = inFlightDelegationByToolId.current.get(id) || resolveDelegationTargetProfile(toolName, undefined, profiles)
+          if (targetProf) {
+            inFlightDelegationByToolId.current.delete(id)
+            const matchedTarget = profiles.find(p => p.name === targetProf)
+            const targetSid = matchedTarget?.canonical_session?.id || `dispatched:${targetProf}`
+            activeInFlightTurnsRef.current.end(targetProf)
+            activeInFlightTurnsRef.current.end(targetSid)
+            recentEndedTurnsRef.current.set(targetProf, Date.now())
+            recentEndedTurnsRef.current.set(targetSid, Date.now())
+            setActiveTurns(prev => {
+              if (!prev[targetProf]) return prev
+              const next = { ...prev }
+              delete next[targetProf]
+              return next
+            })
+            void refresh()
+          }
         },
         onTitleUpdate: title => {
           setSelected(current => current ? { ...current, title } : current)
@@ -774,18 +833,31 @@ export default function App() {
 
       // Commit finalized assistant message to timeline and cache so it never vanishes
       if (finalText.trim()) {
+        const nowSec = Math.floor(Date.now() / 1000)
         const terminalMessage: LiveMessage = {
           id: -Date.now(),
           role: 'assistant',
           content: finalText,
           usage: completionUsage,
+          timestamp: nowSec,
         }
         setMessages(prev => {
-          if (prev.some(m => m.role === 'assistant' && m.content === finalText)) return prev
+          const last = prev[prev.length - 1]
+          if (last && last.id === terminalMessage.id) {
+            return prev
+          }
           return [...prev, terminalMessage]
         })
-        const cached = messageCacheRef.current.get(finalSessionId) || []
-        messageCacheRef.current.set(finalSessionId, [...cached, terminalMessage])
+        const sids = new Set([finalSessionId, turnSessionId].filter(Boolean))
+        for (const sid of sids) {
+          const cached = messageCacheRef.current.get(sid) || []
+          const last = cached[cached.length - 1]
+          const nextCached = (last && last.id === terminalMessage.id)
+            ? cached
+            : [...cached, terminalMessage]
+          messageCacheRef.current.set(sid, nextCached)
+          setCachedSessionMessages(sid, nextCached)
+        }
       }
 
       const terminalAssistant = settleAssistantResponse(finalSessionId, turnProfile, finalText, completionUsage)
@@ -813,6 +885,16 @@ export default function App() {
       await refresh()
       return true
     } catch (reason) {
+      for (const [_, prof] of inFlightDelegationByToolId.current.entries()) {
+        activeInFlightTurnsRef.current.end(prof)
+        setActiveTurns(prev => {
+          if (!prev[prof]) return prev
+          const next = { ...prev }
+          delete next[prof]
+          return next
+        })
+      }
+      inFlightDelegationByToolId.current.clear()
       recentEndedTurnsRef.current.set(turnSessionId, Date.now())
       setActiveTurns(prev => {
         const next = { ...prev }
@@ -988,58 +1070,89 @@ export default function App() {
   const swipeStartXRef = useRef<number | null>(null)
   const swipeStartYRef = useRef<number | null>(null)
   const swipeTrackingRef = useRef(false)
-  const lastSwipeTimeRef = useRef(0)
+  const swipeIntentConfirmedRef = useRef(false)
+  const justSwipedRef = useRef(false)
+  const swipeReleaseTimerRef = useRef<number | null>(null)
 
   const handleRosterTouchStart = (event: React.TouchEvent<HTMLElement>) => {
     if (event.touches.length !== 1) return
     const target = event.target as HTMLElement | null
-    if (target?.closest('input, textarea, select, [type="range"], .task-detail, .task-create-sheet, .task-modal-backdrop, .nav-island')) return
+    if (target?.closest('input, textarea, select, [type="range"], .task-detail, .task-create-sheet, .task-modal-backdrop')) return
     swipeStartXRef.current = event.touches[0].clientX
     swipeStartYRef.current = event.touches[0].clientY
     swipeTrackingRef.current = true
+    swipeIntentConfirmedRef.current = false
+  }
+
+  const handleRosterTouchMove = (event: React.TouchEvent<HTMLElement>) => {
+    if (!swipeTrackingRef.current || swipeStartXRef.current == null || swipeStartYRef.current == null) return
+    const currentX = event.touches[0].clientX
+    const currentY = event.touches[0].clientY
+    const deltaX = currentX - swipeStartXRef.current
+    const deltaY = currentY - swipeStartYRef.current
+
+    if (!swipeIntentConfirmedRef.current) {
+      if (isHorizontalSwipeIntent(deltaX, deltaY, 10)) {
+        swipeIntentConfirmedRef.current = true
+      } else if (Math.hypot(deltaX, deltaY) >= 10) {
+        // Vertical or diagonal movement: immediately yield to vertical scrolling
+        swipeTrackingRef.current = false
+        return
+      }
+    }
+
+    // Once horizontal swipe intent is confirmed, prevent Android WebView native scroll/fling interception
+    if (swipeIntentConfirmedRef.current && event.cancelable) {
+      event.preventDefault()
+    }
   }
 
   const handleRosterTouchEnd = (event: React.TouchEvent<HTMLElement>) => {
     if (!swipeTrackingRef.current || swipeStartXRef.current == null || swipeStartYRef.current == null) {
       swipeTrackingRef.current = false
+      swipeIntentConfirmedRef.current = false
       return
     }
     const endX = event.changedTouches[0]?.clientX ?? swipeStartXRef.current
     const endY = event.changedTouches[0]?.clientY ?? swipeStartYRef.current
     const deltaX = endX - swipeStartXRef.current
     const deltaY = endY - swipeStartYRef.current
+    const wasConfirmed = swipeIntentConfirmedRef.current
+
     swipeTrackingRef.current = false
+    swipeIntentConfirmedRef.current = false
     swipeStartXRef.current = null
     swipeStartYRef.current = null
 
-    // Require predominantly horizontal movement with at least 44px delta
-    if (Math.abs(deltaX) >= 44 && Math.abs(deltaX) > Math.abs(deltaY) * 1.25) {
-      const tabOrder: Tab[] = ['bots', 'sessions', 'tasks']
-      const currentIndex = tabOrder.indexOf(tab)
-      if (deltaX < 0) {
-        // Swipe Left -> next panel
-        if (currentIndex < tabOrder.length - 1) {
-          lastSwipeTimeRef.current = Date.now()
-          switchTab(tabOrder[currentIndex + 1])
+    // Require confirmed horizontal intent with at least 44px delta
+    if (wasConfirmed) {
+      const nextTab = computeNextSwipeTab(tab, deltaX, deltaY, 44)
+      if (nextTab) {
+        justSwipedRef.current = true
+        if (swipeReleaseTimerRef.current != null) window.clearTimeout(swipeReleaseTimerRef.current)
+        swipeReleaseTimerRef.current = window.setTimeout(() => {
+          justSwipedRef.current = false
+        }, 180)
+
+        if (document.activeElement instanceof HTMLElement) {
+          document.activeElement.blur()
         }
-      } else {
-        // Swipe Right -> previous panel
-        if (currentIndex > 0) {
-          lastSwipeTimeRef.current = Date.now()
-          switchTab(tabOrder[currentIndex - 1])
-        }
+        switchTab(nextTab)
       }
     }
   }
 
   const handleRosterTouchCancel = () => {
     swipeTrackingRef.current = false
+    swipeIntentConfirmedRef.current = false
     swipeStartXRef.current = null
     swipeStartYRef.current = null
   }
 
   const handleRosterClickCapture = (event: React.MouseEvent) => {
-    if (Date.now() - lastSwipeTimeRef.current < 250) {
+    if (justSwipedRef.current) {
+      justSwipedRef.current = false
+      if (swipeReleaseTimerRef.current != null) window.clearTimeout(swipeReleaseTimerRef.current)
       event.stopPropagation()
       event.preventDefault()
     }
@@ -1053,6 +1166,7 @@ export default function App() {
   return <main
     className={`app roster-shell tab-slide-${slideDirection}`}
     onTouchStart={handleRosterTouchStart}
+    onTouchMove={handleRosterTouchMove}
     onTouchEnd={handleRosterTouchEnd}
     onTouchCancel={handleRosterTouchCancel}
     onClickCapture={handleRosterClickCapture}
@@ -1216,6 +1330,7 @@ export default function App() {
                   <div className="bot-avatar-wrap">
                     <BotAvatar profile={profile} fallbackName={profile.name}/>
                     {isWorking && <span className="bot-status-pip" aria-hidden="true"/>}
+                    {session?.unread && !isWorking && <span className="bot-unread-pip" aria-hidden="true"/>}
                   </div>
                   <span className="bot-copy">
                     <b>{profile.display_name || titleize(profile.name)}</b>
@@ -1225,12 +1340,12 @@ export default function App() {
                         <span className="live-status-text">{activeTurn.statusText}</span>
                       </small>
                     ) : (
-                      <small>{session?.preview || profile.description || 'No messages yet'} </small>
+                      <small>{cleanPreviewSnippet(session?.preview) || profile.description || 'No messages yet'} </small>
                     )}
                   </span>
                   <span className="meta">
                     {ago(session?.last_active)}
-                    {session && <i className={session.unread ? 'unread' : ''}/>}
+                    {session?.unread && <span className="unread-badge">New</span>}
                   </span>
                 </button>
               )
@@ -1262,6 +1377,7 @@ export default function App() {
                   <div className="bot-avatar-wrap">
                     <BotAvatar profile={profile} fallbackName={session.profile} variant="session"/>
                     {isWorking && <span className="bot-status-pip" aria-hidden="true"/>}
+                    {session.unread && !isWorking && <span className="bot-unread-pip" aria-hidden="true"/>}
                   </div>
                   <span className="bot-copy">
                     <b>{session.title || 'Untitled session'}</b>
@@ -1271,7 +1387,7 @@ export default function App() {
                         <span className="live-status-text">{activeTurn.statusText}</span>
                       </small>
                     ) : (
-                      <small>{titleize(session.profile || 'default')} · {session.preview}</small>
+                      <small>{titleize(session.profile || 'default')} · {cleanPreviewSnippet(session.preview)}</small>
                     )}
                   </span>
                   <span className="meta">
@@ -1280,6 +1396,7 @@ export default function App() {
                     ) : (
                       ago(session.last_active)
                     )}
+                    {session.unread && !isOpening && <span className="unread-badge">New</span>}
                   </span>
                 </button>
               )
