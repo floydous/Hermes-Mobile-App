@@ -4,6 +4,7 @@ import type { DragEvent } from 'react'
 
 import { BotAvatar } from './BotAvatar'
 import { MessageCard, MarkdownContent } from './MarkdownContent'
+import { SmoothStreamingView } from './SmoothStreamingView'
 import { ClarifyCard, type ClarifyRequest } from './ClarifyCard'
 import type { ToolActivity } from '../chat-turn'
 import { applySlashCompletion } from '../slash-routing'
@@ -460,7 +461,11 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
                 )}
                 {activeAssistantText && (
                   <>
-                    <MarkdownContent>{activeAssistantText}</MarkdownContent>
+                    {sending ? (
+                      <SmoothStreamingView text={activeAssistantText} />
+                    ) : (
+                      <MarkdownContent>{activeAssistantText}</MarkdownContent>
+                    )}
                     {sending && (
                       <div className="typing-inline" aria-hidden="true">
                         <span className="typing-dots">

@@ -10,7 +10,8 @@ import {
   parseModelSwitchNotice,
 } from './session-cache'
 import { cleanPreviewSnippet } from './live-model'
-import { MessageCard, getUiZoomFactor } from './components/MarkdownContent'
+import { MessageCard, MarkdownContent, getUiZoomFactor } from './components/MarkdownContent'
+import { SmoothStreamingView } from './components/SmoothStreamingView'
 import { ChatView } from './components/ChatView'
 import { shouldRetainLocalMessages } from './chat-turn'
 import type { LiveMessage } from './hermes'
@@ -491,6 +492,38 @@ User asked (deterministic, from compacted turns): '[Lalo Ehrmantraut] Rombak ula
       const cleaned = cleanPreviewSnippet(rawDocMessage)
       expect(cleaned).toBe('[Lalo Ehrmantraut] Bisakah kamu audit Guidebook tersebut')
       expect(cleaned).not.toContain('The user sent a document')
+    })
+  })
+
+  describe('Item 4: Streaming Markdown Text Smoothness', () => {
+    it('renders clean standard markdown with zero flickering spans or caret', () => {
+      const streamingText = 'Building user interface with fluid animation'
+      const html = renderToString(
+        <MarkdownContent isStreaming={true}>{streamingText}</MarkdownContent>
+      )
+
+      expect(html).not.toContain('stream-live-caret')
+      expect(html).not.toContain('stream-word-fade')
+      expect(html).toContain('Building user interface with fluid animation')
+    })
+
+    it('skips wrapping code blocks while keeping code structure intact', () => {
+      const textWithCode = 'Here is the command:\n\n```bash\npnpm test\n```'
+      const html = renderToString(
+        <MarkdownContent isStreaming={true}>{textWithCode}</MarkdownContent>
+      )
+
+      expect(html).toContain('code-block')
+      expect(html).toContain('language-bash')
+    })
+
+    it('renders SmoothStreamingView container without caret', () => {
+      const html = renderToString(
+        <SmoothStreamingView text="Live stream response" />
+      )
+
+      expect(html).toContain('smooth-streaming-container')
+      expect(html).not.toContain('stream-live-caret')
     })
   })
 })

@@ -200,4 +200,85 @@ describe('edge swipe back', () => {
       vi.useRealTimers()
     }
   })
+
+  it('initiates edge swipe from left, center, and right X coordinates across full screen width', () => {
+    vi.useFakeTimers()
+    const origDoc = (globalThis as any).document
+    const origWindow = (globalThis as any).window
+    const origRaf = (globalThis as any).requestAnimationFrame
+    try {
+      const positions = [20, 200, 340] // left, center, right
+      for (const startX of positions) {
+        let backCalled = false
+        const listeners: Record<string, (e: any) => void> = {}
+        const mockElement = {
+          addEventListener: (t: string, fn: any) => { listeners[t] = fn },
+          removeEventListener: (t: string) => { delete listeners[t] },
+          classList: { add: vi.fn(), remove: vi.fn() },
+          style: { setProperty: vi.fn(), removeProperty: vi.fn() },
+        }
+        ;(globalThis as any).window = {
+          innerWidth: 400,
+          clearTimeout,
+          setTimeout,
+          requestAnimationFrame: (fn: any) => setTimeout(fn, 16),
+        }
+        ;(globalThis as any).document = {}
+        ;(globalThis as any).requestAnimationFrame = (fn: any) => setTimeout(fn, 16)
+
+        const cleanup = createEdgeSwipeController(mockElement as any, () => { backCalled = true })
+
+        listeners['touchstart']({ touches: [{ clientX: startX, clientY: 100 }], target: null })
+        listeners['touchmove']({
+          touches: [{ clientX: startX + 60, clientY: 100 }],
+          cancelable: true,
+          preventDefault: () => {},
+        })
+        listeners['touchend']({
+          changedTouches: [{ clientX: startX + 60, clientY: 100 }],
+          cancelable: true,
+          preventDefault: () => {},
+        })
+
+        vi.advanceTimersByTime(210)
+        expect(backCalled).toBe(true)
+        cleanup()
+      }
+    } finally {
+      ;(globalThis as any).document = origDoc
+      ;(globalThis as any).window = origWindow
+      ;(globalThis as any).requestAnimationFrame = origRaf
+      vi.useRealTimers()
+    }
+  })
+
+  it('ignores touches originating inside horizontal scrollable tables', () => {
+    const origDoc = (globalThis as any).document
+    const origWindow = (globalThis as any).window
+    try {
+      let backCalled = false
+      const listeners: Record<string, (e: any) => void> = {}
+      const mockElement = {
+        addEventListener: (t: string, fn: any) => { listeners[t] = fn },
+        removeEventListener: (t: string) => { delete listeners[t] },
+        classList: { add: vi.fn(), remove: vi.fn() },
+        style: { setProperty: vi.fn(), removeProperty: vi.fn() },
+      }
+      ;(globalThis as any).window = { innerWidth: 400, clearTimeout, setTimeout }
+      ;(globalThis as any).document = {}
+
+      const cleanup = createEdgeSwipeController(mockElement as any, () => { backCalled = true })
+
+      const mockTarget = {
+        closest: (selector: string) => selector.includes('.table-scroll') ? {} : null,
+      }
+
+      listeners['touchstart']({ touches: [{ clientX: 200, clientY: 100 }], target: mockTarget })
+      expect(mockElement.classList.add).not.toHaveBeenCalled()
+      cleanup()
+    } finally {
+      ;(globalThis as any).document = origDoc
+      ;(globalThis as any).window = origWindow
+    }
+  })
 })

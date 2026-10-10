@@ -50,9 +50,7 @@ export function createEdgeSwipeController<T extends HTMLElement>(
   }
 
   const onTouchStart = (event: TouchEvent) => {
-    // Natural mobile trigger edge: within leftmost 72px or 22% of screen width
-    const maxStart = Math.min(EDGE_SWIPE_MAX_START_PX, window.innerWidth * 0.22)
-    if (event.touches.length !== 1 || event.touches[0].clientX > maxStart) return
+    if (event.touches.length !== 1) return
     const target = event.target as HTMLElement | null
     if (target?.closest('input,textarea,select,button,[data-no-edge-swipe],.table-scroll,pre,code')) return
     window.clearTimeout(resetTimer)

@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { cloneElement, isValidElement, memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Bot,
@@ -1029,7 +1029,12 @@ function CodeBlock({ className, children }: { className?: string; children: Reac
   return <div className="code-block"><div className="code-head"><span>{language}</span><button onClick={() => void copy()} aria-label="Copy code">{copied ? <><Check size={13}/> Copied</> : <><Copy size={13}/> Copy</>}</button></div><pre><code className={className}>{children}</code></pre></div>
 }
 
-export const MarkdownContent = memo(function MarkdownContent({ children }: { children?: unknown }) {
+export const MarkdownContent = memo(function MarkdownContent({
+  children,
+}: {
+  children?: unknown
+  isStreaming?: boolean
+}) {
   const text = typeof children === 'string' ? children : children == null ? '' : String(children)
   if (!text.trim()) return null
   prewarmMessageImageCache(text)
@@ -1181,8 +1186,10 @@ export const MessageCard = memo(function MessageCard({ message, previousMessage,
   const [copied, setCopied] = useState(false)
   const [actionSheetOpen, setActionSheetOpen] = useState(false)
   const [actionSheetExiting, setActionSheetExiting] = useState(false)
+  const [isPressing, setIsPressing] = useState(false)
   const [bubbleRect, setBubbleRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null)
   const bubbleRef = useRef<HTMLDivElement | null>(null)
+  const pressTimerRef = useRef<number | null>(null)
   const longPressTimerRef = useRef<number | null>(null)
   const touchStartPosRef = useRef<{ x: number; y: number } | null>(null)
   const [swipeStartX, setSwipeStartX] = useState<number | null>(null)
@@ -1275,7 +1282,17 @@ export const MessageCard = memo(function MessageCard({ message, previousMessage,
 
   const handlePointerDown = (e: React.PointerEvent) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return
+    const target = e.target as HTMLElement | null
+    if (target?.closest('.table-scroll, table, pre, code, .code-block, a, button, input, textarea')) return
     touchStartPosRef.current = { x: e.clientX, y: e.clientY }
+
+    // Start squish animation only after holding for a fraction of a second (140ms),
+    // ensuring ordinary tapping or flicking to scroll never causes a flash of squish
+    if (pressTimerRef.current != null) window.clearTimeout(pressTimerRef.current)
+    pressTimerRef.current = window.setTimeout(() => {
+      setIsPressing(true)
+    }, 140)
+
     const targetEl = e.currentTarget as HTMLElement
     if (targetEl) {
       const rect = targetEl.getBoundingClientRect()
@@ -1288,6 +1305,7 @@ export const MessageCard = memo(function MessageCard({ message, previousMessage,
     }
     if (longPressTimerRef.current != null) window.clearTimeout(longPressTimerRef.current)
     longPressTimerRef.current = window.setTimeout(() => {
+      setIsPressing(false)
       const el = bubbleRef.current || targetEl
       if (el) {
         const r = el.getBoundingClientRect()
@@ -1308,6 +1326,11 @@ export const MessageCard = memo(function MessageCard({ message, previousMessage,
     const dx = Math.abs(e.clientX - touchStartPosRef.current.x)
     const dy = Math.abs(e.clientY - touchStartPosRef.current.y)
     if (dx > 10 || dy > 10) {
+      setIsPressing(false)
+      if (pressTimerRef.current != null) {
+        window.clearTimeout(pressTimerRef.current)
+        pressTimerRef.current = null
+      }
       if (longPressTimerRef.current != null) {
         window.clearTimeout(longPressTimerRef.current)
         longPressTimerRef.current = null
@@ -1316,6 +1339,11 @@ export const MessageCard = memo(function MessageCard({ message, previousMessage,
   }
 
   const handlePointerUp = () => {
+    setIsPressing(false)
+    if (pressTimerRef.current != null) {
+      window.clearTimeout(pressTimerRef.current)
+      pressTimerRef.current = null
+    }
     if (longPressTimerRef.current != null) {
       window.clearTimeout(longPressTimerRef.current)
       longPressTimerRef.current = null
@@ -1389,12 +1417,14 @@ export const MessageCard = memo(function MessageCard({ message, previousMessage,
         const maxHeight = Math.min(Math.round(viewportH * 0.48), 380)
         const visibleHeight = Math.min(scaledRect.height, maxHeight)
         const top = Math.max(68, Math.min(scaledRect.top, viewportH - visibleHeight - 70))
+        const safeWidth = Math.ceil(scaledRect.width) + 3
+
         bubblePositionStyle = {
           position: 'fixed',
           top: `${top}px`,
           left: `${scaledRect.left}px`,
-          width: `${scaledRect.width}px`,
-          maxWidth: `${scaledRect.width}px`,
+          width: `${safeWidth}px`,
+          maxWidth: `${safeWidth}px`,
           height: `${visibleHeight}px`,
           maxHeight: `${visibleHeight}px`,
           margin: 0,
@@ -1407,13 +1437,17 @@ export const MessageCard = memo(function MessageCard({ message, previousMessage,
         }
       } else {
         // Standard in-place message:
+        // Add subtle sub-pixel buffer and use auto height so text never wraps onto an extra cropped line
+        const safeWidth = Math.ceil(scaledRect.width) + 3
+
         bubblePositionStyle = {
           position: 'fixed',
           top: `${scaledRect.top}px`,
           left: `${scaledRect.left}px`,
-          width: `${scaledRect.width}px`,
-          maxWidth: `${scaledRect.width}px`,
-          height: `${scaledRect.height}px`,
+          width: `${safeWidth}px`,
+          minWidth: `${scaledRect.width}px`,
+          minHeight: `${scaledRect.height}px`,
+          height: 'auto',
           margin: 0,
         }
 
@@ -1509,12 +1543,15 @@ export const MessageCard = memo(function MessageCard({ message, previousMessage,
     )
   }
 
+  const isTallBubble = Boolean(bubbleRect && bubbleRect.height > 160)
+  const squishClass = isPressing ? (isTallBubble ? 'is-squished is-tall-squish' : 'is-squished') : ''
+
   if (message.role === 'user') {
     return (
       <>
         <article className="message-row user-row">
           <div
-            className="user-bubble"
+            className={`user-bubble ${squishClass}`}
             ref={bubbleRef}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
@@ -1539,7 +1576,7 @@ export const MessageCard = memo(function MessageCard({ message, previousMessage,
       >
         <div className="assistant-message-layout">
           <div
-            className="assistant-bubble"
+            className={`assistant-bubble ${squishClass}`}
             ref={bubbleRef}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}

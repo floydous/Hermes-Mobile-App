@@ -1104,9 +1104,17 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
 
 @media (prefers-reduced-motion: reduce) {
   .nav-island-indicator.animate,
-  .nav-bottom-scrim {
+  .nav-bottom-scrim,
+  .user-bubble,
+  .assistant-bubble,
+  .user-bubble.is-squished,
+  .assistant-bubble.is-squished,
+  .message-action-bubble-clone {
     transition: none !important;
     animation: none !important;
+    transform: none !important;
+    filter: none !important;
+    opacity: 1 !important;
   }
 }
 
@@ -1152,6 +1160,8 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
   border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.04);
   word-break: break-word;
+  transition: transform 0.28s cubic-bezier(0.175, 0.885, 0.32, 1.25), box-shadow 0.2s ease, filter 0.2s ease;
+  transform-origin: center center;
 }
 
 .user-bubble .markdown-body,
@@ -1575,6 +1585,29 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.03);
   color: #e5e7eb;
   word-break: break-word;
+  transition: transform 0.28s cubic-bezier(0.175, 0.885, 0.32, 1.25), box-shadow 0.2s ease, filter 0.2s ease;
+  transform-origin: center center;
+}
+
+/* Tactile Elastic Bubble Squish on Press-and-Hold (controlled strictly via is-squished) */
+.user-bubble.is-squished,
+.assistant-bubble.is-squished {
+  transform: scale(0.982, 0.976) !important;
+  filter: brightness(0.96) !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2) !important;
+  transition: transform 0.12s cubic-bezier(0.2, 0.8, 0.2, 1) !important;
+  will-change: transform;
+}
+
+/* For bubbles with a lot of text, dampen scale so large bubbles never distort or over-compress */
+.user-bubble.is-tall-squish,
+.assistant-bubble.is-tall-squish {
+  transform: scale(0.994, 0.991) !important;
+}
+
+[data-theme='light'] .user-bubble.is-squished,
+[data-theme='light'] .assistant-bubble.is-squished {
+  filter: brightness(0.97) !important;
 }
 
 .assistant-bubble:empty,
@@ -4251,13 +4284,14 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
 .message-action-bubble-clone {
   pointer-events: auto;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
-  transform: scale(1.02);
+  transform: none !important;
   transform-origin: center;
-  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
-  animation: message-action-bubble-pop 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  transition: none !important;
+  animation: none !important;
   scrollbar-width: none !important;
   -ms-overflow-style: none !important;
-  overflow: hidden !important;
+  box-sizing: border-box !important;
+  word-break: break-word !important;
 }
 
 .message-action-bubble-clone.is-tall-clamped {
@@ -4333,10 +4367,13 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
 }
 
 @keyframes message-action-bubble-pop {
-  from {
-    transform: scale(1);
+  0% {
+    transform: scale(0.965, 0.942);
   }
-  to {
+  50% {
+    transform: scale(1.032);
+  }
+  100% {
     transform: scale(1.02);
   }
 }
@@ -4577,9 +4614,42 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
   background: rgba(255, 255, 255, 0.1);
 }
 
-@keyframes pulse-capsule {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.7; }
+/* ==========================================================================
+   Fluid Streaming Markdown Text Response
+   ========================================================================== */
+.live-response .markdown-body {
+  transition: opacity 0.2s ease;
+  contain: layout style;
+}
+
+.smooth-streaming-container {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.6;
+  font-size: 14px;
+  color: inherit;
+  contain: layout style;
+}
+
+.smooth-streaming-container span {
+  display: inline;
+}
+
+.live-response .markdown-body p,
+.live-response .markdown-body li,
+.live-response .markdown-body span,
+.live-response .markdown-body strong {
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Guard scrollable message regions (tables, code blocks) from bubble squish */
+.table-scroll,
+.table-scroll table,
+pre,
+code,
+.code-block {
+  touch-action: pan-x pan-y !important;
 }
 
 [data-theme='light'] .load-earlier-capsule {
