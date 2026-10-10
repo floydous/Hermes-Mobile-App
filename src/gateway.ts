@@ -74,6 +74,12 @@ export type WebSocketFactory = (url: string) => WebSocket
  * prompt.submit response only acknowledges acceptance; terminal turn events
  * own completion. The client never retries a submitted turn automatically.
  */
+export interface SubmitPromptOptions {
+  truncateMessageId?: number | string
+  truncateRowId?: number
+  truncateOrdinal?: number
+}
+
 export class HermesGatewayClient {
   private socket: WebSocket | null = null
   private connecting: Promise<void> | null = null
@@ -317,7 +323,7 @@ export class HermesGatewayClient {
     sessionId: string,
     text: string,
     listener: (event: GatewayEvent) => void,
-    options?: { truncateMessageId?: number },
+    options?: SubmitPromptOptions,
   ): Promise<void> {
     await this.connect()
     const listeners = this.sessionListeners.get(sessionId) ?? new Set()
@@ -362,10 +368,22 @@ export class HermesGatewayClient {
       // An acknowledgement is not completion. Keep listening until a terminal
       // event is received, and never auto-resubmit after an ambiguous failure.
       const payload: Record<string, unknown> = { session_id: sessionId, text }
-      if (options?.truncateMessageId != null) {
-        payload.truncate_before_message_id = String(options.truncateMessageId)
+      if (options?.truncateRowId != null) {
         payload.confirm_truncate = true
-        if (options.truncateMessageId === 0 || options.truncateMessageId === 1) {
+        payload.truncate_before_row_id = options.truncateRowId
+        if (options.truncateRowId === 0 || options.truncateRowId === 1) {
+          payload.confirm_empty_truncate = true
+        }
+      } else if (options?.truncateMessageId != null) {
+        payload.confirm_truncate = true
+        payload.truncate_before_message_id = String(options.truncateMessageId)
+        if (options.truncateMessageId === 0 || options.truncateMessageId === 1 || options.truncateMessageId === '0' || options.truncateMessageId === '1') {
+          payload.confirm_empty_truncate = true
+        }
+      } else if (options?.truncateOrdinal != null) {
+        payload.confirm_truncate = true
+        payload.truncate_before_user_ordinal = options.truncateOrdinal
+        if (options.truncateOrdinal === 0) {
           payload.confirm_empty_truncate = true
         }
       }

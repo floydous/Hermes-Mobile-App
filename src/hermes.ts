@@ -6,7 +6,7 @@ import type { RosterProfile } from './live-model'
 export type LiveProfile = RosterProfile
 export type LiveSession = { id: string; title: string; preview: string; profile: string; source?: string; model?: string; unread?: boolean; unread_count?: number; message_count?: number; last_active?: number }
 export type LiveUsage = { model?: string; input?: number; output?: number; reasoning?: number; prompt?: number; completion?: number; total?: number; calls?: number; avg_tps?: number; avg_latency_s?: number }
-export type LiveMessage = { id: number; role: 'user' | 'assistant' | 'tool' | 'system'; content: string; display_content?: string; display_kind?: string; tool_name?: string | null; tool_status?: 'running' | 'done' | 'failed'; duration_s?: number; reasoning?: string | null; timestamp?: number; token_count?: number | null; usage?: LiveUsage }
+export type LiveMessage = { id: number; role: 'user' | 'assistant' | 'tool' | 'system'; content: string; display_content?: string; display_kind?: string; tool_name?: string | null; tool_status?: 'running' | 'done' | 'failed'; duration_s?: number; reasoning?: string | null; timestamp?: number; token_count?: number | null; usage?: LiveUsage; row_id?: number; local?: boolean }
 export type ModelProvider = { name: string; slug: string; models?: string[]; featured_models?: string[]; authenticated?: boolean }
 export type ModelOptions = { model?: string; provider?: string; providers?: ModelProvider[] }
 export type SlashCompletion = { text: string; display?: string; meta?: string; kind?: 'skill' | 'command' }
@@ -62,6 +62,7 @@ export function getActiveHermesEndpoint(): string { return activeHermes }
 
 const gateways = new Map<string, HermesGatewayClient>()
 const resolvedSessions = new Map<string, string>()
+const inFlightResumes = new Map<string, Promise<string>>()
 
 export function getResolvedSessionId(sessionId: string, baseUrl = activeHermes): string {
   const normBase = (baseUrl || activeHermes).replace(/\/$/, '')
@@ -238,8 +239,10 @@ export async function loadMessages(
       const messages = Array.isArray(parsed?.messages) ? parsed.messages : []
       return messages.map(msg => {
         const rawContent = msg.display_content || msg.content
+        const rowId = typeof msg.row_id === 'number' ? msg.row_id : typeof msg.id === 'number' && msg.id > 0 && !msg.local ? msg.id : undefined
         return {
           ...msg,
+          row_id: rowId,
           content: typeof rawContent === 'string' ? rawContent : rawContent == null ? '' : String(rawContent),
         }
       })
@@ -296,10 +299,85 @@ export async function fetchRemoteMedia(path: string, baseUrl = activeHermes): Pr
   throw new Error(`Could not load media: ${path}`)
 }
 
+export function isSessionNotFoundError(error: unknown): boolean {
+  if (!error) return false
+  const code = (error as any)?.code
+  if (code === 4001 || code === 4007) return true
+  const message = error instanceof Error ? error.message : typeof error === 'string' ? error : String(error)
+  return /session not found|not in memory|4001|4007/i.test(message)
+}
+
+export function isStaleTargetError(error: unknown): boolean {
+  if (!error) return false
+  const code = (error as any)?.code
+  if (code === 4018) return true
+  const message = error instanceof Error ? error.message : typeof error === 'string' ? error : String(error)
+  return /target user message is no longer in session history|no longer in session history|not in session history|4018/i.test(message)
+}
+
+export async function withSessionNotFoundResume<T>(
+  sessionId: string,
+  profile: string,
+  action: (liveSessionId: string) => Promise<T>,
+  baseUrl = activeHermes
+): Promise<{ result: T; liveSessionId: string }> {
+  const normBase = (baseUrl || activeHermes).replace(/\/$/, '')
+  const client = gateway(normBase)
+
+  const resolveOrResume = async (forceFresh = false): Promise<string> => {
+    let resolved = !forceFresh ? resolvedSessions.get(`${normBase}:${sessionId}`) : undefined
+    if (resolved) return resolved
+
+    if (sessionId.startsWith('draft:')) {
+      const fresh = await createSession(profile, 'Bot Chat', { canonical: true, hidden: true }, normBase)
+      resolved = resolvedSessions.get(`${normBase}:${fresh.id}`) || fresh.id
+    } else {
+      try {
+        resolved = await resumeSession(sessionId, profile, normBase)
+      } catch (err) {
+        if (isSessionNotFoundError(err)) {
+          const fresh = await createSession(profile, 'Bot Chat', { canonical: true, hidden: true }, normBase)
+          resolved = resolvedSessions.get(`${normBase}:${fresh.id}`) || fresh.id
+        } else {
+          throw err
+        }
+      }
+    }
+
+    resolvedSessions.set(`${normBase}:${sessionId}`, resolved)
+    resolvedSessions.set(`${normBase}:${resolved}`, sessionId)
+    return resolved
+  }
+
+  let liveId = await resolveOrResume(false)
+
+  try {
+    const result = await action(liveId)
+    return { result, liveSessionId: liveId }
+  } catch (err) {
+    if (isSessionNotFoundError(err)) {
+      // The runtime session was reaped / evicted / lost across sleep or reconnect.
+      // Purge the stale binding conditionally (do not clobber if a concurrent call already refreshed it),
+      // re-resume the durable stored session ID, and retry once.
+      const current = resolvedSessions.get(`${normBase}:${sessionId}`)
+      if (current === liveId) {
+        resolvedSessions.delete(`${normBase}:${sessionId}`)
+      }
+      resolvedSessions.delete(`${normBase}:${liveId}`)
+
+      liveId = await resolveOrResume(true)
+      const result = await action(liveId)
+      return { result, liveSessionId: liveId }
+    }
+    throw err
+  }
+}
+
 export async function updateSessionTitle(sessionId: string, title: string, baseUrl = activeHermes): Promise<void> {
   const normBase = (baseUrl || activeHermes).replace(/\/$/, '')
-  const resolved = resolvedSessions.get(`${normBase}:${sessionId}`) || sessionId
-  await gateway(normBase).call('session.title', { session_id: resolved, title })
+  await withSessionNotFoundResume(sessionId, '', liveId =>
+    gateway(normBase).call('session.title', { session_id: liveId, title })
+  , normBase)
 }
 
 export async function loadModelOptions(profile: string, baseUrl = activeHermes): Promise<ModelOptions> {
@@ -317,17 +395,21 @@ export async function loadProfileDetails(profile: string, baseUrl = activeHermes
 }
 
 export async function attachFile(sessionId: string, profile: string, input: { name: string; dataUrl: string; path?: string }, baseUrl = activeHermes): Promise<{ name: string; refText: string }> {
-  const resolved = resolvedSessions.get(`${baseUrl}:${sessionId}`) || await gateway(baseUrl).resumeSession(sessionId, profile)
-  resolvedSessions.set(`${baseUrl}:${sessionId}`, resolved)
-  const result = await gateway(baseUrl).attachFile(resolved, { name: input.name, data_url: input.dataUrl, path: input.path })
-  if (result.attached !== true || !result.ref_text) throw new Error(`Hermes could not attach “${input.name}”.`)
-  return { name: result.name || input.name, refText: result.ref_text }
+  const normBase = (baseUrl || activeHermes).replace(/\/$/, '')
+  const { result } = await withSessionNotFoundResume(sessionId, profile, async liveId => {
+    const res = await gateway(normBase).attachFile(liveId, { name: input.name, data_url: input.dataUrl, path: input.path })
+    if (res.attached !== true || !res.ref_text) throw new Error(`Hermes could not attach “${input.name}”.`)
+    return { name: res.name || input.name, refText: res.ref_text }
+  }, normBase)
+  return result
 }
 
 export async function completeSlash(sessionId: string, profile: string, text: string, baseUrl = activeHermes): Promise<SlashCompletionResult> {
-  const resolved = resolvedSessions.get(`${baseUrl}:${sessionId}`) || await gateway(baseUrl).resumeSession(sessionId, profile)
-  resolvedSessions.set(`${baseUrl}:${sessionId}`, resolved)
-  return gateway(baseUrl).call<SlashCompletionResult>('complete.slash', { session_id: resolved, profile, text })
+  const normBase = (baseUrl || activeHermes).replace(/\/$/, '')
+  const { result } = await withSessionNotFoundResume(sessionId, profile, liveId =>
+    gateway(normBase).call<SlashCompletionResult>('complete.slash', { session_id: liveId, profile, text })
+  , normBase)
+  return result
 }
 
 export async function setProfileDescription(profile: string, description: string, baseUrl = activeHermes): Promise<void> {
@@ -487,15 +569,17 @@ export async function setProfileModel(profile: string, provider: string, model: 
 }
 
 export async function setSessionModel(sessionId: string, profile: string, provider: string, model: string, baseUrl = activeHermes): Promise<void> {
-  const resolved = resolvedSessions.get(`${baseUrl}:${sessionId}`) || await gateway(baseUrl).resumeSession(sessionId, profile)
-  resolvedSessions.set(`${baseUrl}:${sessionId}`, resolved)
-  await gateway(baseUrl).setSessionModel(resolved, provider, model)
+  const normBase = (baseUrl || activeHermes).replace(/\/$/, '')
+  await withSessionNotFoundResume(sessionId, profile, liveId =>
+    gateway(normBase).setSessionModel(liveId, provider, model)
+  , normBase)
 }
 
 export async function setSessionReasoning(sessionId: string, profile: string, effort: string, baseUrl = activeHermes): Promise<void> {
-  const resolved = resolvedSessions.get(`${baseUrl}:${sessionId}`) || await gateway(baseUrl).resumeSession(sessionId, profile)
-  resolvedSessions.set(`${baseUrl}:${sessionId}`, resolved)
-  await gateway(baseUrl).setSessionReasoning(resolved, effort)
+  const normBase = (baseUrl || activeHermes).replace(/\/$/, '')
+  await withSessionNotFoundResume(sessionId, profile, liveId =>
+    gateway(normBase).setSessionReasoning(liveId, effort)
+  , normBase)
 }
 
 export async function connectAndSubmit(
@@ -504,46 +588,55 @@ export async function connectAndSubmit(
   text: string,
   onEvent: (type: string, payload: Record<string, unknown>, event?: GatewayEvent) => void,
   baseUrl = activeHermes,
-  options?: { truncateMessageId?: number },
+  options?: { truncateRowId?: number; truncateMessageId?: number | string; truncateOrdinal?: number },
 ): Promise<{ sessionId: string }> {
   const normBase = (baseUrl || activeHermes).replace(/\/$/, '')
   const client = gateway(normBase)
-  let resolvedSessionId = resolvedSessions.get(`${normBase}:${sessionId}`)
 
-  if (!resolvedSessionId) {
-    if (sessionId.startsWith('draft:')) {
-      const fresh = await createSession(profile, 'Bot Chat', { canonical: true, hidden: true }, normBase)
-      resolvedSessionId = resolvedSessions.get(`${normBase}:${fresh.id}`) || fresh.id
-    } else {
+  const { liveSessionId } = await withSessionNotFoundResume(
+    sessionId,
+    profile,
+    async liveId => {
       try {
-        resolvedSessionId = await client.resumeSession(sessionId, profile)
+        await client.submitPrompt(liveId, text, event => onEvent(event.type, event.payload, event), options)
       } catch (err) {
-        const msg = String(err)
-        if (/4007|not found|not_found/i.test(msg)) {
-          // If the session was deleted or unpersisted in DB, auto-recover by minting a fresh session
-          const fresh = await createSession(profile, 'Bot Chat', { canonical: true, hidden: true }, normBase)
-          resolvedSessionId = resolvedSessions.get(`${normBase}:${fresh.id}`) || fresh.id
+        if (isStaleTargetError(err) && (options?.truncateRowId != null || options?.truncateMessageId != null || options?.truncateOrdinal != null)) {
+          // If the message was compressed away or no longer in history, fall back to clean submit without truncation
+          console.warn('[Hermes] Truncation target is stale or compacted away; falling back to submit without truncation')
+          await client.submitPrompt(liveId, text, event => onEvent(event.type, event.payload, event), undefined)
         } else {
           throw err
         }
       }
-    }
-  }
+    },
+    normBase
+  )
 
-  resolvedSessions.set(`${normBase}:${sessionId}`, resolvedSessionId)
-  resolvedSessions.set(`${normBase}:${resolvedSessionId}`, resolvedSessionId)
-  await client.submitPrompt(resolvedSessionId, text, event => onEvent(event.type, event.payload, event), options)
-  return { sessionId: resolvedSessionId }
+  return { sessionId: liveSessionId }
 }
 
 export async function resumeSession(sessionId: string, profile?: string, baseUrl = activeHermes): Promise<string> {
   const normBase = (baseUrl || activeHermes).replace(/\/$/, '')
-  const sid = await gateway(normBase).resumeSession(sessionId, profile)
-  if (sid) {
-    resolvedSessions.set(`${normBase}:${sessionId}`, sid)
-    resolvedSessions.set(`${normBase}:${sid}`, sessionId)
-  }
-  return sid
+  const key = `${normBase}:${sessionId}`
+
+  const inFlight = inFlightResumes.get(key)
+  if (inFlight) return inFlight
+
+  const resumePromise = (async () => {
+    try {
+      const sid = await gateway(normBase).resumeSession(sessionId, profile)
+      if (sid) {
+        resolvedSessions.set(`${normBase}:${sessionId}`, sid)
+        resolvedSessions.set(`${normBase}:${sid}`, sessionId)
+      }
+      return sid
+    } finally {
+      inFlightResumes.delete(key)
+    }
+  })()
+
+  inFlightResumes.set(key, resumePromise)
+  return resumePromise
 }
 
 export function respondClarify(
@@ -557,7 +650,14 @@ export function respondClarify(
 
 export async function interruptSession(sessionId: string, baseUrl = activeHermes): Promise<void> {
   const normBase = (baseUrl || activeHermes).replace(/\/$/, '')
-  await gateway(normBase).interruptSession(resolvedSessions.get(`${normBase}:${sessionId}`) || sessionId)
+  const resolved = resolvedSessions.get(`${normBase}:${sessionId}`) || sessionId
+  try {
+    await gateway(normBase).interruptSession(resolved)
+  } catch (err) {
+    if (!isSessionNotFoundError(err)) {
+      throw err
+    }
+  }
 }
 
 export function settleGatewayTurn(sessionId: string, baseUrl = activeHermes): void {

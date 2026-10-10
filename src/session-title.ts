@@ -77,7 +77,16 @@ export function finalizeSessionRemap(
   onSelectedIdUpdate: (newId: string) => void,
   setSessions: (updater: (items: LiveSession[]) => LiveSession[]) => void
 ): string {
-  const finalId = resolvedSessionId || turnSessionId
+  // Only remap optimistic draft session IDs (e.g. draft:default, local:xyz, session-client-123).
+  // Existing durable SQLite sessions must NEVER be mutated to temporary gateway runtime IDs!
+  const isDraftOrTemp =
+    turnSessionId.startsWith('draft:') ||
+    turnSessionId.startsWith('local:') ||
+    turnSessionId.startsWith('session-client-') ||
+    turnSessionId.startsWith('session-init-') ||
+    turnSessionId.startsWith('temp:')
+
+  const finalId = isDraftOrTemp && resolvedSessionId ? resolvedSessionId : turnSessionId
   state.activeSessionId = finalId
   if (finalId !== turnSessionId) {
     onSelectedIdUpdate(finalId)
@@ -91,14 +100,22 @@ export type TurnSubmissionPipelineArgs = {
   turnProfile: string
   prompt: string
   activeEndpoint: string
-  options?: { editMessageId?: number }
+  options?: {
+    editMessageId?: number
+    truncateRowId?: number
+    truncateOrdinal?: number
+  }
   connectAndSubmitFn: (
     sessionId: string,
     profile: string,
     text: string,
     onEvent: (type: string, payload: Record<string, unknown>) => void,
     endpoint: string,
-    opts?: { truncateMessageId?: number }
+    opts?: {
+      truncateRowId?: number
+      truncateMessageId?: number | string
+      truncateOrdinal?: number
+    }
   ) => Promise<{ sessionId: string }>
   onDelta: (text: string) => void
   onComplete: (text: string, usage?: LiveUsage) => void
@@ -175,7 +192,11 @@ export async function executeTurnSubmissionPipeline(
       }
     },
     args.activeEndpoint,
-    args.options?.editMessageId != null ? { truncateMessageId: args.options.editMessageId } : undefined
+    args.options?.editMessageId != null || args.options?.truncateRowId != null ? {
+      truncateRowId: args.options?.truncateRowId,
+      truncateOrdinal: args.options?.truncateOrdinal,
+      truncateMessageId: args.options?.editMessageId,
+    } : undefined
   )
 
   const finalSessionId = finalizeSessionRemap(

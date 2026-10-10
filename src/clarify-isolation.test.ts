@@ -88,6 +88,13 @@ describe('clarify-isolation', () => {
       expect(doesSessionMatchTurn(adhocSession1, 'canonical-default-id', 'default', mockProfiles)).toBe(false)
     })
 
+    it('canonical bot chat never matches an ad-hoc session turn sharing the same profile', () => {
+      // User creates session in Sessions tab with profile 'default' or 'researcher'
+      // When opening the canonical bot, it must NOT match the ad-hoc session turn!
+      expect(doesSessionMatchTurn(canonicalDefaultSession, 'adhoc-session-123', 'default', mockProfiles)).toBe(false)
+      expect(doesSessionMatchTurn(draftDefaultSession, 'adhoc-session-123', 'default', mockProfiles)).toBe(false)
+    })
+
     it('resolves alias tips when getter provided', () => {
       const getter = (id: string) => (id === 'alias-tip-123' ? 'adhoc-session-123' : id)
       expect(doesSessionMatchTurn(adhocSession1, 'alias-tip-123', 'default', mockProfiles, getter)).toBe(true)

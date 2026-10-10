@@ -322,10 +322,16 @@ export default function App() {
         // Preserve any session that is currently selected, in-flight, or has local optimistic messages
         // so a background refresh during in-flight turns (when SQLite messages count is 0) never drops it
         for (const prev of prevSessions) {
-          if (!nextMap.has(prev.id)) {
+          const isAlreadyPresent = Array.from(nextMap.keys()).some(existingId =>
+            existingId === prev.id ||
+            getResolvedSessionId(existingId, endpoint) === prev.id ||
+            getResolvedSessionId(prev.id, endpoint) === existingId
+          )
+          if (!isAlreadyPresent) {
+            const isPrevCanonical = isSessionCanonical(prev, data.profiles, adhocSessionIds)
             const isInFlight = Boolean(
               activeInFlightTurnsRef.current.has(prev.id) ||
-              activeInFlightTurnsRef.current.has(prev.profile) ||
+              (isPrevCanonical && activeInFlightTurnsRef.current.has(prev.profile)) ||
               selectedRef.current?.id === prev.id
             )
             const hasLocalMessages = Boolean(
@@ -437,15 +443,20 @@ export default function App() {
         // Gateway reconnected: re-reconcile active sessions and reload transcript in case
         // terminal completion arrived while transport was re-establishing
         void refresh()
-        if (selectedRef.current && (activeInFlightTurnsRef.current.has(selectedRef.current.id) || activeInFlightTurnsRef.current.has(selectedRef.current.profile))) {
-          void openSession(selectedRef.current)
+        if (selectedRef.current) {
+          if (activeInFlightTurnsRef.current.has(selectedRef.current.id) || activeInFlightTurnsRef.current.has(selectedRef.current.profile)) {
+            void openSession(selectedRef.current)
+          } else {
+            // Pre-warm the current view's session so the next user prompt is immediately bound to a live runtime
+            void resumeSession(selectedRef.current.id, selectedRef.current.profile, activeEndpointRef.current).catch(() => {})
+          }
         }
       }
       if (event.type === 'message.delta') {
         const sid = event.sessionId || ''
         const prof = resolveProfileForSessionId(sid, profiles, sessions, activeTurnsRef.current)
         if (sid && typeof event.payload.text === 'string') {
-          if (doesSessionMatchTurn(selectedRef.current, sid, prof || '', profiles, id => getResolvedSessionId(id, activeEndpointRef.current))) {
+          if (doesSessionMatchTurn(selectedRef.current, sid, prof || '', profiles, id => getResolvedSessionId(id, activeEndpointRef.current), adhocSessionIds)) {
             setStreaming(event.payload.text)
           }
         }
@@ -456,7 +467,7 @@ export default function App() {
         const id = String(event.payload.tool_id || event.payload.name || event.payload.tool_name || `tool-${Date.now()}`)
         const toolName = String(event.payload.name || event.payload.tool_name || event.payload.tool || 'tool')
         const summary = typeof event.payload.context === 'string' ? event.payload.context : undefined
-        if (doesSessionMatchTurn(selectedRef.current, sid, prof || '', profiles, id => getResolvedSessionId(id, activeEndpointRef.current))) {
+        if (doesSessionMatchTurn(selectedRef.current, sid, prof || '', profiles, id => getResolvedSessionId(id, activeEndpointRef.current), adhocSessionIds)) {
           setToolActivities(items => [
             ...(Array.isArray(items) ? items : []).filter(item => item && item.id !== id),
             { id, name: toolName, status: 'running', summary },
@@ -470,11 +481,29 @@ export default function App() {
         const toolName = String(event.payload.name || event.payload.tool_name || event.payload.tool || 'tool')
         const duration_s = typeof event.payload.duration_s === 'number' ? event.payload.duration_s : undefined
         const summary = typeof event.payload.summary === 'string' ? event.payload.summary : undefined
-        if (doesSessionMatchTurn(selectedRef.current, sid, prof || '', profiles, id => getResolvedSessionId(id, activeEndpointRef.current))) {
+        if (doesSessionMatchTurn(selectedRef.current, sid, prof || '', profiles, id => getResolvedSessionId(id, activeEndpointRef.current), adhocSessionIds)) {
           setToolActivities(items => [
             ...(Array.isArray(items) ? items : []).filter(item => item && item.id !== id),
             { id, name: toolName, status: 'done', duration_s, summary },
           ])
+        }
+      }
+      if (event.type === 'status.update') {
+        const sid = event.sessionId || ''
+        const prof = resolveProfileForSessionId(sid, profiles, sessions, activeTurnsRef.current)
+        const kind = String(event.payload.kind || '')
+        const text = String(event.payload.text || '')
+        if (doesSessionMatchTurn(selectedRef.current, sid, prof || '', profiles, id => getResolvedSessionId(id, activeEndpointRef.current), adhocSessionIds)) {
+          if (kind === 'compacting' || /compact|compress/i.test(text)) {
+            setActiveTurns(prev => {
+              const current = prev[sid] || (prof ? prev[prof] : undefined)
+              if (!current) return prev
+              const updated = { ...current, statusText: 'Compressing context…' }
+              const next = { ...prev, [sid]: updated }
+              if (prof) next[prof] = updated
+              return next
+            })
+          }
         }
       }
       if (event.type === 'request.clarify') {
@@ -488,7 +517,7 @@ export default function App() {
         }))
         const sid = event.sessionId || ''
         const prof = resolveProfileForSessionId(sid, profiles, sessions, activeTurnsRef.current)
-          || (selectedRef.current && doesSessionMatchTurn(selectedRef.current, sid, '', profiles) ? selectedRef.current.profile : null)
+          || (selectedRef.current && doesSessionMatchTurn(selectedRef.current, sid, '', profiles, undefined, adhocSessionIds) ? selectedRef.current.profile : null)
 
         console.log('[Hermes Debug] onGatewayGlobalEvent request.clarify:', reqId, 'sid:', sid, 'resolved profile:', prof)
 
@@ -499,35 +528,38 @@ export default function App() {
 
         const req: ClarifyRequest = { requestId: reqId, sessionId: sid, questions }
         pendingClarifyRef.current[sid] = req
-        const isCanonical = isSessionCanonical({ id: sid, profile: prof }, profiles)
+        const isCanonical = isSessionCanonical({ id: sid, profile: prof }, profiles, adhocSessionIds)
         if (isCanonical) {
           pendingClarifyByProfileRef.current[prof] = req
         }
         persistClarify(req, prof, isCanonical)
-        if (doesSessionMatchTurn(selectedRef.current, sid, prof, profiles, id => getResolvedSessionId(id, activeEndpointRef.current))) {
+        if (doesSessionMatchTurn(selectedRef.current, sid, prof, profiles, id => getResolvedSessionId(id, activeEndpointRef.current), adhocSessionIds)) {
           setPendingClarify(req)
           setSending(true)
         }
-        setActiveTurns(prev => ({
-          ...prev,
-          [prof]: {
-            ...(prev[prof] || {
-              sessionId: sid,
-              profile: prof,
-              status: 'thinking',
-              statusText: 'Thinking…',
-              streamingText: '',
-              toolActivities: [],
-              userMessage: { id: 0, role: 'user', content: '' },
-              startedAt: Date.now(),
-            }),
+        setActiveTurns(prev => {
+          const current = prev[sid] || (isCanonical ? prev[prof] : undefined) || {
             sessionId: sid,
-            status: 'waiting',
+            profile: prof,
+            status: 'thinking',
+            statusText: 'Thinking…',
+            streamingText: '',
+            toolActivities: [],
+            userMessage: { id: 0, role: 'user', content: '' },
+            startedAt: Date.now(),
+          }
+          const updated = {
+            ...current,
+            sessionId: sid,
+            status: 'waiting' as const,
             statusText: 'Needs your input…',
             needsInput: true,
             pendingClarify: req,
-          },
-        }))
+          }
+          const next = { ...prev, [sid]: updated }
+          if (isCanonical) next[prof] = updated
+          return next
+        })
       }
       if (event.type === 'message.complete' || event.type === 'turn.end' || event.type === 'turn.error') {
         const sid = event.sessionId || ''
@@ -643,12 +675,14 @@ export default function App() {
     return () => document.removeEventListener('visibilitychange', resumeSavedConnection)
   }, [])
 
+  const adhocSessionIds = useMemo(() => new Set(sessions.map(s => s.id)), [sessions])
+
   const rows = useMemo(() => buildBotRows(profiles, sessions).map(({ profile, session }) => {
     const sid = session ? resolveCanonicalSessionId(session) : ''
     const cached = sid ? (messageCacheRef.current.get(sid) || getCachedSessionMessages(sid)) : null
     const latestPreview = resolveLatestSessionPreview(sid, session?.preview, cached || undefined, session?.last_active)
     const lastRead = Number(localStorage.getItem(`hermes-last-read:${sid}`) || 0)
-    const activeTurn = activeTurns[profile.name] || Object.values(activeTurns).find(t => t?.profile === profile.name)
+    const activeTurn = isBotRowWorking(profile.name, session || profile.canonical_session, activeTurns, adhocSessionIds)
     const isWaitingInput = Boolean(activeTurn && (activeTurn.status === 'waiting' || activeTurn.needsInput))
     const { isUnread, unreadCount } = calculateUnreadState(
       sid,
@@ -672,7 +706,7 @@ export default function App() {
         unread_count: unreadCount,
       } satisfies LiveSession : null,
     }
-  }).filter(row => `${row.profile.name} ${row.profile.display_name || ''} ${row.session?.preview || ''}`.toLowerCase().includes(query.toLowerCase())), [profiles, sessions, activeTurns, selected?.id, query])
+  }).filter(row => `${row.profile.name} ${row.profile.display_name || ''} ${row.session?.preview || ''}`.toLowerCase().includes(query.toLowerCase())), [profiles, sessions, activeTurns, selected?.id, query, adhocSessionIds])
 
   const canonicalSessionIds = useMemo(() => {
     const set = new Set<string>()
@@ -684,28 +718,41 @@ export default function App() {
     return set
   }, [profiles])
 
-  const visibleSessions = useMemo(() => sessions.filter(session => isHumanChatSession(session, canonicalSessionIds) && `${session.title} ${session.profile} ${session.preview}`.toLowerCase().includes(query.toLowerCase())).map(session => {
-    const cached = messageCacheRef.current.get(session.id) || getCachedSessionMessages(session.id)
-    const latestPreview = resolveLatestSessionPreview(session.id, session.preview, cached || undefined, session.last_active)
-    const lastRead = Number(localStorage.getItem(`hermes-last-read:${session.id}`) || 0)
-    const activeTurn = isSessionRowWorking(session.id, session.profile, activeTurns)
-    const isWaitingInput = Boolean(activeTurn && (activeTurn.status === 'waiting' || activeTurn.needsInput))
-    const { isUnread, unreadCount } = calculateUnreadState(
-      session.id,
-      session.last_active,
-      cached || undefined,
-      lastRead,
-      Boolean(selected?.id === session.id),
-      isWaitingInput
-    )
-
-    return {
-      ...session,
-      preview: latestPreview,
-      unread: isUnread,
-      unread_count: unreadCount,
+  const visibleSessions = useMemo(() => {
+    const seenIds = new Set<string>()
+    const deduped: LiveSession[] = []
+    for (const session of sessions) {
+      const canonicalKey = getResolvedSessionId(session.id, activeEndpointRef.current) || session.id
+      if (!seenIds.has(session.id) && !seenIds.has(canonicalKey)) {
+        seenIds.add(session.id)
+        seenIds.add(canonicalKey)
+        deduped.push(session)
+      }
     }
-  }), [sessions, canonicalSessionIds, activeTurns, selected?.id, query])
+
+    return deduped.filter(session => isHumanChatSession(session, canonicalSessionIds) && `${session.title} ${session.profile} ${session.preview}`.toLowerCase().includes(query.toLowerCase())).map(session => {
+      const cached = messageCacheRef.current.get(session.id) || getCachedSessionMessages(session.id)
+      const latestPreview = resolveLatestSessionPreview(session.id, session.preview, cached || undefined, session.last_active)
+      const lastRead = Number(localStorage.getItem(`hermes-last-read:${session.id}`) || 0)
+      const activeTurn = isSessionRowWorking(session.id, session.profile, activeTurns)
+      const isWaitingInput = Boolean(activeTurn && (activeTurn.status === 'waiting' || activeTurn.needsInput))
+      const { isUnread, unreadCount } = calculateUnreadState(
+        session.id,
+        session.last_active,
+        cached || undefined,
+        lastRead,
+        Boolean(selected?.id === session.id),
+        isWaitingInput
+      )
+
+      return {
+        ...session,
+        preview: latestPreview,
+        unread: isUnread,
+        unread_count: unreadCount,
+      }
+    })
+  }, [sessions, canonicalSessionIds, activeTurns, selected?.id, query])
   const profileMap = useMemo(() => new Map(profiles.map(p => [p.name, p])), [profiles])
   const [openingSessionId, setOpeningSessionId] = useState<string | null>(null)
   const [sessionDisplayCount, setSessionDisplayCount] = useState(35)
@@ -733,13 +780,9 @@ export default function App() {
       preview: session.preview || '',
     }
     const requestId = ++sessionLoadRef.current
-    const isCanonical = isSessionCanonical(safeSession, profiles)
+    const isCanonical = isSessionCanonical(safeSession, profiles, adhocSessionIds)
     const activeTurn = Object.values(activeTurnsRef.current).find(t =>
-      t && doesSessionMatchTurn(safeSession, t.sessionId || '', t.profile, profiles, id => getResolvedSessionId(id, activeEndpointRef.current))
-    ) || (
-      isCanonical
-        ? (activeTurnsRef.current[safeSession.profile] || Object.values(activeTurnsRef.current).find(t => t?.profile === safeSession.profile))
-        : undefined
+      t && doesSessionMatchTurn(safeSession, t.sessionId || '', t.profile, profiles, id => getResolvedSessionId(id, activeEndpointRef.current), adhocSessionIds)
     )
 
     // Candidate alias IDs across canonical and gateway runtime remappings
@@ -791,7 +834,7 @@ export default function App() {
     setError('')
 
     const isTurnInFlight = Boolean(
-      activeInFlightTurnsRef.current.has(safeSession.profile) ||
+      (isCanonical && activeInFlightTurnsRef.current.has(safeSession.profile)) ||
       activeInFlightTurnsRef.current.has(safeSession.id)
     )
     const isCachedSettled = isTurnSettledByTranscript(activeTurn, cached, isTurnInFlight)
@@ -836,10 +879,10 @@ export default function App() {
 
         const isTurnActive = Boolean(
           Object.values(activeTurnsRef.current).some(t =>
-            t && doesSessionMatchTurn(safeSession, t.sessionId || '', t.profile, profiles, id => getResolvedSessionId(id, activeEndpointRef.current))
+            t && doesSessionMatchTurn(safeSession, t.sessionId || '', t.profile, profiles, id => getResolvedSessionId(id, activeEndpointRef.current), adhocSessionIds)
           ) ||
           activeInFlightTurnsRef.current.has(safeSession.id) ||
-          (isCanonical && (activeTurnsRef.current[safeSession.profile] || activeInFlightTurnsRef.current.has(safeSession.profile)))
+          (isCanonical && activeInFlightTurnsRef.current.has(safeSession.profile))
         )
         const existingMessages = (() => {
           for (const cid of candidateIds) {
@@ -864,8 +907,8 @@ export default function App() {
         if (requestId !== sessionLoadRef.current || selectedRef.current?.id !== safeSession.id) return
 
         const currentActive = Object.values(activeTurnsRef.current).find(t =>
-          t && doesSessionMatchTurn(safeSession, t.sessionId || '', t.profile, profiles, id => getResolvedSessionId(id, activeEndpointRef.current))
-        ) || (isCanonical ? activeTurnsRef.current[safeSession.profile] : undefined)
+          t && doesSessionMatchTurn(safeSession, t.sessionId || '', t.profile, profiles, id => getResolvedSessionId(id, activeEndpointRef.current), adhocSessionIds)
+        )
         const isTurnInFlightAsync = Boolean(
           activeInFlightTurnsRef.current.has(safeSession.id) ||
           (isCanonical && activeInFlightTurnsRef.current.has(safeSession.profile))
@@ -1147,7 +1190,9 @@ export default function App() {
         localStorage.setItem(`hermes-last-read:${matchedProfile.canonical_session.id}`, String(nowMs))
       }
     } catch {}
-    const localUserMessage = { id: -Date.now(), role: 'user' as const, content: attachmentSummary(text, attachmentRefs), timestamp: nowSec }
+    const localUserMessage: LiveMessage = { id: -Date.now(), role: 'user' as const, content: attachmentSummary(text, attachmentRefs), timestamp: nowSec, local: true }
+
+    const isCanonical = isSessionCanonical(turnSession, profiles, adhocSessionIds)
 
     const initialTurn: ActiveBotTurn = {
       sessionId: turnSessionId,
@@ -1159,13 +1204,23 @@ export default function App() {
       userMessage: localUserMessage,
       startedAt: Date.now(),
     }
-    recentEndedTurnsRef.current.delete(turnProfile)
     recentEndedTurnsRef.current.delete(turnSessionId)
     recentEndedTurnsRef.current.delete(turnSession.id)
+    if (isCanonical) {
+      recentEndedTurnsRef.current.delete(turnProfile)
+    }
 
-    setActiveTurns(prev => ({ ...prev, [turnProfile]: initialTurn }))
-    activeInFlightTurnsRef.current.start(turnProfile)
+    setActiveTurns(prev => {
+      const next = { ...prev, [turnSessionId]: initialTurn }
+      if (isCanonical) {
+        next[turnProfile] = initialTurn
+      }
+      return next
+    })
     activeInFlightTurnsRef.current.start(turnSessionId)
+    if (isCanonical) {
+      activeInFlightTurnsRef.current.start(turnProfile)
+    }
 
     setSettledAssistant(null)
     setError('')
@@ -1204,30 +1259,55 @@ export default function App() {
       return nextMessages
     })
 
+    const editMsgId = options?.editMessageId
+    let truncateRowId: number | undefined
+    let truncateOrdinal: number | undefined
+
+    if (editMsgId != null) {
+      const targetIndex = messages.findIndex(m => m.id === editMsgId)
+      if (targetIndex >= 0) {
+        const targetMsg = messages[targetIndex]
+        if (targetMsg) {
+          if (typeof targetMsg.row_id === 'number') {
+            truncateRowId = targetMsg.row_id
+          } else if (targetMsg.id > 0 && !targetMsg.local) {
+            truncateRowId = targetMsg.id
+          }
+        }
+        truncateOrdinal = messages.slice(0, targetIndex).filter(m => m.role === 'user').length
+      } else if (editMsgId > 0) {
+        truncateRowId = editMsgId
+      }
+    }
+
     try {
       const { finalSessionId, finalText: finalOutput, completionUsage: usage } = await executeTurnSubmissionPipeline({
         turnSessionId,
         turnProfile,
         prompt,
         activeEndpoint: activeEndpointRef.current,
-        options,
+        options: {
+          editMessageId: editMsgId,
+          truncateRowId,
+          truncateOrdinal,
+        },
         connectAndSubmitFn: connectAndSubmit,
         onDelta: text => {
           finalText = text
           setActiveTurns(prev => {
-            const current = prev[turnProfile]
+            const current = prev[turnSessionId] || (isCanonical ? prev[turnProfile] : undefined)
             if (!current) return prev
-            return {
-              ...prev,
-              [turnProfile]: {
-                ...current,
-                status: 'streaming',
-                statusText: 'Replying…',
-                streamingText: text,
-              },
+            const updated = {
+              ...current,
+              status: 'streaming' as const,
+              statusText: 'Replying…',
+              streamingText: text,
             }
+            const next = { ...prev, [turnSessionId]: updated }
+            if (isCanonical) next[turnProfile] = updated
+            return next
           })
-          if (doesSessionMatchTurn(selectedRef.current, turnSessionId, turnProfile, profiles, id => getResolvedSessionId(id, activeEndpointRef.current))) {
+          if (doesSessionMatchTurn(selectedRef.current, turnSessionId, turnProfile, profiles, id => getResolvedSessionId(id, activeEndpointRef.current), adhocSessionIds)) {
             setStreaming(text)
           }
         },
@@ -1235,23 +1315,23 @@ export default function App() {
           finalText = text
           completionUsage = compUsage
           setActiveTurns(prev => {
-            const current = prev[turnProfile]
+            const current = prev[turnSessionId] || (isCanonical ? prev[turnProfile] : undefined)
             if (!current) return prev
-            return {
-              ...prev,
-              [turnProfile]: {
-                ...current,
-                streamingText: text,
-              },
+            const updated = {
+              ...current,
+              streamingText: text,
             }
+            const next = { ...prev, [turnSessionId]: updated }
+            if (isCanonical) next[turnProfile] = updated
+            return next
           })
-          if (doesSessionMatchTurn(selectedRef.current, turnSessionId, turnProfile, profiles, id => getResolvedSessionId(id, activeEndpointRef.current))) {
+          if (doesSessionMatchTurn(selectedRef.current, turnSessionId, turnProfile, profiles, id => getResolvedSessionId(id, activeEndpointRef.current), adhocSessionIds)) {
             setStreaming(text)
           }
         },
         onToolStart: (id, toolName, summary, params) => {
           setActiveTurns(prev => {
-            const current = prev[turnProfile]
+            const current = prev[turnSessionId] || (isCanonical ? prev[turnProfile] : undefined)
             if (!current) return prev
             const safeCurrentTools = Array.isArray(current.toolActivities) ? current.toolActivities : []
             const nextTools = [
@@ -1260,17 +1340,17 @@ export default function App() {
             ]
             const activeCount = nextTools.length
             const statusText = activeCount > 1 ? `Using ${toolName} · ${activeCount} tool calls…` : `Using ${toolName}…`
-            return {
-              ...prev,
-              [turnProfile]: {
-                ...current,
-                status: 'tool',
-                statusText,
-                toolActivities: nextTools,
-              },
+            const updated = {
+              ...current,
+              status: 'tool' as const,
+              statusText,
+              toolActivities: nextTools,
             }
+            const next = { ...prev, [turnSessionId]: updated }
+            if (isCanonical) next[turnProfile] = updated
+            return next
           })
-          if (doesSessionMatchTurn(selectedRef.current, turnSessionId, turnProfile, profiles, id => getResolvedSessionId(id, activeEndpointRef.current))) {
+          if (doesSessionMatchTurn(selectedRef.current, turnSessionId, turnProfile, profiles, id => getResolvedSessionId(id, activeEndpointRef.current), adhocSessionIds)) {
             setToolActivities(items => [
               ...(Array.isArray(items) ? items : []).filter(item => item && item.id !== id),
               { id, name: toolName, status: 'running', summary },
@@ -1307,7 +1387,7 @@ export default function App() {
         },
         onToolComplete: (id, toolName, duration_s, summary) => {
           setActiveTurns(prev => {
-            const current = prev[turnProfile]
+            const current = prev[turnSessionId] || (isCanonical ? prev[turnProfile] : undefined)
             if (!current) return prev
             const safeCurrentTools = Array.isArray(current.toolActivities) ? current.toolActivities : []
             const nextTools = [
@@ -1315,17 +1395,17 @@ export default function App() {
               { id, name: toolName, status: 'done' as const, duration_s, summary },
             ]
             const progressiveStatus = getProgressiveSpinnerPhrase(current.statusText)
-            return {
-              ...prev,
-              [turnProfile]: {
-                ...current,
-                status: 'thinking',
-                statusText: progressiveStatus,
-                toolActivities: nextTools,
-              },
+            const updated = {
+              ...current,
+              status: 'thinking' as const,
+              statusText: progressiveStatus,
+              toolActivities: nextTools,
             }
+            const next = { ...prev, [turnSessionId]: updated }
+            if (isCanonical) next[turnProfile] = updated
+            return next
           })
-          if (selectedRef.current?.profile === turnProfile) {
+          if (doesSessionMatchTurn(selectedRef.current, turnSessionId, turnProfile, profiles, id => getResolvedSessionId(id, activeEndpointRef.current), adhocSessionIds)) {
             setToolActivities(items => [
               ...(Array.isArray(items) ? items : []).filter(item => item && item.id !== id),
               { id, name: toolName, status: 'done', duration_s, summary },
@@ -1360,7 +1440,6 @@ export default function App() {
           }))
           const req: ClarifyRequest = { requestId, sessionId: turnSessionId, questions }
           pendingClarifyRef.current[turnSessionId] = req
-          const isCanonical = isSessionCanonical({ id: turnSessionId, profile: turnProfile }, profiles)
           if (isCanonical) {
             pendingClarifyByProfileRef.current[turnProfile] = req
           }
@@ -1371,13 +1450,14 @@ export default function App() {
               turnSessionId,
               turnProfile,
               profiles,
-              id => getResolvedSessionId(id, activeEndpointRef.current)
+              id => getResolvedSessionId(id, activeEndpointRef.current),
+              adhocSessionIds
             )
           ) {
             setPendingClarify(req)
           }
           setActiveTurns(prev => {
-            const current = prev[turnProfile] || {
+            const current = prev[turnSessionId] || (isCanonical ? prev[turnProfile] : undefined) || {
               sessionId: turnSessionId,
               profile: turnProfile,
               status: 'thinking',
@@ -1387,17 +1467,17 @@ export default function App() {
               userMessage: { id: 0, role: 'user', content: '' },
               startedAt: Date.now(),
             }
-            return {
-              ...prev,
-              [turnProfile]: {
-                ...current,
-                sessionId: turnSessionId,
-                status: 'waiting',
-                statusText: 'Needs your input…',
-                needsInput: true,
-                pendingClarify: req,
-              },
+            const updated = {
+              ...current,
+              sessionId: turnSessionId,
+              status: 'waiting' as const,
+              statusText: 'Needs your input…',
+              needsInput: true,
+              pendingClarify: req,
             }
+            const next = { ...prev, [turnSessionId]: updated }
+            if (isCanonical) next[turnProfile] = updated
+            return next
           })
         },
         onTitleUpdate: title => {
@@ -1418,7 +1498,7 @@ export default function App() {
           }
         },
         onError: msg => {
-          if (doesSessionMatchTurn(selectedRef.current, turnSessionId, turnProfile, profiles, id => getResolvedSessionId(id, activeEndpointRef.current))) {
+          if (doesSessionMatchTurn(selectedRef.current, turnSessionId, turnProfile, profiles, id => getResolvedSessionId(id, activeEndpointRef.current), adhocSessionIds)) {
             setError(msg)
           }
         },
@@ -1427,22 +1507,31 @@ export default function App() {
       completionUsage = usage
       recentEndedTurnsRef.current.set(finalSessionId, Date.now())
       recentEndedTurnsRef.current.set(turnSessionId, Date.now())
+      if (isCanonical) {
+        recentEndedTurnsRef.current.set(turnProfile, Date.now())
+      }
 
       delete pendingClarifyRef.current[turnSessionId]
       delete pendingClarifyRef.current[finalSessionId]
-      delete pendingClarifyByProfileRef.current[turnProfile]
+      if (isCanonical) {
+        delete pendingClarifyByProfileRef.current[turnProfile]
+      }
       clearPersistedClarify(turnSessionId, turnProfile)
       clearPersistedClarify(finalSessionId, turnProfile)
-      if (doesSessionMatchTurn(selectedRef.current, turnSessionId, turnProfile, profiles, id => getResolvedSessionId(id, activeEndpointRef.current))) {
+      if (doesSessionMatchTurn(selectedRef.current, turnSessionId, turnProfile, profiles, id => getResolvedSessionId(id, activeEndpointRef.current), adhocSessionIds)) {
         setPendingClarify(null)
       }
 
       setActiveTurns(prev => {
         const next = { ...prev }
-        delete next[turnProfile]
+        delete next[turnSessionId]
+        delete next[finalSessionId]
+        if (isCanonical) {
+          delete next[turnProfile]
+        }
         return next
       })
-      if (doesSessionMatchTurn(selectedRef.current, turnSessionId, turnProfile, profiles, id => getResolvedSessionId(id, activeEndpointRef.current))) {
+      if (doesSessionMatchTurn(selectedRef.current, turnSessionId, turnProfile, profiles, id => getResolvedSessionId(id, activeEndpointRef.current), adhocSessionIds)) {
         setToolActivities([])
       }
 
@@ -1528,21 +1617,26 @@ export default function App() {
       recentEndedTurnsRef.current.set(turnSessionId, Date.now())
       setActiveTurns(prev => {
         const next = { ...prev }
-        delete next[turnProfile]
+        delete next[turnSessionId]
+        if (isCanonical) {
+          delete next[turnProfile]
+        }
         return next
       })
       setToolActivities([])
-      if (selectedRef.current?.profile === turnProfile) {
+      if (doesSessionMatchTurn(selectedRef.current, turnSessionId, turnProfile, profiles, id => getResolvedSessionId(id, activeEndpointRef.current), adhocSessionIds)) {
         setError(reason instanceof Error ? reason.message : 'Could not send to Hermes.')
         setSending(false)
         setStreaming('')
       }
       return false
     } finally {
-      activeInFlightTurnsRef.current.end(turnProfile)
       activeInFlightTurnsRef.current.end(turnSessionId)
+      if (isCanonical) {
+        activeInFlightTurnsRef.current.end(turnProfile)
+      }
       setToolActivities([])
-      if (selectedRef.current?.profile === turnProfile) {
+      if (doesSessionMatchTurn(selectedRef.current, turnSessionId, turnProfile, profiles, id => getResolvedSessionId(id, activeEndpointRef.current), adhocSessionIds)) {
         setSending(false)
         setStreaming('')
       }
@@ -1830,8 +1924,6 @@ export default function App() {
   if (settings) return <ConnectionSettings profiles={profiles.length} sessions={sessions.length} connected={connectionStatus === 'connected'} endpoint={activeEndpoint !== 'http://127.0.0.1:9119' ? activeEndpoint : undefined} theme={theme} setTheme={setTheme} uiScale={uiScale} setUiScale={setUiScale} close={() => setSettings(false)} refresh={() => refresh()} onPairingBusy={setPairingBusyState} onPaired={async endpoint => { const normalized = activateEndpoint(endpoint); const data = await refresh(normalized, true); if (!data) throw new Error(lastConnectionErrorRef.current || 'Signed in, but authenticated Hermes REST or live WebSocket verification failed.'); localStorage.setItem('hermes-mobile-active-endpoint', normalized) }}/>
   if (selected && profileSheet) return <BotProfileSheet profile={profiles.find(profile => profile.name === selected.profile)} session={selected} onClose={() => setProfileSheet(false)} onUpdated={() => void refresh()}/>
   if (selected) return <ErrorBoundary onReset={() => setSelected(null)}><ChatView session={selected} conversationLoading={conversationLoading} messages={messages} settledAssistant={settledAssistant?.sessionId === selected.id && settledAssistant.profile === selected.profile ? settledAssistant : null} profiles={profiles} streaming={streaming} sending={sending} toolActivities={toolActivities} error={error} back={() => setSelected(null)} refresh={() => void openSession(selected)} clearChat={() => handleClearChat(selected)} openProfile={() => setProfileSheet(true)} onSessionModelChange={handleSessionModelChange} pendingClarify={pendingClarify} onAnswerClarify={handleAnswerClarify} onSkipClarify={handleSkipClarify} submit={submit} submitVoice={submitVoice} stop={stop} loadEarlierMessages={loadEarlierMessages}/></ErrorBoundary>
-
-  const adhocSessionIds = new Set(visibleSessions.map(s => s.id))
 
   return <main
     className={`app roster-shell tab-slide-${slideDirection}`}

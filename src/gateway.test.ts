@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { GatewayRpcError, HermesGatewayClient, parseGatewayEvent } from './gateway'
 
-class MockWebSocket {
+export class MockWebSocket {
   static OPEN = 1
   readyState = MockWebSocket.OPEN
   sent: string[] = []

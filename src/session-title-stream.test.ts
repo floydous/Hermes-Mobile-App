@@ -49,6 +49,67 @@ describe('session title event resolution and TDZ safety', () => {
     expect(remapSessionId(sessions, 'session-1', 'session-1', null)).toBe(sessions)
   })
 
+  it('retains durable SQLite session IDs and never mutates them to temporary runtime IDs', () => {
+    const durableId = '20261002_170104_84486a'
+    const runtimeId = 'e81a9420'
+    const titleState = createTitleReconciliation(durableId)
+    let selected: LiveSession | null = {
+      id: durableId,
+      title: 'Say Loha',
+      preview: '',
+      profile: 'researcher',
+      last_active: 10,
+    }
+    let sessions: LiveSession[] = [selected]
+
+    const finalId = finalizeSessionRemap(
+      titleState,
+      runtimeId,
+      durableId,
+      newId => { if (selected) selected = { ...selected, id: newId } },
+      updater => { sessions = updater(sessions) }
+    )
+
+    expect(finalId).toBe(durableId)
+    expect(selected?.id).toBe(durableId)
+    expect(sessions[0].id).toBe(durableId)
+  })
+
+  it('deduplicates SQLite snapshot against previous runtime aliases when local messages exist', () => {
+    const durableId = '20261002_170104_84486a'
+    const runtimeAlias = 'e81a9420'
+
+    // Simulate SQLite returning the authoritative session row
+    const sqliteSnapshot: LiveSession[] = [
+      { id: durableId, title: 'Say Loha', preview: 'Loha', profile: 'researcher', last_active: 50 },
+    ]
+
+    // Simulate previous client state holding the runtime alias with cached local messages
+    const prevSessions: LiveSession[] = [
+      { id: runtimeAlias, title: 'Say Loha', preview: 'Loha', profile: 'researcher', last_active: 50 },
+    ]
+
+    // Test the exact reconciliation logic from App.tsx
+    const endpoint = 'http://127.0.0.1:9119'
+    const getResolvedId = (id: string) => (id === durableId ? runtimeAlias : id === runtimeAlias ? durableId : id)
+
+    const nextMap = new Map<string, LiveSession>(sqliteSnapshot.map(s => [s.id, s]))
+    for (const prev of prevSessions) {
+      const isAlreadyPresent = Array.from(nextMap.keys()).some(existingId =>
+        existingId === prev.id ||
+        getResolvedId(existingId) === prev.id ||
+        getResolvedId(prev.id) === existingId
+      )
+      if (!isAlreadyPresent) {
+        nextMap.set(prev.id, prev)
+      }
+    }
+
+    const reconciled = Array.from(nextMap.values())
+    expect(reconciled).toHaveLength(1)
+    expect(reconciled[0].id).toBe(durableId)
+  })
+
   it('executes real gateway event listener during in-flight turn without TDZ and updates sessions', async () => {
     const gw = new HermesGatewayClient(async () => 'http://127.0.0.1:9999')
     // Mock low-level connect and call so submitPrompt executes cleanly

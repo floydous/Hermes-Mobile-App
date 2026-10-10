@@ -43,9 +43,40 @@ export function isSessionCanonical(
 }
 
 /**
+ * Checks whether an in-flight turn belongs to the canonical 1-on-1 bot chat for turnProfile.
+ * Ad-hoc sessions from the Sessions tab are NEVER canonical.
+ */
+export function isTurnCanonicalForProfile(
+  turnSessionId: string,
+  turnProfile: string,
+  profiles: LiveProfile[],
+  resolvedIdGetter?: (id: string) => string,
+  adhocSessionIds?: Set<string>
+): boolean {
+  if (!turnSessionId || !turnProfile) return false
+  if (adhocSessionIds?.has(turnSessionId)) return false
+  if (turnSessionId === `draft:${turnProfile}`) return true
+  if (turnSessionId.startsWith(`dispatched:${turnProfile}`)) return true
+
+  const profile = profiles.find(p => p.name === turnProfile)
+  if (profile?.canonical_session) {
+    const cId = profile.canonical_session.id
+    const rId = profile.canonical_session.resolved_id
+    if (cId && turnSessionId === cId) return true
+    if (rId && turnSessionId === rId) return true
+    if (resolvedIdGetter) {
+      const resolved = resolvedIdGetter(turnSessionId)
+      if (cId && resolved === cId) return true
+      if (rId && resolved === rId) return true
+    }
+  }
+  return false
+}
+
+/**
  * Checks whether an active view (session) matches the session running a turn.
  * Ensures turns and clarify requests from one session do not leak into another,
- * even when both sessions belong to the same profile (e.g. 'default').
+ * even when both sessions belong to the same profile (e.g. 'default' or 'researcher').
  */
 export function doesSessionMatchTurn(
   session: LiveSession | null | undefined,
@@ -63,9 +94,9 @@ export function doesSessionMatchTurn(
     if (resolvedIdGetter(turnSessionId) === session.id) return true
     if (resolvedIdGetter(session.id) === turnSessionId) return true
   }
-  // 3. Canonical bot chat match: both must be canonical for the same profile
+  // 3. Canonical bot chat match: both the open session AND the turn must be canonical for the same profile
   const sessionIsCanonical = isSessionCanonical(session, profiles, adhocSessionIds)
-  const turnIsCanonical = isSessionCanonical({ id: turnSessionId, profile: turnProfile, title: 'Bot Chat' }, profiles, adhocSessionIds)
+  const turnIsCanonical = isTurnCanonicalForProfile(turnSessionId, turnProfile, profiles, resolvedIdGetter, adhocSessionIds)
   if (sessionIsCanonical && turnIsCanonical && session.profile === turnProfile) return true
 
   return false
