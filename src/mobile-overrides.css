@@ -4441,6 +4441,167 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
   border-color: rgba(0, 0, 0, 0.06);
 }
 
+/* ==========================================================================
+   Context Compaction Scaffolding Notice Capsule
+   ========================================================================== */
+.compacted-history-notice-row {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 6px 12px;
+  margin: 6px 0;
+  width: 100%;
+}
+
+.compacted-history-capsule {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 12px;
+  font-weight: 500;
+  color: color-mix(in srgb, currentColor 55%, transparent);
+  letter-spacing: -0.01em;
+  user-select: none;
+}
+
+.compacted-history-icon {
+  flex-shrink: 0;
+  color: color-mix(in srgb, currentColor 45%, transparent);
+}
+
+[data-theme='light'] .compacted-history-capsule {
+  background: rgba(0, 0, 0, 0.03);
+  border-color: rgba(0, 0, 0, 0.06);
+}
+
+/* ==========================================================================
+   Model Switch Notice Capsule
+   ========================================================================== */
+.model-switch-notice-row {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 6px 12px;
+  margin: 6px 0;
+  width: 100%;
+}
+
+.model-switch-capsule {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 12px;
+  font-weight: 500;
+  color: color-mix(in srgb, currentColor 55%, transparent);
+  letter-spacing: -0.01em;
+  user-select: none;
+}
+
+.model-switch-icon {
+  flex-shrink: 0;
+  color: color-mix(in srgb, currentColor 45%, transparent);
+}
+
+[data-theme='light'] .model-switch-capsule {
+  background: rgba(0, 0, 0, 0.03);
+  border-color: rgba(0, 0, 0, 0.06);
+}
+
+/* ==========================================================================
+   Load Earlier Messages Indicator & Button
+   ========================================================================== */
+.load-earlier-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 12px 16px 8px;
+  width: 100%;
+  user-select: none;
+}
+
+.load-earlier-capsule {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 14px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  color: color-mix(in srgb, currentColor 60%, transparent);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  transition: opacity 0.2s ease;
+}
+
+.load-earlier-capsule.is-loading {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text, #f4f4f5);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  animation: pulse-capsule 1.5s ease-in-out infinite;
+}
+
+.load-earlier-capsule.is-start {
+  background: transparent;
+  border-color: transparent;
+  color: color-mix(in srgb, currentColor 40%, transparent);
+  font-size: 11px;
+}
+
+.load-earlier-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 14px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: color-mix(in srgb, currentColor 75%, transparent);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.12s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.load-earlier-btn:active {
+  transform: scale(0.96);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+@keyframes pulse-capsule {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+[data-theme='light'] .load-earlier-capsule {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.07);
+}
+
+[data-theme='light'] .load-earlier-capsule.is-loading {
+  background: rgba(0, 0, 0, 0.06);
+  color: #18181b;
+}
+
+[data-theme='light'] .load-earlier-btn {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.08);
+  color: #3f3f46;
+}
+
+[data-theme='light'] .load-earlier-btn:active {
+  background: rgba(0, 0, 0, 0.08);
+}
+
 
 
 

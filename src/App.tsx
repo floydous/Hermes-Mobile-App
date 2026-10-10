@@ -58,6 +58,7 @@ import {
   resumeSession,
   savedHermesEndpoint,
   setActiveHermesEndpoint,
+  settleGatewayTurn,
   updateSessionTitle,
   type LiveMessage,
   type LiveProfile,
@@ -158,6 +159,8 @@ export default function App() {
   const sessionLoadRef = useRef(0)
   const [profileSheet, setProfileSheet] = useState(false)
   const [messages, setMessages] = useState<LiveMessage[]>([])
+  const messagesRef = useRef<LiveMessage[]>([])
+  messagesRef.current = messages
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [activeEndpoint, setActiveEndpoint] = useState(() => {
@@ -314,7 +317,28 @@ export default function App() {
       const data = await loadSnapshot(endpoint)
       if (!refreshEpochRef.current.isCurrent(epoch)) return null
       setProfiles(data.profiles)
-      setSessions(data.sessions)
+      setSessions(prevSessions => {
+        const nextMap = new Map<string, LiveSession>(data.sessions.map(s => [s.id, s]))
+        // Preserve any session that is currently selected, in-flight, or has local optimistic messages
+        // so a background refresh during in-flight turns (when SQLite messages count is 0) never drops it
+        for (const prev of prevSessions) {
+          if (!nextMap.has(prev.id)) {
+            const isInFlight = Boolean(
+              activeInFlightTurnsRef.current.has(prev.id) ||
+              activeInFlightTurnsRef.current.has(prev.profile) ||
+              selectedRef.current?.id === prev.id
+            )
+            const hasLocalMessages = Boolean(
+              (messageCacheRef.current.get(prev.id)?.length || 0) > 0 ||
+              getCachedSessionMessages(prev.id)?.length
+            )
+            if (isInFlight || hasLocalMessages) {
+              nextMap.set(prev.id, prev)
+            }
+          }
+        }
+        return Array.from(nextMap.values())
+      })
       if (selectedRef.current) {
         const curId = selectedRef.current.id
         const matched = data.sessions.find(s => s.id === curId)
@@ -409,6 +433,14 @@ export default function App() {
 
   useEffect(() => {
     return onGatewayGlobalEvent(event => {
+      if (event.type === 'gateway.ready') {
+        // Gateway reconnected: re-reconcile active sessions and reload transcript in case
+        // terminal completion arrived while transport was re-establishing
+        void refresh()
+        if (selectedRef.current && (activeInFlightTurnsRef.current.has(selectedRef.current.id) || activeInFlightTurnsRef.current.has(selectedRef.current.profile))) {
+          void openSession(selectedRef.current)
+        }
+      }
       if (event.type === 'message.delta') {
         const sid = event.sessionId || ''
         const prof = resolveProfileForSessionId(sid, profiles, sessions, activeTurnsRef.current)
@@ -710,13 +742,24 @@ export default function App() {
         : undefined
     )
 
+    // Candidate alias IDs across canonical and gateway runtime remappings
+    const candidateIds = [
+      safeSession.id,
+      getResolvedSessionId(safeSession.id, activeEndpointRef.current),
+      isCanonical ? profiles.find(p => p.name === safeSession.profile)?.canonical_session?.id : undefined,
+      isCanonical ? profiles.find(p => p.name === safeSession.profile)?.canonical_session?.resolved_id : undefined,
+    ].filter((id): id is string => Boolean(id))
+
     // Fast-path: check in-memory cache, then fallback to persistent localStorage cache for instant 0ms restoration
-    let cached = messageCacheRef.current.get(safeSession.id)
-    if (cached === undefined) {
-      const persisted = getCachedSessionMessages(safeSession.id)
-      if (persisted) {
-        cached = persisted
-        messageCacheRef.current.set(safeSession.id, persisted)
+    let cached: LiveMessage[] | undefined = undefined
+    for (const cid of candidateIds) {
+      const found = messageCacheRef.current.get(cid) || getCachedSessionMessages(cid)
+      if (found && found.length > 0) {
+        cached = found
+        for (const alias of candidateIds) {
+          messageCacheRef.current.set(alias, found)
+        }
+        break
       }
     }
 
@@ -798,7 +841,13 @@ export default function App() {
           activeInFlightTurnsRef.current.has(safeSession.id) ||
           (isCanonical && (activeTurnsRef.current[safeSession.profile] || activeInFlightTurnsRef.current.has(safeSession.profile)))
         )
-        const existingMessages = messageCacheRef.current.get(safeSession.id) || []
+        const existingMessages = (() => {
+          for (const cid of candidateIds) {
+            const found = messageCacheRef.current.get(cid) || getCachedSessionMessages(cid)
+            if (found && found.length > 0) return found
+          }
+          return messageCacheRef.current.get(safeSession.id) || []
+        })()
         if (shouldRetainLocalMessages(resolvedLoaded, existingMessages, isTurnActive)) {
           // Do not overwrite optimistic user messages with empty array from unset SQLite backend
           if (requestId === sessionLoadRef.current) {
@@ -807,8 +856,10 @@ export default function App() {
           return
         }
 
-        messageCacheRef.current.set(safeSession.id, resolvedLoaded)
-        setCachedSessionMessages(safeSession.id, resolvedLoaded)
+        for (const cid of candidateIds) {
+          messageCacheRef.current.set(cid, resolvedLoaded)
+          setCachedSessionMessages(cid, resolvedLoaded)
+        }
 
         if (requestId !== sessionLoadRef.current || selectedRef.current?.id !== safeSession.id) return
 
@@ -826,6 +877,7 @@ export default function App() {
           setSending(false)
           setStreaming('')
           setToolActivities([])
+          settleGatewayTurn(safeSession.id, activeEndpointRef.current)
           if (currentActive) {
             recentEndedTurnsRef.current.set(safeSession.id, Date.now())
             setActiveTurns(prev => {
@@ -861,6 +913,32 @@ export default function App() {
         if (requestId === sessionLoadRef.current) setConversationLoading(false)
       }
     })()
+  }, [])
+
+  const loadEarlierMessages = useCallback(async (): Promise<boolean> => {
+    const curSession = selectedRef.current
+    if (!curSession || curSession.id.startsWith('draft:')) return false
+    const currentList = messagesRef.current || []
+    const offset = currentList.length
+    try {
+      const older = await loadMessages(curSession.id, curSession.profile, activeEndpointRef.current, offset, 80)
+      if (!older || older.length === 0) return false
+
+      // Guard: Discard stale page if user navigated away or switched session
+      if (selectedRef.current?.id !== curSession.id) return false
+
+      const existingIds = new Set(currentList.map(m => m.id))
+      const novelOlder = older.filter(m => !existingIds.has(m.id))
+      if (novelOlder.length === 0) return false
+
+      const merged = deduplicateConsecutiveMessages([...novelOlder, ...currentList])
+      setMessages(merged)
+      messageCacheRef.current.set(curSession.id, merged)
+      setCachedSessionMessages(curSession.id, merged)
+      return novelOlder.length >= 80
+    } catch {
+      return false
+    }
   }, [])
 
   const [creatingSession, setCreatingSession] = useState(false)
@@ -1114,8 +1192,15 @@ export default function App() {
 
       const nextMessages = deduplicateConsecutiveMessages(rawNext)
 
-      messageCacheRef.current.set(turnSessionId, nextMessages)
-      setCachedSessionMessages(turnSessionId, nextMessages)
+      const aliasIds = new Set<string>([
+        turnSessionId,
+        turnSession.id,
+        getResolvedSessionId(turnSessionId, activeEndpointRef.current),
+      ].filter(Boolean))
+      for (const aid of aliasIds) {
+        messageCacheRef.current.set(aid, nextMessages)
+        setCachedSessionMessages(aid, nextMessages)
+      }
       return nextMessages
     })
 
@@ -1324,6 +1409,12 @@ export default function App() {
           const req = pendingClarifyRef.current[turnSessionId]
           if (req) {
             pendingClarifyRef.current[newId] = { ...req, sessionId: newId }
+          }
+          // Atomically link message cache to newId so remapped IDs never load blank
+          const cached = messageCacheRef.current.get(turnSessionId)
+          if (cached && cached.length > 0) {
+            messageCacheRef.current.set(newId, cached)
+            setCachedSessionMessages(newId, cached)
           }
         },
         onError: msg => {
@@ -1738,7 +1829,7 @@ export default function App() {
   if (createOpen) return <CreateWizard step={createStep} setStep={setCreateStep} draft={botDraft} setDraft={setBotDraft} creating={creating} error={error} close={() => { setCreateOpen(false); setCreateStep(0); setError('') }} finish={() => void finishCreate()}/>
   if (settings) return <ConnectionSettings profiles={profiles.length} sessions={sessions.length} connected={connectionStatus === 'connected'} endpoint={activeEndpoint !== 'http://127.0.0.1:9119' ? activeEndpoint : undefined} theme={theme} setTheme={setTheme} uiScale={uiScale} setUiScale={setUiScale} close={() => setSettings(false)} refresh={() => refresh()} onPairingBusy={setPairingBusyState} onPaired={async endpoint => { const normalized = activateEndpoint(endpoint); const data = await refresh(normalized, true); if (!data) throw new Error(lastConnectionErrorRef.current || 'Signed in, but authenticated Hermes REST or live WebSocket verification failed.'); localStorage.setItem('hermes-mobile-active-endpoint', normalized) }}/>
   if (selected && profileSheet) return <BotProfileSheet profile={profiles.find(profile => profile.name === selected.profile)} session={selected} onClose={() => setProfileSheet(false)} onUpdated={() => void refresh()}/>
-  if (selected) return <ErrorBoundary onReset={() => setSelected(null)}><ChatView session={selected} conversationLoading={conversationLoading} messages={messages} settledAssistant={settledAssistant?.sessionId === selected.id && settledAssistant.profile === selected.profile ? settledAssistant : null} profiles={profiles} streaming={streaming} sending={sending} toolActivities={toolActivities} error={error} back={() => setSelected(null)} refresh={() => void openSession(selected)} clearChat={() => handleClearChat(selected)} openProfile={() => setProfileSheet(true)} onSessionModelChange={handleSessionModelChange} pendingClarify={pendingClarify} onAnswerClarify={handleAnswerClarify} onSkipClarify={handleSkipClarify} submit={submit} submitVoice={submitVoice} stop={stop}/></ErrorBoundary>
+  if (selected) return <ErrorBoundary onReset={() => setSelected(null)}><ChatView session={selected} conversationLoading={conversationLoading} messages={messages} settledAssistant={settledAssistant?.sessionId === selected.id && settledAssistant.profile === selected.profile ? settledAssistant : null} profiles={profiles} streaming={streaming} sending={sending} toolActivities={toolActivities} error={error} back={() => setSelected(null)} refresh={() => void openSession(selected)} clearChat={() => handleClearChat(selected)} openProfile={() => setProfileSheet(true)} onSessionModelChange={handleSessionModelChange} pendingClarify={pendingClarify} onAnswerClarify={handleAnswerClarify} onSkipClarify={handleSkipClarify} submit={submit} submitVoice={submitVoice} stop={stop} loadEarlierMessages={loadEarlierMessages}/></ErrorBoundary>
 
   const adhocSessionIds = new Set(visibleSessions.map(s => s.id))
 

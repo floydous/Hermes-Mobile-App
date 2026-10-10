@@ -6,7 +6,7 @@ import type { RosterProfile } from './live-model'
 export type LiveProfile = RosterProfile
 export type LiveSession = { id: string; title: string; preview: string; profile: string; source?: string; model?: string; unread?: boolean; unread_count?: number; message_count?: number; last_active?: number }
 export type LiveUsage = { model?: string; input?: number; output?: number; reasoning?: number; prompt?: number; completion?: number; total?: number; calls?: number; avg_tps?: number; avg_latency_s?: number }
-export type LiveMessage = { id: number; role: 'user' | 'assistant' | 'tool' | 'system'; content: string; tool_name?: string | null; tool_status?: 'running' | 'done' | 'failed'; duration_s?: number; reasoning?: string | null; timestamp?: number; token_count?: number | null; usage?: LiveUsage }
+export type LiveMessage = { id: number; role: 'user' | 'assistant' | 'tool' | 'system'; content: string; display_content?: string; display_kind?: string; tool_name?: string | null; tool_status?: 'running' | 'done' | 'failed'; duration_s?: number; reasoning?: string | null; timestamp?: number; token_count?: number | null; usage?: LiveUsage }
 export type ModelProvider = { name: string; slug: string; models?: string[]; featured_models?: string[]; authenticated?: boolean }
 export type ModelOptions = { model?: string; provider?: string; providers?: ModelProvider[] }
 export type SlashCompletion = { text: string; display?: string; meta?: string; kind?: 'skill' | 'command' }
@@ -215,19 +215,34 @@ export async function createSession(
   }
 }
 
-export async function loadMessages(sessionId: string, profile: string, baseUrl = activeHermes): Promise<LiveMessage[]> {
+export async function loadMessages(
+  sessionId: string,
+  profile: string,
+  baseUrl = activeHermes,
+  offset = 0,
+  limit = 100
+): Promise<LiveMessage[]> {
   const safeProfile = profile || 'default'
   let lastErr: unknown
 
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const raw = await invoke<string>('hermes_session_messages', { baseUrl, sessionId, profile: safeProfile })
+      const raw = await invoke<string>('hermes_session_messages', {
+        baseUrl,
+        sessionId,
+        profile: safeProfile,
+        offset,
+        limit,
+      })
       const parsed = JSON.parse(raw) as { messages?: LiveMessage[] }
       const messages = Array.isArray(parsed?.messages) ? parsed.messages : []
-      return messages.map(msg => ({
-        ...msg,
-        content: typeof msg.content === 'string' ? msg.content : msg.content == null ? '' : String(msg.content),
-      }))
+      return messages.map(msg => {
+        const rawContent = msg.display_content || msg.content
+        return {
+          ...msg,
+          content: typeof rawContent === 'string' ? rawContent : rawContent == null ? '' : String(rawContent),
+        }
+      })
     } catch (err) {
       lastErr = err
       const message = String(err)
@@ -543,6 +558,13 @@ export function respondClarify(
 export async function interruptSession(sessionId: string, baseUrl = activeHermes): Promise<void> {
   const normBase = (baseUrl || activeHermes).replace(/\/$/, '')
   await gateway(normBase).interruptSession(resolvedSessions.get(`${normBase}:${sessionId}`) || sessionId)
+}
+
+export function settleGatewayTurn(sessionId: string, baseUrl = activeHermes): void {
+  const normBase = (baseUrl || activeHermes).replace(/\/$/, '')
+  const resolved = resolvedSessions.get(`${normBase}:${sessionId}`) || sessionId
+  gateway(normBase).settleTurn(sessionId)
+  gateway(normBase).settleTurn(resolved)
 }
 
 export type ClearSessionOptions = {

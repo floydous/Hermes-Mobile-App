@@ -86,6 +86,9 @@ export class HermesGatewayClient {
   private readonly requestHandlers = new Map<string, (params: GatewayPayload) => unknown>()
   private readonly activeTurnCancels = new Map<string, () => void>()
   private readonly replayedRequestIds = new Set<string>()
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private static readonly HEARTBEAT_INTERVAL_MS = 20_000
   private globalListener?: (event: GatewayEvent) => void
 
   constructor(
@@ -115,7 +118,7 @@ export class HermesGatewayClient {
     this.socket = socket
 
     const opened = new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('Hermes Gateway connection timed out')), 15_000)
+      const timer = setTimeout(() => reject(new Error('Hermes Gateway connection timed out')), 25_000)
       socket.onopen = () => { clearTimeout(timer); resolve() }
       socket.onerror = () => { clearTimeout(timer); reject(new Error('Hermes Gateway connection failed')) }
     })
@@ -129,7 +132,7 @@ export class HermesGatewayClient {
     await opened
     await Promise.race([
       ready,
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Hermes Gateway did not announce readiness')), 15_000)),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Hermes Gateway did not announce readiness')), 25_000)),
     ])
   }
 
@@ -145,6 +148,8 @@ export class HermesGatewayClient {
         if (event.type === 'gateway.ready') {
           void this.advertiseCapabilities().finally(() => {
             this.readyResolve?.()
+            this.startHeartbeat()
+            this.rebindInFlightSessions()
           })
         }
         this.globalListener?.(event)
@@ -213,10 +218,45 @@ export class HermesGatewayClient {
     }
   }
 
+  private startHeartbeat(): void {
+    this.stopHeartbeat()
+    this.heartbeatTimer = setInterval(() => {
+      if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+        void this.ping().catch(() => {})
+      }
+    }, HermesGatewayClient.HEARTBEAT_INTERVAL_MS)
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer)
+      this.heartbeatTimer = null
+    }
+  }
+
+  private rebindInFlightSessions(): void {
+    for (const sessionId of Array.from(this.activeTurnCancels.keys())) {
+      void this.resumeSession(sessionId).catch(() => {})
+    }
+  }
+
+  private scheduleReconnect(delayMs = 1000): void {
+    if (this.reconnectTimer) return
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null
+      if (this.activeTurnCancels.size > 0 && (!this.socket || this.socket.readyState !== WebSocket.OPEN)) {
+        void this.connect().catch(() => {
+          this.scheduleReconnect(Math.min(delayMs * 2, 8000))
+        })
+      }
+    }, delayMs)
+  }
+
   private handleClose(generation: number) {
     if (generation !== this.generation) return
     this.generation += 1
     this.socket = null
+    this.stopHeartbeat()
     const error = new GatewayRpcError('connection', 'Hermes Gateway connection closed', undefined, { reason: 'connection_closed' })
     this.readyReject?.(error)
     this.readyResolve = null
@@ -226,7 +266,14 @@ export class HermesGatewayClient {
       pending.reject(error)
     }
     this.pending.clear()
-    this.sessionListeners.clear()
+
+    // If active turns are in flight, keep their session listeners alive and
+    // attempt automatic reconnection so the turn is not abandoned.
+    if (this.activeTurnCancels.size > 0) {
+      this.scheduleReconnect()
+    } else {
+      this.sessionListeners.clear()
+    }
   }
 
   async call<T>(method: string, params: GatewayPayload, timeoutMs = 30_000): Promise<T> {
@@ -279,7 +326,30 @@ export class HermesGatewayClient {
     let settle!: () => void
     let fail!: (reason: Error) => void
     const terminal = new Promise<void>((resolve, reject) => { settle = resolve; fail = reject })
+
+    // Track rolling activity and liveness
+    let lastActivityTime = Date.now()
+    let watchdogTimer: ReturnType<typeof setTimeout> | null = null
+    let maxCeilingTimer: ReturnType<typeof setTimeout> | null = null
+
+    const resetWatchdog = () => {
+      lastActivityTime = Date.now()
+      if (watchdogTimer) clearTimeout(watchdogTimer)
+      // Check every 4 minutes of quiet time. If quiet, probe via ping()
+      watchdogTimer = setTimeout(async () => {
+        if (Date.now() - lastActivityTime >= 4 * 60_000) {
+          const alive = await this.ping()
+          if (alive) {
+            resetWatchdog()
+          } else {
+            fail(new GatewayRpcError('prompt.submit', 'Hermes turn timed out (gateway unresponsive)'))
+          }
+        }
+      }, 4 * 60_000)
+    }
+
     const terminalListener = (event: GatewayEvent) => {
+      resetWatchdog()
       listener(event)
       if (!event.terminal) return
       if (event.type === 'error' || event.type === 'turn.error') fail(new GatewayRpcError('prompt.submit', String(event.payload.message || 'Hermes turn failed')))
@@ -300,11 +370,18 @@ export class HermesGatewayClient {
         }
       }
       await this.call('prompt.submit', payload, 30_000)
-      await Promise.race([
-        terminal,
-        new Promise<never>((_, reject) => setTimeout(() => reject(new GatewayRpcError('prompt.submit', 'Hermes turn timed out')), 10 * 60_000)),
-      ])
+
+      resetWatchdog()
+      const maxCeilingPromise = new Promise<never>((_, reject) => {
+        maxCeilingTimer = setTimeout(() => {
+          reject(new GatewayRpcError('prompt.submit', 'Hermes turn exceeded 30-minute maximum execution limit'))
+        }, 30 * 60_000)
+      })
+
+      await Promise.race([terminal, maxCeilingPromise])
     } finally {
+      if (watchdogTimer) clearTimeout(watchdogTimer)
+      if (maxCeilingTimer) clearTimeout(maxCeilingTimer)
       listeners.delete(terminalListener)
       if (this.activeTurnCancels.get(sessionId) === settle) this.activeTurnCancels.delete(sessionId)
       if (!listeners.size) this.sessionListeners.delete(sessionId)
@@ -324,6 +401,14 @@ export class HermesGatewayClient {
     const result = await this.call('session.interrupt', { session_id: sessionId })
     this.activeTurnCancels.get(sessionId)?.()
     return result
+  }
+
+  settleTurn(sessionId: string): void {
+    const cancel = this.activeTurnCancels.get(sessionId)
+    if (cancel) {
+      cancel()
+      this.activeTurnCancels.delete(sessionId)
+    }
   }
 
   async deleteSession(sessionId: string, profile?: string): Promise<boolean> {
@@ -411,6 +496,11 @@ export class HermesGatewayClient {
   }
 
   close() {
+    this.stopHeartbeat()
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
     const socket = this.socket
     if (!socket) return
     this.handleClose(this.generation)

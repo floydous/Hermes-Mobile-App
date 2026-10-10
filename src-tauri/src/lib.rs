@@ -236,16 +236,22 @@ fn hermes_session_messages(
     base_url: String,
     session_id: String,
     profile: String,
+    offset: Option<usize>,
+    limit: Option<usize>,
 ) -> Result<String, String> {
     let origin = server_origin(&base_url);
     let target_profile = if profile.trim().is_empty() { "default" } else { profile.trim() };
+    let page_limit = limit.unwrap_or(100);
+    let page_offset = offset.unwrap_or(0);
     authenticated_get(
         &app,
         &origin,
         &format!(
-            "/api/sessions/{}/messages?profile={}&limit=120&order=latest&include_compacted=true",
+            "/api/sessions/{}/messages?profile={}&limit={}&offset={}&order=latest&include_compacted=true",
             urlencoding::encode(&session_id),
-            urlencoding::encode(target_profile)
+            urlencoding::encode(target_profile),
+            page_limit,
+            page_offset
         ),
     )
 }

@@ -50,11 +50,25 @@ export function buildBotRows(
     .sort((a, b) => (b.session?.last_active || 0) - (a.session?.last_active || 0))
 }
 
-import { cleanContinuationScaffolding } from './session-cache'
+import { cleanContinuationScaffolding, extractCompactedUserAsk, isCompactionSummary, isModelSwitchMarker, parseModelSwitchNotice } from './session-cache'
 
 export function cleanPreviewSnippet(preview?: string | null): string {
   if (!preview) return ''
-  const trimmed = cleanContinuationScaffolding(preview.trim())
+  let trimmed = cleanContinuationScaffolding(preview.trim())
+  if (isCompactionSummary(trimmed)) {
+    const extracted = extractCompactedUserAsk(trimmed)
+    trimmed = extracted || 'Earlier conversation compacted'
+  }
+  if (isModelSwitchMarker(trimmed)) {
+    const parsed = parseModelSwitchNotice(trimmed)
+    if (parsed) {
+      return `Model changed: ${parsed.model}${parsed.provider ? ` (${parsed.provider})` : ''}`
+    }
+  }
+  trimmed = trimmed
+    .replace(/^\s*\[STILL IN PROGRESS\s*[—–-]\s*this is the active request[\s\S]*?do not start over\.?\]\s*/i, '')
+    .replace(/^\s*\[PRIOR CONTEXT\s*[—–-]\s*for reference only;?\s*not a new message\.?\]\s*/i, '')
+    .trim()
   const match = trimmed.match(/^Message from (?:🤖\s*([^\n(@:]+?)(?:\s*\(@([A-Za-z0-9_.-]+)\))?|([^\n(@:]+?)\s*\(@([A-Za-z0-9_.-]+)\)):\s*([\s\S]*)$/i)
   if (match) {
     const handle = match[2] || match[4] || match[1] || match[3] || 'agent'

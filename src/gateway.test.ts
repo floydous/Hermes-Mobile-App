@@ -404,4 +404,96 @@ describe('Desktop Gateway protocol', () => {
       payload: expect.objectContaining({ text: 'The clarify tool worked.' }),
     }))
   })
+
+  it('sends periodic heartbeat pings while connected to keep tunnel and NAT alive', async () => {
+    vi.useFakeTimers()
+    try {
+      let mockWs!: MockWebSocket
+      const client = new HermesGatewayClient(
+        async () => 'ws://127.0.0.1:9119/api/ws',
+        url => {
+          mockWs = new MockWebSocket(url)
+          return mockWs as unknown as WebSocket
+        }
+      )
+
+      const connectPromise = client.connect()
+      await vi.advanceTimersByTimeAsync(10)
+      mockWs.receive({ method: 'event', params: { type: 'gateway.ready', payload: {} } })
+      await vi.advanceTimersByTimeAsync(10)
+      await connectPromise
+
+      // Advance 20 seconds (the heartbeat interval)
+      await vi.advanceTimersByTimeAsync(20_000)
+
+      expect(mockWs.sent.some(line => line.includes('"ping"'))).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('preserves in-flight turn listeners across unexpected socket drop and re-binds with session.resume', async () => {
+    let sockets: MockWebSocket[] = []
+    const client = new HermesGatewayClient(
+      async () => 'ws://127.0.0.1:9119/api/ws',
+      url => {
+        const ws = new MockWebSocket(url)
+        sockets.push(ws)
+        return ws as unknown as WebSocket
+      }
+    )
+
+    const connectPromise = client.connect()
+    await Promise.resolve()
+    await Promise.resolve()
+    sockets[0].receive({ method: 'event', params: { type: 'gateway.ready', payload: {} } })
+    await connectPromise
+
+    const listener = vi.fn()
+    const submitPromise = client.submitPrompt(
+      'session-long-running',
+      'Research query',
+      listener
+    )
+
+    const promptFrame = await sockets[0].waitForSent(line => line.includes('"prompt.submit"'))
+    const promptCall = JSON.parse(promptFrame.trim())
+    sockets[0].receive({ jsonrpc: '2.0', id: promptCall.id, result: { status: 'streaming' } })
+
+    // Simulate Cloudflare tunnel or NAT idle drop: socket closes while turn is in-flight!
+    sockets[0].close()
+
+    // Trigger reconnect attempt
+    const secondConnect = client.connect()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(sockets.length).toBe(2)
+    sockets[1].receive({ method: 'event', params: { type: 'gateway.ready', payload: {} } })
+    await secondConnect
+
+    // Second socket must receive session.resume to re-bind the active turn
+    const resumeFrame = await sockets[1].waitForSent(line => line.includes('"session.resume"'))
+    expect(resumeFrame).toContain('"session-long-running"')
+    const resumeCall = JSON.parse(resumeFrame.trim())
+    sockets[1].receive({ jsonrpc: '2.0', id: resumeCall.id, result: { session_id: 'session-long-running' } })
+
+    // Now gateway sends completion over the reconnected socket
+    sockets[1].receive({
+      method: 'event',
+      params: {
+        type: 'message.complete',
+        session_id: 'session-long-running',
+        payload: { text: 'Comparison completed successfully.' },
+      },
+    })
+
+    // Turn resolves cleanly without dropping history or timing out!
+    await submitPromise
+    expect(listener).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'message.complete',
+      payload: expect.objectContaining({ text: 'Comparison completed successfully.' }),
+    }))
+
+    client.close()
+  })
 })

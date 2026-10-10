@@ -50,8 +50,8 @@ describe('session-cache message caching and eviction', () => {
     expect(getCachedSessionMessages('session-to-del')).toBeNull()
   })
 
-  it('bounds cached messages to latest 60 items per session', () => {
-    const msgs: LiveMessage[] = Array.from({ length: 80 }, (_, i) => ({
+  it('bounds cached messages to latest 250 items per session', () => {
+    const msgs: LiveMessage[] = Array.from({ length: 300 }, (_, i) => ({
       id: i + 1,
       role: 'user',
       content: `msg-${i + 1}`,
@@ -59,9 +59,9 @@ describe('session-cache message caching and eviction', () => {
 
     setCachedSessionMessages('long-session', msgs)
     const cached = getCachedSessionMessages('long-session')
-    expect(cached).toHaveLength(60)
-    expect(cached?.[0].content).toBe('msg-21')
-    expect(cached?.[59].content).toBe('msg-80')
+    expect(cached).toHaveLength(250)
+    expect(cached?.[0].content).toBe('msg-51')
+    expect(cached?.[249].content).toBe('msg-300')
   })
 
   it('evicts oldest sessions when exceeding MAX_CACHED_SESSIONS', () => {

@@ -26,8 +26,8 @@ export function setCachedSessionMessages(sessionId: string, messages: LiveMessag
   if (typeof window === 'undefined' || !window.localStorage || !sessionId) return
   if (!Array.isArray(messages) || messages.length === 0) return
   try {
-    // Only cache the latest 60 messages per session to keep storage compact
-    const compactMessages = messages.length > 60 ? messages.slice(messages.length - 60) : messages
+    // Cache up to 250 latest messages per session for instant deep scrollback restoration
+    const compactMessages = messages.length > 250 ? messages.slice(messages.length - 250) : messages
     localStorage.setItem(`${STORAGE_PREFIX}${sessionId}`, JSON.stringify(compactMessages))
 
     // Manage index of cached session keys
@@ -189,8 +189,116 @@ export function isContinuationNudge(content: string): boolean {
 export function cleanContinuationScaffolding(text: string): string {
   if (!text) return ''
   return text
+    .replace(/\[The user sent a (?:text )?document:\s*['"][^'"]+['"]\.\s*(?:It is saved at|The file is also saved at):[\s\S]*?\]/gi, '')
     .replace(/\[System:\s*(?:The|Your)?\s*previous\s+(?:response|tool\s+call(?:\s*\([^)]*\))?)\s+was\s+(?:cut\s*off|truncated|too\s+large)[\s\S]*?\]/gi, '')
+    .replace(/\[STILL IN PROGRESS\s*[—–-]\s*this is the active request[\s\S]*?do not start over\.?\]/gi, '')
+    .replace(/\[PRIOR CONTEXT\s*[—–-]\s*for reference only;?\s*not a new message\.?\]/gi, '')
+    .replace(/\[OUT-OF-BAND USER MESSAGE\s*[—–-]\s*a direct message from the user[\s\S]*?conversation history\]/gi, '')
+    .replace(/\[\/OUT-OF-BAND USER MESSAGE\]/gi, '')
     .trim()
+}
+
+/**
+ * Detects synthetic model switch markers injected by Hermes Gateway mid-conversation
+ * (e.g. [System: The active model for this chat has changed to ... via provider ...]).
+ */
+export function isModelSwitchMarker(content: string): boolean {
+  if (!content) return false
+  const trimmed = content.trim()
+  return (
+    trimmed.startsWith('[System: The active model for this chat has changed to') ||
+    trimmed.startsWith('[System: The model for this session was set to') ||
+    /\[System:\s*The (?:active )?model for this (?:chat|session) (?:has changed|was set) to/i.test(trimmed)
+  )
+}
+
+export function parseModelSwitchNotice(content: string): { model: string; provider?: string } | null {
+  if (!content) return null
+  const trimmed = content.trim()
+  const match = trimmed.match(/\[System:\s*The (?:active )?model for this (?:chat|session) (?:has changed|was set) to\s+([^\s\]]+)(?:\s+via provider\s+([^\s\].]+))?/i)
+  if (!match) return null
+  return {
+    model: match[1],
+    provider: match[2]?.replace(/[.]$/, '').trim(),
+  }
+}
+
+/**
+ * Detects synthetic context compaction / conversation summary scaffolding from the backend
+ * (e.g. [CONTEXT COMPACTION — REFERENCE ONLY] Earlier turns were compacted...).
+ */
+export function isCompactionSummary(content: string): boolean {
+  if (!content) return false
+  const trimmed = content.trim()
+  return (
+    trimmed.startsWith('[CONTEXT COMPACTION') ||
+    trimmed.startsWith('[CONTEXT SUMMARY]:') ||
+    /\[CONTEXT COMPACTION\s*[—–-]\s*REFERENCE ONLY\]/i.test(trimmed)
+  )
+}
+
+/**
+ * Extracts the authentic user prompt embedded in a context compaction carrier,
+ * or returns null if it is a pure handoff summary with no user ask.
+ */
+export function extractCompactedUserAsk(content: string): string | null {
+  if (!content) return null
+  const trimmed = content.trim()
+  if (!isCompactionSummary(trimmed)) return null
+
+  const stripCompactionHeaders = (s: string) => s
+    .replace(/^\s*\[STILL IN PROGRESS\s*[—–-]\s*this is the active request[\s\S]*?do not start over\.?\]\s*/i, '')
+    .replace(/^\s*\[PRIOR CONTEXT\s*[—–-]\s*for reference only;?\s*not a new message\.?\]\s*/i, '')
+    .trim()
+
+  // 1. Official Hermes Summary End Marker: live user ask follows the boundary
+  if (trimmed.includes('--- END OF CONTEXT SUMMARY')) {
+    const parts = trimmed.split(/---\s*END OF CONTEXT SUMMARY[^\n]*---/i)
+    if (parts.length > 1 && parts[1].trim()) {
+      const liveAsk = stripCompactionHeaders(parts[1].trim())
+      if (liveAsk) return liveAsk
+    }
+  }
+
+  // 2. Official Hermes Merged Prior Context: user context precedes the delimiter
+  if (trimmed.includes('[END OF PRIOR CONTEXT')) {
+    const parts = trimmed.split(/\[END OF PRIOR CONTEXT[^\n]*\]/i)
+    if (parts.length > 0 && parts[0].trim()) {
+      const liveAsk = stripCompactionHeaders(parts[0].trim())
+      if (liveAsk) return liveAsk
+    }
+  }
+
+  // 3. In-flight task restatement header embedded directly in content
+  if (/\[STILL IN PROGRESS\s*[—–-]\s*this is the active request/i.test(trimmed)) {
+    const parts = trimmed.split(/\[STILL IN PROGRESS\s*[—–-]\s*this is the active request[\s\S]*?do not start over\.?\]/i)
+    if (parts.length > 1 && parts[1].trim()) {
+      const restated = stripCompactionHeaders(parts[1].trim())
+      if (restated) return restated
+    }
+  }
+
+  // 4. Other custom delimiter formats
+  const delimiterMatch = trimmed.match(/(?:---\s*NEW TURN\s*---|<!--\s*handoff\s*-->|=== END SUMMARY ===)\s*([\s\S]+)$/i)
+  if (delimiterMatch && delimiterMatch[1].trim()) {
+    return stripCompactionHeaders(delimiterMatch[1].trim())
+  }
+
+  // 5. Deterministic Historical Task Snapshot ("User asked: '...'")
+  const askMatch = trimmed.match(/User asked(?:\s*\([^)]*\))?:\s*['"]([\s\S]*?)['"](?:\s*Historical|\s*\n|$)/i)
+  if (askMatch && askMatch[1].trim()) {
+    return stripCompactionHeaders(askMatch[1].trim())
+  }
+
+  // 6. Fallback unquoted line after 'User asked:'
+  const askFallback = trimmed.match(/User asked(?:\s*\([^)]*\))?:\s*([^\n]+)/i)
+  if (askFallback && askFallback[1].trim()) {
+    const raw = askFallback[1].trim()
+    const unquoted = raw.replace(/^['"`]|['"`]$/g, '').trim()
+    if (unquoted) return stripCompactionHeaders(unquoted)
+  }
+
+  return null
 }
 
 /**

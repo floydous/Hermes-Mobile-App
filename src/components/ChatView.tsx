@@ -1,5 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { ArrowDown, Eraser, LoaderCircle, Paperclip, RotateCw, X } from 'lucide-react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { ArrowDown, Eraser, History, LoaderCircle, Paperclip, RotateCw, X } from 'lucide-react'
 import type { DragEvent } from 'react'
 
 import { BotAvatar } from './BotAvatar'
@@ -36,19 +36,24 @@ type Props = {
   submit: (attachments: { name: string; refText: string }[], text: string, options?: { editMessageId?: number }) => Promise<boolean>
   submitVoice: (text: string) => Promise<boolean>
   stop: () => void
+  loadEarlierMessages?: () => Promise<boolean>
 }
 
 const titleize = (value?: string | null) => (value || '').split(/[-_]+/).filter(Boolean).map(part => (part[0] ? part[0].toUpperCase() + part.slice(1) : '')).join(' ') || 'Bot'
 
-export function ChatView({ session, conversationLoading, messages, settledAssistant, profiles, streaming, sending, toolActivities, error, back, refresh, clearChat, openProfile, onSessionModelChange, pendingClarify, onAnswerClarify, onSkipClarify, submit, submitVoice, stop }: Props) {
+export function ChatView({ session, conversationLoading, messages, settledAssistant, profiles, streaming, sending, toolActivities, error, back, refresh, clearChat, openProfile, onSessionModelChange, pendingClarify, onAnswerClarify, onSkipClarify, submit, submitVoice, stop, loadEarlierMessages }: Props) {
   const shellRef = useRef<HTMLElement>(null)
   const threadRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const initializedRef = useRef(false)
   const followingRef = useRef(true)
   const stickQueuedRef = useRef(false)
+  const prependingEarlierRef = useRef(false)
+  const scrollAnchorRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null)
   const [following, setFollowing] = useState(true)
   const [unreadBelow, setUnreadBelow] = useState(0)
+  const [loadingEarlier, setLoadingEarlier] = useState(false)
+  const [hasMoreEarlier, setHasMoreEarlier] = useState(true)
   const [revealedTimestampId, setRevealedTimestampId] = useState<number | null>(null)
   const [controlError, setControlError] = useState('')
   const [draggingFiles, setDraggingFiles] = useState(false)
@@ -208,7 +213,21 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
     setFollowing(true)
     setUnreadBelow(0)
     setRevealedTimestampId(null)
+    setHasMoreEarlier(true)
+    setLoadingEarlier(false)
+    scrollAnchorRef.current = null
+    prependingEarlierRef.current = false
   }, [session.id])
+
+  useLayoutEffect(() => {
+    const thread = threadRef.current
+    if (scrollAnchorRef.current && thread) {
+      const heightDiff = thread.scrollHeight - scrollAnchorRef.current.scrollHeight
+      thread.scrollTop = scrollAnchorRef.current.scrollTop + heightDiff
+      scrollAnchorRef.current = null
+      prependingEarlierRef.current = false
+    }
+  }, [messages])
 
   useLayoutEffect(() => {
     if (!messages.length || initializedRef.current) return
@@ -222,6 +241,7 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
 
   useEffect(() => {
     if (!initializedRef.current) return
+    if (prependingEarlierRef.current) return
     if (followingRef.current) scheduleStickToBottom('auto')
     else setUnreadBelow(count => count + 1)
   }, [messages.length, streaming])
@@ -230,15 +250,41 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
     const content = contentRef.current
     if (!content) return
     const observer = new ResizeObserver(() => {
-      if (followingRef.current) scheduleStickToBottom('auto')
+      if (followingRef.current && !prependingEarlierRef.current) scheduleStickToBottom('auto')
     })
     observer.observe(content)
     return () => observer.disconnect()
   }, [])
 
+  const fetchEarlier = useCallback(async () => {
+    if (loadingEarlier || !hasMoreEarlier || !loadEarlierMessages) return
+    const thread = threadRef.current
+    if (!thread) return
+    setLoadingEarlier(true)
+    prependingEarlierRef.current = true
+    scrollAnchorRef.current = {
+      scrollHeight: thread.scrollHeight,
+      scrollTop: thread.scrollTop,
+    }
+    try {
+      const more = await loadEarlierMessages()
+      setHasMoreEarlier(more)
+    } catch {
+      setHasMoreEarlier(false)
+    } finally {
+      setLoadingEarlier(false)
+    }
+  }, [loadingEarlier, hasMoreEarlier, loadEarlierMessages])
+
   const onScroll = () => {
     const thread = threadRef.current
     if (!thread) return
+
+    // Auto-fetch earlier messages when scrolled near top
+    if (thread.scrollTop < 120 && !loadingEarlier && hasMoreEarlier && !pullRefreshing && messages.length >= 10 && loadEarlierMessages) {
+      void fetchEarlier()
+    }
+
     const nearEnd = shouldStickToBottom(thread.scrollHeight, thread.scrollTop, thread.clientHeight, SCROLL_FOLLOW_THRESHOLD)
     if (nearEnd === followingRef.current) return
     followingRef.current = nearEnd
@@ -348,6 +394,31 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
           </section>
         )}
         {showEmptyState && <section className="chat-empty-state" aria-label={`Start a conversation with ${botName}`}><BotAvatar profile={botProfile} fallbackName={session.profile} variant="welcome"/><h1>{botName.toUpperCase()}</h1><p>Say something to get started.</p></section>}
+        {messages.length >= 10 && loadEarlierMessages && (
+          <div className="load-earlier-container" aria-live="polite">
+            {loadingEarlier ? (
+              <div className="load-earlier-capsule is-loading" role="status" aria-label="Loading earlier messages">
+                <LoaderCircle size={13} className="spin" />
+                <span>Loading earlier messages…</span>
+              </div>
+            ) : hasMoreEarlier ? (
+              <button
+                type="button"
+                className="load-earlier-btn"
+                onClick={fetchEarlier}
+                disabled={loadingEarlier}
+                aria-label="Load earlier messages"
+              >
+                <History size={13} />
+                <span>Load earlier messages</span>
+              </button>
+            ) : (
+              <div className="load-earlier-capsule is-start" role="status" aria-label="Beginning of conversation">
+                <span>Beginning of conversation</span>
+              </div>
+            )}
+          </div>
+        )}
         {messages.map((message, index) => {
           const isLast = index === messages.length - 1
           const previousMessage = index > 0 ? messages[index - 1] : undefined

@@ -5,12 +5,14 @@ import {
   Check,
   ChevronDown,
   Copy,
+  Cpu,
   Download,
   File,
   FileCode,
   FileSpreadsheet,
   FileText,
   Image as ImageIcon,
+  Layers,
   Maximize2,
   Pencil,
   WifiOff,
@@ -26,7 +28,7 @@ import 'katex/dist/katex.min.css'
 
 import type { LiveMessage, LiveProfile } from '../hermes'
 import { fetchRemoteMedia } from '../hermes'
-import { isContinuationNudge } from '../session-cache'
+import { extractCompactedUserAsk, isCompactionSummary, isContinuationNudge, isModelSwitchMarker, parseModelSwitchNotice } from '../session-cache'
 import { resolveDelegationSenderProfile } from '../chat-turn'
 import { formatMessageTime, formatResponseStats } from '../message-stats'
 import { BotAvatar } from './BotAvatar'
@@ -233,8 +235,26 @@ export function parseAgentDelegation(
 
 export function stripAttachedContextScaffolding(text: string): string {
   if (!text) return ''
-  const withoutContext = text.replace(/\n*--- (?:Attached Context|Context Warnings) ---\n[\s\S]*$/, '').trim()
-  const { clean } = stripBackgroundProcessNotices(withoutContext)
+
+  // Convert backend document notices into clean attachment directives.
+  // Requires high-entropy Hermes signature: 'saved at:' AND ('not inlined' or 'has been included')
+  // so casual conversational mentions of brackets can never trigger a false positive.
+  let stripped = text.replace(
+    /\[The user sent a (?:text )?document:\s*['"]([^'"]+)['"]\.\s*(?:It is saved at|The file is also saved at):\s*([^\s\]]+?)\.\s*(?:Its (?:text|content) (?:is not inlined|has been included)|To read it, extract)[\s\S]*?\]/gi,
+    (_, name, path) => {
+      const cleanPath = path ? path.replace(/[.]+$/, '').trim() : name.trim()
+      return `\nAttached: ${cleanPath}\n`
+    }
+  )
+
+  stripped = stripped
+    .replace(/^\s*\[STILL IN PROGRESS\s*[—–-]\s*this is the active request[\s\S]*?do not start over\.?\]\s*/i, '')
+    .replace(/^\s*\[PRIOR CONTEXT\s*[—–-]\s*for reference only;?\s*not a new message\.?\]\s*/i, '')
+    .replace(/\[OUT-OF-BAND USER MESSAGE\s*[—–-]\s*a direct message from the user[\s\S]*?conversation history\]/gi, '')
+    .replace(/\[\/OUT-OF-BAND USER MESSAGE\]/gi, '')
+    .replace(/\n*--- (?:Attached Context|Context Warnings) ---\n[\s\S]*$/, '')
+    .trim()
+  const { clean } = stripBackgroundProcessNotices(stripped)
   return clean
 }
 
@@ -1138,6 +1158,25 @@ export function AgentDispatchBubble({
   )
 }
 
+export function getUiZoomFactor(): number {
+  if (typeof document === 'undefined') return 1
+  try {
+    const docEl = document.documentElement
+    const computed = typeof window !== 'undefined' && window.getComputedStyle ? window.getComputedStyle(docEl) : null
+
+    // 1. Check custom property --ui-scale (computed or inline)
+    const propVal = computed?.getPropertyValue('--ui-scale') || docEl.style.getPropertyValue('--ui-scale')
+    const parsedProp = parseFloat(propVal)
+    if (!isNaN(parsedProp) && parsedProp > 0) return parsedProp
+
+    // 2. Check CSS zoom (computed or inline)
+    const zoomVal = (computed as any)?.zoom || (docEl.style as any)?.zoom
+    const parsedZoom = parseFloat(zoomVal)
+    if (!isNaN(parsedZoom) && parsedZoom > 0) return parsedZoom
+  } catch {}
+  return 1
+}
+
 export const MessageCard = memo(function MessageCard({ message, previousMessage, onEdit, profile: _profile, profiles, fallbackName: _fallbackName, isCompleted, isActiveTurn, activeToolStatus, revealTimestamp, onRevealTimestamp }: MessageCardProps) {
   const [copied, setCopied] = useState(false)
   const [actionSheetOpen, setActionSheetOpen] = useState(false)
@@ -1149,10 +1188,29 @@ export const MessageCard = memo(function MessageCard({ message, previousMessage,
   const [swipeStartX, setSwipeStartX] = useState<number | null>(null)
   const stats = formatResponseStats(message)
   const timestamp = formatMessageTime(message.timestamp)
-  const textContent = typeof message.content === 'string' ? message.content : message.content == null ? '' : String(message.content)
-  const cleanContent = stripAttachedContextScaffolding(textContent)
-  const trimmed = cleanContent.trim()
+  const rawContent = message.display_content || message.content
+  const textContent = typeof rawContent === 'string' ? rawContent : rawContent == null ? '' : String(rawContent)
+  let cleanContent = stripAttachedContextScaffolding(textContent)
+  let trimmed = cleanContent.trim()
   if (message.role === 'system' || !trimmed) return null
+
+  // If this is a synthetic context compaction handoff message
+  if (isCompactionSummary(trimmed)) {
+    const extractedUserAsk = extractCompactedUserAsk(trimmed)
+    if (extractedUserAsk) {
+      cleanContent = extractedUserAsk
+      trimmed = extractedUserAsk.trim()
+    } else {
+      return (
+        <div className="compacted-history-notice-row" role="status" aria-label="Earlier conversation compacted">
+          <div className="compacted-history-capsule">
+            <Layers size={13} className="compacted-history-icon" aria-hidden="true" />
+            <span>Earlier conversation compacted for context</span>
+          </div>
+        </div>
+      )
+    }
+  }
 
   // If this is a synthetic network cutoff / continuation nudge, render a clean notice capsule
   if (isContinuationNudge(trimmed)) {
@@ -1161,6 +1219,23 @@ export const MessageCard = memo(function MessageCard({ message, previousMessage,
         <div className="network-cutoff-capsule">
           <WifiOff size={13} className="network-cutoff-icon" aria-hidden="true" />
           <span>Response continued after network interruption</span>
+        </div>
+      </div>
+    )
+  }
+
+  // If this is a synthetic model switch marker injected by the gateway
+  const displayKind = (message as any).display_kind
+  if (displayKind === 'model_switch' || isModelSwitchMarker(trimmed)) {
+    const modelNotice = parseModelSwitchNotice(trimmed)
+    return (
+      <div className="model-switch-notice-row" role="status" aria-label="Model changed">
+        <div className="model-switch-capsule">
+          <Cpu size={13} className="model-switch-icon" aria-hidden="true" />
+          <span>
+            Model switched to <strong>{modelNotice?.model || 'new model'}</strong>
+            {modelNotice?.provider ? ` (${modelNotice.provider})` : ''}
+          </span>
         </div>
       </div>
     )
@@ -1185,7 +1260,6 @@ export const MessageCard = memo(function MessageCard({ message, previousMessage,
   }
 
   // Internal runtime scaffolding (process completion signals and hidden system rows) are never rendered
-  const displayKind = (message as any).display_kind
   if (displayKind === 'hidden' || displayKind === 'process_complete' || displayKind === 'async_delegation_complete') return null
   if (/^\[IMPORTANT:\s*Background process\s+/i.test(textContent.trim()) && textContent.trim().endsWith(']')) return null
 
@@ -1279,74 +1353,81 @@ export const MessageCard = memo(function MessageCard({ message, previousMessage,
   const renderActionSheet = () => {
     if (!actionSheetOpen || typeof document === 'undefined') return null
 
-    const viewportH = typeof window !== 'undefined' ? window.innerHeight : 700
-    const viewportW = typeof window !== 'undefined' ? window.innerWidth : 380
+    const zoom = getUiZoomFactor()
+    const docEl = document.documentElement
+    const viewportH = typeof window !== 'undefined' ? (docEl.clientHeight || window.innerHeight) : 700
+    const viewportW = typeof window !== 'undefined' ? (docEl.clientWidth || window.innerWidth) : 380
 
-    // Detect if this bubble is long or partially scrolled off-screen
-    const isTall = Boolean(
-      bubbleRect &&
-      (bubbleRect.height > viewportH * 0.48 ||
-       bubbleRect.top < 64 ||
-       bubbleRect.top + bubbleRect.height > viewportH - 70)
-    )
+    // When CSS zoom is active on documentElement, getBoundingClientRect() returns
+    // zoomed visual viewport coordinates. Elements rendered in position: fixed inside
+    // the zoomed root would be scaled a second time. Divide by zoom to normalize.
+    const scaledRect = bubbleRect ? {
+      top: bubbleRect.top / zoom,
+      left: bubbleRect.left / zoom,
+      width: bubbleRect.width / zoom,
+      height: bubbleRect.height / zoom,
+    } : null
+
+    // Truly tall bubble: actual rendered height exceeds 48% of viewport
+    const isTall = Boolean(scaledRect && scaledRect.height > viewportH * 0.48)
 
     let bubblePositionStyle: React.CSSProperties = {}
     let pillsPositionStyle: React.CSSProperties = {}
 
-    if (bubbleRect) {
+    if (scaledRect) {
+      // Horizontal positioning in unscaled layout coordinate space:
+      // For assistant messages, align left edge of pills to left edge of bubble.
+      // For user messages, align right edge of pills flush to right edge of bubble.
+      const pillsEstimatedWidth = message.role === 'user' ? 186 : 96
+      const pillsLeft = message.role === 'user'
+        ? Math.max(16, Math.min(viewportW - pillsEstimatedWidth - 16, scaledRect.left + scaledRect.width - pillsEstimatedWidth))
+        : Math.max(16, Math.min(viewportW - pillsEstimatedWidth - 16, scaledRect.left))
+
       if (isTall) {
         // Long / overflowing message bubble:
         // Gracefully contain within a clean 48vh viewport window with a bottom fade mask
         const maxHeight = Math.min(Math.round(viewportH * 0.48), 380)
-        const top = Math.max(68, Math.min(bubbleRect.top, viewportH - maxHeight - 90))
+        const visibleHeight = Math.min(scaledRect.height, maxHeight)
+        const top = Math.max(68, Math.min(scaledRect.top, viewportH - visibleHeight - 70))
         bubblePositionStyle = {
           position: 'fixed',
           top: `${top}px`,
-          left: `${bubbleRect.left}px`,
-          width: `${bubbleRect.width}px`,
-          maxWidth: `${bubbleRect.width}px`,
-          maxHeight: `${maxHeight}px`,
+          left: `${scaledRect.left}px`,
+          width: `${scaledRect.width}px`,
+          maxWidth: `${scaledRect.width}px`,
+          height: `${visibleHeight}px`,
+          maxHeight: `${visibleHeight}px`,
           margin: 0,
         }
-        // Action pills float cleanly right below the clamped preview
+        // Action pills float cleanly right below the clamped preview (snug 8px gap)
         pillsPositionStyle = {
           position: 'fixed',
-          top: `${top + maxHeight + 10}px`,
-          ...(message.role === 'user' ? {
-            right: `${Math.max(16, viewportW - bubbleRect.left - bubbleRect.width)}px`,
-          } : {
-            left: `${Math.max(16, bubbleRect.left)}px`,
-          }),
+          top: `${top + visibleHeight + 8}px`,
+          left: `${pillsLeft}px`,
         }
       } else {
         // Standard in-place message:
-        const showPillsAbove = bubbleRect.top > 80
-        pillsPositionStyle = showPillsAbove ? {
-          position: 'fixed',
-          bottom: `${Math.max(16, viewportH - bubbleRect.top + 10)}px`,
-          ...(message.role === 'user' ? {
-            right: `${Math.max(16, viewportW - bubbleRect.left - bubbleRect.width)}px`,
-          } : {
-            left: `${Math.max(16, bubbleRect.left)}px`,
-          }),
-        } : {
-          position: 'fixed',
-          top: `${bubbleRect.top + bubbleRect.height + 10}px`,
-          ...(message.role === 'user' ? {
-            right: `${Math.max(16, viewportW - bubbleRect.left - bubbleRect.width)}px`,
-          } : {
-            left: `${Math.max(16, bubbleRect.left)}px`,
-          }),
-        }
-
         bubblePositionStyle = {
           position: 'fixed',
-          top: `${bubbleRect.top}px`,
-          left: `${bubbleRect.left}px`,
-          width: `${bubbleRect.width}px`,
-          maxWidth: `${bubbleRect.width}px`,
-          height: `${bubbleRect.height}px`,
+          top: `${scaledRect.top}px`,
+          left: `${scaledRect.left}px`,
+          width: `${scaledRect.width}px`,
+          maxWidth: `${scaledRect.width}px`,
+          height: `${scaledRect.height}px`,
           margin: 0,
+        }
+
+        // Determine whether to place pills above or below based on available space:
+        // If there is >= 54px above, place snug 8px above; otherwise snug 8px below.
+        const canShowAbove = scaledRect.top >= 54
+        const pillsTop = canShowAbove
+          ? Math.max(12, scaledRect.top - 46)
+          : scaledRect.top + scaledRect.height + 8
+
+        pillsPositionStyle = {
+          position: 'fixed',
+          top: `${pillsTop}px`,
+          left: `${pillsLeft}px`,
         }
       }
     }
