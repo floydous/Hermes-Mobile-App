@@ -38,6 +38,7 @@ import com.hermesagent.nativemobile.ui.screens.TaskListScreen
 import com.hermesagent.nativemobile.ui.theme.HermesBg
 import com.hermesagent.nativemobile.ui.theme.HermesTheme
 import com.hermesagent.nativemobile.util.RemoteLogger
+import androidx.compose.foundation.ExperimentalFoundationApi
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -67,6 +68,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MainAppScreen(
     authStore: HermesAuthStore,

@@ -22,6 +22,13 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.concurrent.TimeUnit
 
+data class GatewayProbeResult(
+    val version: String? = null,
+    val authRequired: Boolean = false,
+    val supportsPassword: Boolean = false,
+    val authFlows: List<String> = emptyList()
+)
+
 class InMemoryCookieJar : CookieJar {
     private val cookieStore = mutableMapOf<String, MutableList<Cookie>>()
 
