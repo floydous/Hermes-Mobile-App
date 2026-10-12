@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -55,10 +56,14 @@ fun MessageActionSheetModal(
     val context = LocalContext.current
     val isUser = message.role == "user"
 
+    BackHandler {
+        onDismiss()
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0x8C000000)) // Frosted blurred backdrop
+            .background(Color(0x8C000000))
             .pointerInput(Unit) {
                 detectTapGestures { onDismiss() }
             },
@@ -67,7 +72,10 @@ fun MessageActionSheetModal(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 24.dp),
+                .padding(horizontal = 24.dp)
+                .pointerInput(Unit) {
+                    detectTapGestures {}
+                },
             horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {

@@ -70,6 +70,13 @@ class MainActivity : ComponentActivity() {
 
         RemoteLogger.i("MainActivity", "Hermes Native Mobile starting up...")
 
+        val imageLoader = coil.ImageLoader.Builder(this)
+            .components {
+                add(coil.decode.SvgDecoder.Factory())
+            }
+            .build()
+        coil.Coil.setImageLoader(imageLoader)
+
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             RemoteLogger.e("CrashHandler", "Uncaught exception on thread ${thread.name}", throwable)
         }
