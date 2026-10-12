@@ -146,6 +146,17 @@ class HermesApiClient(
         }
     }
 
+    suspend fun deleteCronJob(jobId: String): Boolean = withContext(Dispatchers.IO) {
+        val encoded = URLEncoder.encode(jobId, "UTF-8")
+        val path = "/api/cron/jobs/$encoded"
+        try {
+            val request = buildRequest(path).delete().build()
+            client.newCall(request).execute().use { it.isSuccessful }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     suspend fun getCronJobs(): List<CronJob> = withContext(Dispatchers.IO) {
         val path = "/api/cron/jobs"
         try {

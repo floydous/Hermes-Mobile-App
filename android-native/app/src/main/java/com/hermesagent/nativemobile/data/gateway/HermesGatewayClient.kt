@@ -301,6 +301,31 @@ class HermesGatewayClient(
         )
     }
 
+    suspend fun updateProfileSoul(profileName: String, soul: String) {
+        val params = buildJsonObject {
+            put("name", profileName)
+            put("soul", soul)
+        }
+        call("profiles.configure", params)
+    }
+
+    suspend fun updateProfileDescription(profileName: String, description: String) {
+        val params = buildJsonObject {
+            put("name", profileName)
+            put("description", description)
+        }
+        call("profiles.configure", params)
+    }
+
+    suspend fun updateProfileModel(profileName: String, provider: String, model: String) {
+        val params = buildJsonObject {
+            put("name", profileName)
+            put("provider", provider)
+            put("model", model)
+        }
+        call("profiles.configure", params)
+    }
+
     suspend fun createSession(profile: String, title: String = "New chat"): com.hermesagent.nativemobile.data.model.LiveSession {
         val params = buildJsonObject {
             put("profile", profile)

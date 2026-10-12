@@ -128,6 +128,10 @@ fun MainAppScreen(
     var selectedSession by remember { mutableStateOf<LiveSession?>(null) }
     var isSettingsOpen by remember { mutableStateOf(false) }
     var showNewChatBotPicker by remember { mutableStateOf(false) }
+    var selectedProfileForSheet by remember { mutableStateOf<LiveProfile?>(null) }
+    var selectedTaskForDetail by remember { mutableStateOf<CronJob?>(null) }
+    var sessionToClear by remember { mutableStateOf<LiveSession?>(null) }
+    var lightboxImageUrl by remember { mutableStateOf<String?>(null) }
 
     val connectionStatus by repository.connectionStatus.collectAsState()
     val profiles by repository.profiles.collectAsState()
@@ -149,8 +153,11 @@ fun MainAppScreen(
     }
 
     // Android Hardware Back Navigation Hierarchy
-    BackHandler(enabled = isSettingsOpen || selectedSession != null) {
+    BackHandler(enabled = isSettingsOpen || selectedSession != null || selectedProfileForSheet != null || selectedTaskForDetail != null || lightboxImageUrl != null) {
         when {
+            lightboxImageUrl != null -> lightboxImageUrl = null
+            selectedProfileForSheet != null -> selectedProfileForSheet = null
+            selectedTaskForDetail != null -> selectedTaskForDetail = null
             selectedSession != null -> selectedSession = null
             isSettingsOpen -> isSettingsOpen = false
         }
@@ -167,6 +174,32 @@ fun MainAppScreen(
                 .background(com.hermesagent.nativemobile.ui.theme.getBackgroundColor(currentTheme))
         ) {
             when {
+                // Lightbox Image View
+                lightboxImageUrl != null -> {
+                    com.hermesagent.nativemobile.ui.components.ImageLightboxModal(
+                        imageUrl = lightboxImageUrl!!,
+                        onClose = { lightboxImageUrl = null }
+                    )
+                }
+
+                // Bot Profile Sheet (SOUL, Model, Capabilities)
+                selectedProfileForSheet != null -> {
+                    com.hermesagent.nativemobile.ui.screens.BotProfileSheet(
+                        profile = selectedProfileForSheet!!,
+                        repository = repository,
+                        onClose = { selectedProfileForSheet = null }
+                    )
+                }
+
+                // Task Detail & Execution Sheet
+                selectedTaskForDetail != null -> {
+                    com.hermesagent.nativemobile.ui.screens.TaskDetailSheet(
+                        task = selectedTaskForDetail!!,
+                        repository = repository,
+                        onBack = { selectedTaskForDetail = null }
+                    )
+                }
+
                 // 1. Dedicated Settings & Connection Screen
                 isSettingsOpen -> {
                     SettingsScreen(
@@ -191,6 +224,7 @@ fun MainAppScreen(
                     pendingClarify = if (pendingClarify?.sessionId == session.id) pendingClarify else null,
                     profile = currentProfile,
                     onBackClick = { selectedSession = null },
+                    onOpenProfile = { selectedProfileForSheet = currentProfile },
                         onSendMessage = { prompt, rowId ->
                             scope.launch {
                                 try {
@@ -201,9 +235,7 @@ fun MainAppScreen(
                             }
                         },
                         onClearChat = {
-                            scope.launch {
-                                repository.clearSession(session.id, session.profile)
-                            }
+                            sessionToClear = session
                         },
                         onClarifySubmit = { answers ->
                             scope.launch {
@@ -288,7 +320,7 @@ fun MainAppScreen(
                                 2 -> {
                                     TaskListScreen(
                                         tasks = cronJobs,
-                                        onTaskClick = { /* Task details */ },
+                                        onTaskClick = { task -> selectedTaskForDetail = task },
                                         onTriggerTask = { job ->
                                             scope.launch {
                                                 repository.triggerTask(job.jobId, job.profile)
@@ -362,6 +394,20 @@ fun MainAppScreen(
                         }
                     }
                 }
+            }
+
+            // Clear Chat Confirmation Modal Dialog
+            if (sessionToClear != null) {
+                com.hermesagent.nativemobile.ui.components.ClearChatDialog(
+                    onDismiss = { sessionToClear = null },
+                    onConfirmClear = {
+                        val target = sessionToClear!!
+                        scope.launch {
+                            repository.clearSession(target.id, target.profile)
+                        }
+                        sessionToClear = null
+                    }
+                )
             }
         }
     }

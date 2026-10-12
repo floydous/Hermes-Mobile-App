@@ -290,6 +290,27 @@ class HermesRepository(
         _pendingClarify.value = null
     }
 
+    suspend fun saveProfileSoul(profileName: String, soul: String) {
+        gatewayClient.updateProfileSoul(profileName, soul)
+        refresh()
+    }
+
+    suspend fun saveProfileDescription(profileName: String, description: String) {
+        gatewayClient.updateProfileDescription(profileName, description)
+        refresh()
+    }
+
+    suspend fun saveProfileModel(profileName: String, provider: String, model: String) {
+        gatewayClient.updateProfileModel(profileName, provider, model)
+        refresh()
+    }
+
+    suspend fun deleteTask(jobId: String): Boolean {
+        val success = apiClient.deleteCronJob(jobId)
+        refresh()
+        return success
+    }
+
     suspend fun triggerTask(jobId: String, profile: String? = null): Boolean {
         val success = apiClient.triggerCronJob(jobId, profile)
         refresh()

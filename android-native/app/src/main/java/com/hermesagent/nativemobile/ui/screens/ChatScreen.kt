@@ -71,6 +71,7 @@ fun ChatScreen(
     pendingClarify: ClarifyRequest?,
     profile: com.hermesagent.nativemobile.data.model.LiveProfile? = null,
     onBackClick: () -> Unit,
+    onOpenProfile: (() -> Unit)? = null,
     onSendMessage: (prompt: String, rowId: Long?) -> Unit,
     onClearChat: () -> Unit,
     onClarifySubmit: (Map<String, String>) -> Unit,
@@ -122,7 +123,11 @@ fun ChatScreen(
                     size = 36.dp
                 )
 
-                Column {
+                Column(
+                    modifier = Modifier.clickable(enabled = onOpenProfile != null) {
+                        onOpenProfile?.invoke()
+                    }
+                ) {
                     Text(
                         text = session.title.ifBlank { profile?.displayName ?: session.profile },
                         fontSize = 16.sp,
