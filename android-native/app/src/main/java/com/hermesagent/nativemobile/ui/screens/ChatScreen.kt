@@ -48,6 +48,8 @@ import com.hermesagent.nativemobile.data.model.LiveSession
 import com.hermesagent.nativemobile.data.repository.ActiveTurn
 import com.hermesagent.nativemobile.ui.components.ChatBubble
 import com.hermesagent.nativemobile.ui.components.ClarifyCard
+import com.hermesagent.nativemobile.ui.components.SmoothStreamingText
+import com.hermesagent.nativemobile.ui.theme.AccentAmber
 import com.hermesagent.nativemobile.ui.theme.AccentIndigo
 import com.hermesagent.nativemobile.ui.theme.HermesBg
 import com.hermesagent.nativemobile.ui.theme.HermesBorder
@@ -68,13 +70,14 @@ fun ChatScreen(
     pendingClarify: ClarifyRequest?,
     profile: com.hermesagent.nativemobile.data.model.LiveProfile? = null,
     onBackClick: () -> Unit,
-    onSendMessage: (String) -> Unit,
+    onSendMessage: (prompt: String, rowId: Long?) -> Unit,
     onClearChat: () -> Unit,
     onClarifySubmit: (Map<String, String>) -> Unit,
     onClarifySkip: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var inputText by remember { mutableStateOf("") }
+    var editingRowId by remember { mutableStateOf<Long?>(null) }
     val listState = rememberLazyListState()
 
     // Auto-scroll on new message
@@ -161,46 +164,49 @@ fun ChatScreen(
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             items(messages, key = { it.id }) { msg ->
-                ChatBubble(message = msg)
+                ChatBubble(
+                    message = msg,
+                    onEditMessage = { msgToEdit ->
+                        inputText = msgToEdit.content
+                        editingRowId = msgToEdit.rowId
+                    }
+                )
             }
 
-            // In-flight streaming response
+            // In-flight streaming response with smooth fade-in
             if (activeTurn != null && activeTurn.streamingText.isNotBlank()) {
                 item(key = "streaming-active") {
-                    ChatBubble(
-                        message = LiveMessage(
-                            id = 0L,
-                            role = "assistant",
-                            content = activeTurn.streamingText
-                        )
-                    )
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth(0.92f)
+                            .padding(horizontal = 16.dp, vertical = 4.dp)
+                    ) {
+                        SmoothStreamingText(streamingText = activeTurn.streamingText)
+                    }
                 }
             }
 
-            // Active thinking indicator
+            // Active thinking indicator with pulsing status dot
             if (activeTurn != null && activeTurn.streamingText.isBlank()) {
                 item(key = "thinking-indicator") {
                     Row(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                            .padding(horizontal = 16.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(9999.dp))
-                                .background(HermesSurface)
-                                .border(1.dp, HermesBorder, RoundedCornerShape(9999.dp))
-                                .padding(horizontal = 12.dp, vertical = 6.dp)
-                        ) {
-                            Text(
-                                text = activeTurn.statusText,
-                                fontSize = 13.sp,
-                                color = AccentIndigo,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(AccentAmber)
+                        )
+                        Text(
+                            text = activeTurn.statusText,
+                            fontSize = 13.sp,
+                            color = AccentAmber,
+                            fontWeight = FontWeight.Medium
+                        )
                     }
                 }
             }
@@ -268,8 +274,9 @@ fun ChatScreen(
                         .clickable(enabled = inputText.isNotBlank()) {
                             val prompt = inputText.trim()
                             if (prompt.isNotBlank()) {
-                                onSendMessage(prompt)
+                                onSendMessage(prompt, editingRowId)
                                 inputText = ""
+                                editingRowId = null
                             }
                         },
                     contentAlignment = Alignment.Center

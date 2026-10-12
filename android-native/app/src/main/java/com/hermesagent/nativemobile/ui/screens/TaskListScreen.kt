@@ -31,6 +31,7 @@ import com.hermesagent.nativemobile.ui.theme.HermesBg
 import com.hermesagent.nativemobile.ui.theme.HermesBorder
 import com.hermesagent.nativemobile.ui.theme.HermesMuted
 import com.hermesagent.nativemobile.ui.theme.HermesPanel
+import com.hermesagent.nativemobile.ui.theme.HermesSurface
 import com.hermesagent.nativemobile.ui.theme.HermesText
 
 @Composable

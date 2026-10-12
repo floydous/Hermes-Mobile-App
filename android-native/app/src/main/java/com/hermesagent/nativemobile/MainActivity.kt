@@ -140,10 +140,10 @@ fun MainAppScreen(
                     pendingClarify = if (pendingClarify?.sessionId == session.id) pendingClarify else null,
                     profile = currentProfile,
                     onBackClick = { selectedSession = null },
-                        onSendMessage = { prompt ->
+                        onSendMessage = { prompt, rowId ->
                             scope.launch {
                                 try {
-                                    repository.submitMessage(session, prompt)
+                                    repository.submitMessage(session, prompt, rowId)
                                 } catch (e: Exception) {
                                     RemoteLogger.e("ChatScreen", "Failed to submit message", e)
                                 }

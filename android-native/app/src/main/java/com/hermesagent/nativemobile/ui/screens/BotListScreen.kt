@@ -1,6 +1,11 @@
 package com.hermesagent.nativemobile.ui.screens
 
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
@@ -13,6 +18,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -21,6 +27,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -31,6 +38,7 @@ import androidx.compose.ui.unit.sp
 import com.hermesagent.nativemobile.data.model.LiveProfile
 import com.hermesagent.nativemobile.data.model.LiveSession
 import com.hermesagent.nativemobile.data.repository.ActiveTurn
+import com.hermesagent.nativemobile.ui.components.BotAvatar
 import com.hermesagent.nativemobile.ui.theme.AccentAmber
 import com.hermesagent.nativemobile.ui.theme.AccentIndigo
 import com.hermesagent.nativemobile.ui.theme.HermesBg
@@ -98,7 +106,34 @@ fun BotListScreen(
 }
 
 @Composable
-fun BotRow(
+fun LiveWaveIndicator(modifier: Modifier = Modifier) {
+    val infiniteTransition = rememberInfiniteTransition(label = "wave")
+    val dot1 by infiniteTransition.animateFloat(
+        initialValue = 0f, targetValue = -3f,
+        animationSpec = infiniteRepeatable(tween(400, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "dot1"
+    )
+    val dot2 by infiniteTransition.animateFloat(
+        initialValue = 0f, targetValue = -3f,
+        animationSpec = infiniteRepeatable(tween(400, delayMillis = 150, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "dot2"
+    )
+    val dot3 by infiniteTransition.animateFloat(
+        initialValue = 0f, targetValue = -3f,
+        animationSpec = infiniteRepeatable(tween(400, delayMillis = 300, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "dot3"
+    )
+
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(2.5.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(modifier = Modifier.size(3.5.dp).offset(y = dot1.dp).clip(CircleShape).background(AccentIndigo))
+        Box(modifier = Modifier.size(3.5.dp).offset(y = dot2.dp).clip(CircleShape).background(AccentIndigo))
+        Box(modifier = Modifier.size(3.5.dp).offset(y = dot3.dp).clip(CircleShape).background(AccentIndigo))
+    }
+}
     profile: LiveProfile,
     session: LiveSession?,
     isWorking: Boolean,
@@ -139,18 +174,24 @@ fun BotRow(
                     color = HermesText
                 )
 
-                // Working phrase badge
+                // Working phrase badge with live wave dots
                 AnimatedVisibility(
                     visible = isWorking,
                     enter = fadeIn(),
                     exit = fadeOut()
                 ) {
-                    Text(
-                        text = statusText,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = AccentIndigo
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        LiveWaveIndicator()
+                        Text(
+                            text = statusText,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = AccentIndigo
+                        )
+                    }
                 }
             }
 
