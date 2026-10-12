@@ -25,6 +25,7 @@ import com.hermesagent.nativemobile.ui.theme.Zinc100
 import com.hermesagent.nativemobile.ui.theme.Zinc400
 import com.hermesagent.nativemobile.ui.theme.Zinc800
 import com.hermesagent.nativemobile.ui.theme.Zinc850
+import com.hermesagent.nativemobile.util.EnvelopeCleaner
 
 @Composable
 fun ChatBubble(

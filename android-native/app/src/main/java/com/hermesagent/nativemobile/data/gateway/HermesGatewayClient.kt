@@ -345,6 +345,9 @@ class HermesGatewayClient(
                 }
             })
         }
+        respondToServerRequest(requestId, resultPayload)
+    }
+
     fun getResolvedSessionId(sessionId: String): String {
         return resolvedSessions[sessionId] ?: sessionId
     }
