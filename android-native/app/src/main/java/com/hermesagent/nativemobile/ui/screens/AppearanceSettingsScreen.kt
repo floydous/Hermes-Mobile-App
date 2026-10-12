@@ -48,6 +48,7 @@ import com.hermesagent.nativemobile.ui.theme.HermesSecondary
 import com.hermesagent.nativemobile.ui.theme.HermesSurface
 import com.hermesagent.nativemobile.ui.theme.HermesText
 import com.hermesagent.nativemobile.ui.theme.White
+import com.hermesagent.nativemobile.ui.theme.Black
 import kotlin.math.roundToInt
 
 data class ThemeOption(
