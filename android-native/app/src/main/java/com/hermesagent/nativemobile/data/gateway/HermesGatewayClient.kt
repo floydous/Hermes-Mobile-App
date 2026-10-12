@@ -316,6 +316,35 @@ class HermesGatewayClient(
         call("session.interrupt", params, timeoutMs = 5000)
     }
 
+    fun respondToServerRequest(id: String, result: JsonElement? = null, error: JsonRpcError? = null) {
+        val socket = webSocket ?: return
+        val frame = if (error != null) {
+            buildJsonObject {
+                put("jsonrpc", "2.0")
+                put("id", id)
+                put("error", buildJsonObject {
+                    put("code", error.code)
+                    put("message", error.message)
+                })
+            }
+        } else {
+            buildJsonObject {
+                put("jsonrpc", "2.0")
+                put("id", id)
+                put("result", result ?: buildJsonObject {})
+            }
+        }
+        socket.send(json.encodeToString(JsonElement.serializer(), frame) + "\n")
+    }
+
+    suspend fun answerClarify(requestId: String, answers: Map<String, String>) {
+        val resultPayload = buildJsonObject {
+            put("answers", buildJsonObject {
+                for ((k, v) in answers) {
+                    put(k, v)
+                }
+            })
+        }
     fun getResolvedSessionId(sessionId: String): String {
         return resolvedSessions[sessionId] ?: sessionId
     }

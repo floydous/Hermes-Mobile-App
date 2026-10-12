@@ -42,10 +42,12 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.hermesagent.nativemobile.data.model.ClarifyRequest
 import com.hermesagent.nativemobile.data.model.LiveMessage
 import com.hermesagent.nativemobile.data.model.LiveSession
 import com.hermesagent.nativemobile.data.repository.ActiveTurn
 import com.hermesagent.nativemobile.ui.components.ChatBubble
+import com.hermesagent.nativemobile.ui.components.ClarifyCard
 import com.hermesagent.nativemobile.ui.theme.AccentAmber
 import com.hermesagent.nativemobile.ui.theme.White
 import com.hermesagent.nativemobile.ui.theme.Zinc100
@@ -60,9 +62,12 @@ fun ChatScreen(
     session: LiveSession,
     messages: List<LiveMessage>,
     activeTurn: ActiveTurn?,
+    pendingClarify: ClarifyRequest?,
     onBackClick: () -> Unit,
     onSendMessage: (String) -> Unit,
     onClearChat: () -> Unit,
+    onClarifySubmit: (Map<String, String>) -> Unit,
+    onClarifySkip: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var inputText by remember { mutableStateOf("") }
@@ -178,62 +183,76 @@ fun ChatScreen(
             }
         }
 
-        // Bottom Composer Bar
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
+        // Bottom Action Area: Either Clarify Card or Text Composer
+        if (pendingClarify != null) {
             Box(
                 modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(Zinc850)
-                    .border(1.dp, Zinc800, RoundedCornerShape(24.dp))
+                    .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
-                if (inputText.isBlank()) {
-                    Text(
-                        text = "Message Hermes…",
-                        fontSize = 15.sp,
-                        color = Zinc400
-                    )
-                }
-                BasicTextField(
-                    value = inputText,
-                    onValueChange = { inputText = it },
-                    textStyle = TextStyle(
-                        fontSize = 15.sp,
-                        color = White
-                    ),
-                    cursorBrush = SolidColor(White),
-                    modifier = Modifier.fillMaxWidth()
+                ClarifyCard(
+                    request = pendingClarify,
+                    onSubmit = onClarifySubmit,
+                    onSkip = onClarifySkip
                 )
             }
-
-            // Send Button
-            Box(
+        } else {
+            Row(
                 modifier = Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(if (inputText.isNotBlank()) White else Zinc800)
-                    .clickable(enabled = inputText.isNotBlank()) {
-                        val prompt = inputText.trim()
-                        if (prompt.isNotBlank()) {
-                            onSendMessage(prompt)
-                            inputText = ""
-                        }
-                    },
-                contentAlignment = Alignment.Center
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.Send,
-                    contentDescription = "Send",
-                    tint = if (inputText.isNotBlank()) Zinc900 else Zinc700,
-                    modifier = Modifier.size(20.dp)
-                )
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(Zinc850)
+                        .border(1.dp, Zinc800, RoundedCornerShape(24.dp))
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                ) {
+                    if (inputText.isBlank()) {
+                        Text(
+                            text = "Message Hermes…",
+                            fontSize = 15.sp,
+                            color = Zinc400
+                        )
+                    }
+                    BasicTextField(
+                        value = inputText,
+                        onValueChange = { inputText = it },
+                        textStyle = TextStyle(
+                            fontSize = 15.sp,
+                            color = White
+                        ),
+                        cursorBrush = SolidColor(White),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                // Send Button
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(if (inputText.isNotBlank()) White else Zinc800)
+                        .clickable(enabled = inputText.isNotBlank()) {
+                            val prompt = inputText.trim()
+                            if (prompt.isNotBlank()) {
+                                onSendMessage(prompt)
+                                inputText = ""
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.Send,
+                        contentDescription = "Send",
+                        tint = if (inputText.isNotBlank()) Zinc900 else Zinc700,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
         }
     }

@@ -82,8 +82,9 @@ fun ChatBubble(
                     }
                 }
 
+                val display = EnvelopeCleaner.clean(message.displayContent ?: message.content)
                 Text(
-                    text = message.displayContent ?: message.content,
+                    text = display,
                     fontSize = 15.sp,
                     color = Zinc100,
                     lineHeight = 22.sp

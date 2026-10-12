@@ -50,6 +50,9 @@ class HermesRepository(
     private val _currentSessionMessages = MutableStateFlow<List<LiveMessage>>(emptyList())
     val currentSessionMessages: StateFlow<List<LiveMessage>> = _currentSessionMessages.asStateFlow()
 
+    private val _pendingClarify = MutableStateFlow<ClarifyRequest?>(null)
+    val pendingClarify: StateFlow<ClarifyRequest?> = _pendingClarify.asStateFlow()
+
     private val messageCache = ConcurrentHashMap<String, List<LiveMessage>>()
     private val inFlightTurns = ConcurrentHashMap.newKeySet<String>()
 
@@ -138,7 +141,15 @@ class HermesRepository(
 
     private fun handleGatewayEvent(event: GatewayEvent) {
         val sid = event.sessionId ?: return
-        if (event.type == "message.delta") {
+        if (event.type == "request.clarify" || event.type == "clarify") {
+            val reqId = event.messageId ?: "cr-${System.currentTimeMillis()}"
+            val questions = event.payload["questions"]
+            // Route clarify request
+            _pendingClarify.value = ClarifyRequest(
+                requestId = reqId,
+                sessionId = sid
+            )
+        } else if (event.type == "message.delta") {
             val text = event.payload["text"]?.jsonPrimitive?.contentOrNull ?: ""
             val existing = _activeTurns.value.values.find { it.sessionId == sid }
             if (existing != null) {
@@ -163,6 +174,16 @@ class HermesRepository(
                 } catch (_: Exception) {}
             }
         }
+    }
+
+    suspend fun submitClarifyAnswer(requestId: String, answers: Map<String, String>) {
+        gatewayClient.answerClarify(requestId, answers)
+        _pendingClarify.value = null
+    }
+
+    suspend fun skipClarify(requestId: String) {
+        gatewayClient.answerClarify(requestId, emptyMap())
+        _pendingClarify.value = null
     }
 
     suspend fun clearSession(sessionId: String, profile: String) {

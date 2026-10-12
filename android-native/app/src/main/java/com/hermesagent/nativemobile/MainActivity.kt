@@ -71,6 +71,7 @@ fun MainAppScreen(repository: HermesRepository) {
     val cronJobs by repository.cronJobs.collectAsState()
     val activeTurns by repository.activeTurns.collectAsState()
     val messages by repository.currentSessionMessages.collectAsState()
+    val pendingClarify by repository.pendingClarify.collectAsState()
 
     LaunchedEffect(Unit) {
         try {
@@ -105,6 +106,7 @@ fun MainAppScreen(repository: HermesRepository) {
                     session = session,
                     messages = messages,
                     activeTurn = turn,
+                    pendingClarify = if (pendingClarify?.sessionId == session.id) pendingClarify else null,
                     onBackClick = { selectedSession = null },
                     onSendMessage = { prompt ->
                         scope.launch {
@@ -114,6 +116,20 @@ fun MainAppScreen(repository: HermesRepository) {
                     onClearChat = {
                         scope.launch {
                             repository.clearSession(session.id, session.profile)
+                        }
+                    },
+                    onClarifySubmit = { answers ->
+                        scope.launch {
+                            pendingClarify?.let { req ->
+                                repository.submitClarifyAnswer(req.requestId, answers)
+                            }
+                        }
+                    },
+                    onClarifySkip = {
+                        scope.launch {
+                            pendingClarify?.let { req ->
+                                repository.skipClarify(req.requestId)
+                            }
                         }
                     }
                 )
