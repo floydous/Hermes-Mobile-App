@@ -1,11 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- Allow cleartext communication exclusively for private LAN and mesh tunnel IP ranges -->
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="true">10.0.0.130</domain>
-        <domain includeSubdomains="true">127.0.0.1</domain>
-        <domain includeSubdomains="true">100.64.0.0</domain>
-    </domain-config>
-    <!-- All other internet connections strictly enforce HTTPS -->
-    <base-config cleartextTrafficPermitted="false" />
+    <!-- Allow cleartext HTTP communication for LAN, mesh tunnels, and local dev -->
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
 </network-security-config>

@@ -1,6 +1,8 @@
 package com.hermesagent.nativemobile.data.repository
 
 import com.hermesagent.nativemobile.data.api.HermesApiClient
+import com.hermesagent.nativemobile.data.auth.HermesAuthClient
+import com.hermesagent.nativemobile.data.auth.HermesAuthStore
 import com.hermesagent.nativemobile.data.gateway.GatewayEvent
 import com.hermesagent.nativemobile.data.gateway.HermesGatewayClient
 import com.hermesagent.nativemobile.data.gateway.SubmitPromptOptions
@@ -23,15 +25,15 @@ import java.util.concurrent.ConcurrentHashMap
 data class ActiveTurn(
     val sessionId: String,
     val profile: String,
-    val status: String = "thinking", // "thinking", "waiting", "done"
+    val status: String = "thinking",
     val statusText: String = "Thinking…",
     val streamingText: String = "",
     val startedAt: Long = System.currentTimeMillis()
 )
 
 class HermesRepository(
-    private val apiClient: HermesApiClient,
-    private val gatewayClient: HermesGatewayClient
+    private val authStore: HermesAuthStore,
+    private val authClient: HermesAuthClient
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -53,10 +55,56 @@ class HermesRepository(
     private val _pendingClarify = MutableStateFlow<ClarifyRequest?>(null)
     val pendingClarify: StateFlow<ClarifyRequest?> = _pendingClarify.asStateFlow()
 
+    private val _connectionStatus = MutableStateFlow("disconnected") // "connecting", "connected", "disconnected"
+    val connectionStatus: StateFlow<String> = _connectionStatus.asStateFlow()
+
     private val messageCache = ConcurrentHashMap<String, List<LiveMessage>>()
     private val inFlightTurns = ConcurrentHashMap.newKeySet<String>()
 
+    private var apiClient: HermesApiClient = createApiClient()
+    private var gatewayClient: HermesGatewayClient = createGatewayClient()
+
     init {
+        setupGatewayListener()
+    }
+
+    private fun getAuthHeaders(): Map<String, String> {
+        val headers = mutableMapOf<String, String>()
+        val token = authStore.getAccessToken()
+        val basic = authStore.getBasicAuthHeader()
+        if (!token.isNullOrBlank()) {
+            headers["Authorization"] = "Bearer $token"
+        } else if (!basic.isNullOrBlank()) {
+            headers["Authorization"] = basic
+        }
+        return headers
+    }
+
+    private fun createApiClient(): HermesApiClient {
+        return HermesApiClient(
+            endpointProvider = { authStore.getEndpoint() },
+            authHeadersProvider = { getAuthHeaders() }
+        )
+    }
+
+    private fun createGatewayClient(): HermesGatewayClient {
+        return HermesGatewayClient(
+            endpointProvider = { authStore.getEndpoint() },
+            authHeadersProvider = { getAuthHeaders() },
+            ticketProvider = {
+                val ep = authStore.getEndpoint()
+                val token = authStore.getAccessToken() ?: authStore.getBasicAuthHeader()
+                if (!token.isNullOrBlank()) {
+                    authClient.mintWsTicket(ep, token)
+                } else {
+                    val sessionToken = authClient.extractSessionToken(ep)
+                    if (!sessionToken.isNullOrBlank()) "token:$sessionToken" else null
+                }
+            }
+        )
+    }
+
+    private fun setupGatewayListener() {
         scope.launch {
             gatewayClient.events.collect { event ->
                 handleGatewayEvent(event)
@@ -64,21 +112,65 @@ class HermesRepository(
         }
     }
 
+    suspend fun updateEndpoint(newEndpoint: String, username: String? = null, password: String? = null) {
+        authStore.setEndpoint(newEndpoint)
+        if (!username.isNullOrBlank() && !password.isNullOrBlank()) {
+            try {
+                val token = authClient.loginWithPassword(newEndpoint, username, password)
+                if (token.startsWith("Basic ")) {
+                    authStore.setBasicAuthHeader(token)
+                } else {
+                    authStore.setAccessToken(token)
+                }
+            } catch (_: Exception) {}
+        }
+        apiClient = createApiClient()
+        gatewayClient = createGatewayClient()
+        setupGatewayListener()
+        refresh()
+    }
+
     suspend fun refresh() {
+        _connectionStatus.value = "connecting"
         try {
-            val profs = apiClient.getProfiles()
-            _profiles.value = profs
+            // 1. Connect WebSocket gateway
+            gatewayClient.connect()
+            _connectionStatus.value = "connected"
+        } catch (_: Exception) {
+            // Gateway connect failed or still attempting
+        }
+
+        // 2. Fetch Profiles via WebSocket RPC profiles.list (with HTTP /api/profiles fallback)
+        try {
+            val profs = try {
+                gatewayClient.listProfiles()
+            } catch (_: Exception) {
+                apiClient.getProfiles()
+            }
+            if (profs.isNotEmpty()) {
+                _profiles.value = profs
+                _connectionStatus.value = "connected"
+            }
         } catch (_: Exception) {}
 
+        // 3. Fetch Sessions via REST
         try {
             val sess = apiClient.getSessions()
             _sessions.value = sess
+            if (sess.isNotEmpty()) {
+                _connectionStatus.value = "connected"
+            }
         } catch (_: Exception) {}
 
+        // 4. Fetch Cron Jobs via REST
         try {
             val jobs = apiClient.getCronJobs()
             _cronJobs.value = jobs
         } catch (_: Exception) {}
+
+        if (_profiles.value.isEmpty() && _sessions.value.isEmpty()) {
+            _connectionStatus.value = "disconnected"
+        }
     }
 
     suspend fun loadSession(session: LiveSession): List<LiveMessage> {
@@ -90,7 +182,6 @@ class HermesRepository(
         val remote = apiClient.getSessionMessages(session.id)
         val isTurnActive = inFlightTurns.contains(session.id) || inFlightTurns.contains(session.profile)
 
-        // Strict Mobile Rule: If turn is active and remote is empty, retain cached local messages
         val finalMessages = if (remote.isEmpty() && isTurnActive && cached != null && cached.isNotEmpty()) {
             cached
         } else {
@@ -111,12 +202,10 @@ class HermesRepository(
             local = true
         )
 
-        // Optimistically commit message to current transcript
         val updated = _currentSessionMessages.value + userMsg
         _currentSessionMessages.value = updated
         messageCache[session.id] = updated
 
-        // Mark turn as active
         inFlightTurns.add(session.id)
         inFlightTurns.add(session.profile)
 
@@ -143,8 +232,6 @@ class HermesRepository(
         val sid = event.sessionId ?: return
         if (event.type == "request.clarify" || event.type == "clarify") {
             val reqId = event.messageId ?: "cr-${System.currentTimeMillis()}"
-            val questions = event.payload["questions"]
-            // Route clarify request
             _pendingClarify.value = ClarifyRequest(
                 requestId = reqId,
                 sessionId = sid
@@ -163,7 +250,6 @@ class HermesRepository(
                 inFlightTurns.remove(existing.profile)
                 _activeTurns.value = _activeTurns.value - existing.profile
             }
-            // Background reload of committed messages
             scope.launch {
                 try {
                     val messages = apiClient.getSessionMessages(sid)

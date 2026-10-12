@@ -19,16 +19,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hermesagent.nativemobile.data.model.ClarifyRequest
+import com.hermesagent.nativemobile.ui.theme.HermesBorder
+import com.hermesagent.nativemobile.ui.theme.HermesMuted
+import com.hermesagent.nativemobile.ui.theme.HermesPanel
+import com.hermesagent.nativemobile.ui.theme.HermesSecondary
+import com.hermesagent.nativemobile.ui.theme.HermesSurface
+import com.hermesagent.nativemobile.ui.theme.HermesText
 import com.hermesagent.nativemobile.ui.theme.White
-import com.hermesagent.nativemobile.ui.theme.Zinc100
-import com.hermesagent.nativemobile.ui.theme.Zinc400
-import com.hermesagent.nativemobile.ui.theme.Zinc800
-import com.hermesagent.nativemobile.ui.theme.Zinc850
-import com.hermesagent.nativemobile.ui.theme.Zinc900
 
 @Composable
 fun ClarifyCard(
@@ -42,9 +45,10 @@ fun ClarifyCard(
     Column(
         modifier = modifier
             .fillMaxWidth()
+            .shadow(4.dp, RoundedCornerShape(20.dp), ambientColor = Color(0x10000000), spotColor = Color(0x10000000))
             .clip(RoundedCornerShape(20.dp))
-            .background(Zinc900)
-            .border(1.dp, Zinc800, RoundedCornerShape(20.dp))
+            .background(HermesPanel)
+            .border(1.dp, HermesBorder, RoundedCornerShape(20.dp))
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
@@ -57,13 +61,13 @@ fun ClarifyCard(
                 text = "Clarification Needed",
                 fontSize = 14.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = White
+                color = HermesText
             )
 
             Text(
                 text = "Skip",
                 fontSize = 13.sp,
-                color = Zinc400,
+                color = HermesMuted,
                 modifier = Modifier
                     .clickable { onSkip() }
                     .padding(4.dp)
@@ -75,7 +79,7 @@ fun ClarifyCard(
                 Text(
                     text = q.question,
                     fontSize = 14.sp,
-                    color = Zinc100
+                    color = HermesText
                 )
 
                 q.choices?.forEach { choice ->
@@ -84,8 +88,8 @@ fun ClarifyCard(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(12.dp))
-                            .background(if (isSelected) Zinc800 else Zinc850)
-                            .border(1.dp, if (isSelected) White else Zinc800, RoundedCornerShape(12.dp))
+                            .background(if (isSelected) HermesSurface else HermesPanel)
+                            .border(1.dp, if (isSelected) HermesText else HermesBorder, RoundedCornerShape(12.dp))
                             .clickable {
                                 selectedChoices = selectedChoices + (q.qid to choice)
                             }
@@ -94,7 +98,8 @@ fun ClarifyCard(
                         Text(
                             text = choice,
                             fontSize = 13.sp,
-                            color = if (isSelected) White else Zinc400
+                            fontWeight = if (isSelected) FontWeight.Medium else FontWeight.Normal,
+                            color = if (isSelected) HermesText else HermesSecondary
                         )
                     }
                 }
@@ -105,7 +110,7 @@ fun ClarifyCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(14.dp))
-                .background(White)
+                .background(HermesText)
                 .clickable { onSubmit(selectedChoices) }
                 .padding(vertical = 12.dp),
             contentAlignment = Alignment.Center
@@ -114,7 +119,7 @@ fun ClarifyCard(
                 text = "Continue",
                 fontSize = 14.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = Zinc900
+                color = White
             )
         }
     }

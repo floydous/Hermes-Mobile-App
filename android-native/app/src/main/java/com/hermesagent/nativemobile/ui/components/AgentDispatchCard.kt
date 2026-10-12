@@ -1,6 +1,5 @@
 package com.hermesagent.nativemobile.ui.components
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -27,17 +26,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.hermesagent.nativemobile.data.model.LiveMessage
 import com.hermesagent.nativemobile.ui.theme.AccentGreen
-import com.hermesagent.nativemobile.ui.theme.White
-import com.hermesagent.nativemobile.ui.theme.Zinc100
-import com.hermesagent.nativemobile.ui.theme.Zinc400
-import com.hermesagent.nativemobile.ui.theme.Zinc800
-import com.hermesagent.nativemobile.ui.theme.Zinc850
-import com.hermesagent.nativemobile.ui.theme.Zinc900
+import com.hermesagent.nativemobile.ui.theme.HermesBorder
+import com.hermesagent.nativemobile.ui.theme.HermesMuted
+import com.hermesagent.nativemobile.ui.theme.HermesPanel
+import com.hermesagent.nativemobile.ui.theme.HermesSecondary
+import com.hermesagent.nativemobile.ui.theme.HermesSurface
+import com.hermesagent.nativemobile.ui.theme.HermesText
 
 @Composable
 fun AgentDispatchCard(
@@ -53,9 +53,10 @@ fun AgentDispatchCard(
     Column(
         modifier = modifier
             .fillMaxWidth()
+            .shadow(2.dp, RoundedCornerShape(16.dp), ambientColor = Color(0x0A000000), spotColor = Color(0x0A000000))
             .clip(RoundedCornerShape(16.dp))
-            .background(Zinc900)
-            .border(1.dp, Zinc850, RoundedCornerShape(16.dp))
+            .background(HermesPanel)
+            .border(1.dp, HermesBorder, RoundedCornerShape(16.dp))
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
@@ -75,14 +76,15 @@ fun AgentDispatchCard(
                     modifier = Modifier
                         .size(32.dp)
                         .clip(CircleShape)
-                        .background(Zinc800),
+                        .background(HermesSurface)
+                        .border(1.dp, HermesBorder, CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = agentHandle.take(1).uppercase(),
                         fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = White
+                        color = HermesText
                     )
                 }
 
@@ -90,14 +92,14 @@ fun AgentDispatchCard(
                     text = "@$agentHandle",
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = Zinc100
+                    color = HermesText
                 )
             }
 
             Icon(
                 imageVector = Icons.Default.ChevronRight,
                 contentDescription = "Expand",
-                tint = Zinc400,
+                tint = HermesMuted,
                 modifier = Modifier
                     .size(20.dp)
                     .rotate(rotation)
@@ -108,7 +110,7 @@ fun AgentDispatchCard(
         Text(
             text = taskSummary,
             fontSize = 13.sp,
-            color = Zinc400,
+            color = HermesSecondary,
             maxLines = if (isExpanded) Int.MAX_VALUE else 3
         )
 
@@ -123,13 +125,13 @@ fun AgentDispatchCard(
                         Text(
                             text = "└",
                             fontSize = 13.sp,
-                            color = Zinc400
+                            color = HermesMuted
                         )
                         Text(
                             text = tool,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
-                            color = Zinc400
+                            color = HermesSecondary
                         )
                     }
                 }

@@ -1,8 +1,5 @@
 package com.hermesagent.nativemobile.ui.screens
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -25,6 +22,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -37,6 +35,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -48,14 +48,17 @@ import com.hermesagent.nativemobile.data.model.LiveSession
 import com.hermesagent.nativemobile.data.repository.ActiveTurn
 import com.hermesagent.nativemobile.ui.components.ChatBubble
 import com.hermesagent.nativemobile.ui.components.ClarifyCard
-import com.hermesagent.nativemobile.ui.theme.AccentAmber
+import com.hermesagent.nativemobile.ui.theme.AccentIndigo
+import com.hermesagent.nativemobile.ui.theme.HermesBg
+import com.hermesagent.nativemobile.ui.theme.HermesBorder
+import com.hermesagent.nativemobile.ui.theme.HermesBorderSubtle
+import com.hermesagent.nativemobile.ui.theme.HermesMuted
+import com.hermesagent.nativemobile.ui.theme.HermesPanel
+import com.hermesagent.nativemobile.ui.theme.HermesQuiet
+import com.hermesagent.nativemobile.ui.theme.HermesSecondary
+import com.hermesagent.nativemobile.ui.theme.HermesSurface
+import com.hermesagent.nativemobile.ui.theme.HermesText
 import com.hermesagent.nativemobile.ui.theme.White
-import com.hermesagent.nativemobile.ui.theme.Zinc100
-import com.hermesagent.nativemobile.ui.theme.Zinc400
-import com.hermesagent.nativemobile.ui.theme.Zinc700
-import com.hermesagent.nativemobile.ui.theme.Zinc800
-import com.hermesagent.nativemobile.ui.theme.Zinc850
-import com.hermesagent.nativemobile.ui.theme.Zinc900
 
 @Composable
 fun ChatScreen(
@@ -83,13 +86,14 @@ fun ChatScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(Zinc900)
+            .background(HermesBg)
             .imePadding()
     ) {
         // Chat Header
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .background(HermesBg)
                 .padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
@@ -102,22 +106,30 @@ fun ChatScreen(
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Back",
-                        tint = White
+                        tint = HermesText
                     )
                 }
-                Text(
-                    text = session.title.ifBlank { "Chat" },
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Zinc100
-                )
+                Column {
+                    Text(
+                        text = session.title.ifBlank { "Chat" },
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = HermesText
+                    )
+                    Text(
+                        text = session.profile,
+                        fontSize = 12.sp,
+                        color = HermesMuted
+                    )
+                }
             }
 
-            // Clear chat button
+            // Clear chat pill button
             Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(Zinc850)
+                    .clip(RoundedCornerShape(9999.dp))
+                    .background(Color(0x0A000000))
+                    .border(1.dp, Color(0x12000000), RoundedCornerShape(9999.dp))
                     .clickable { onClearChat() }
                     .padding(horizontal = 12.dp, vertical = 6.dp)
             ) {
@@ -125,10 +137,11 @@ fun ChatScreen(
                     text = "Clear",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
-                    color = Zinc400
+                    color = HermesSecondary
                 )
             }
         }
+        HorizontalDivider(color = HermesBorderSubtle, thickness = 1.dp)
 
         // Messages List
         LazyColumn(
@@ -168,16 +181,18 @@ fun ChatScreen(
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(AccentAmber)
-                        )
-                        Text(
-                            text = activeTurn.statusText,
-                            fontSize = 14.sp,
-                            color = AccentAmber,
-                            fontWeight = FontWeight.Medium
-                        )
+                                .clip(RoundedCornerShape(9999.dp))
+                                .background(HermesSurface)
+                                .border(1.dp, HermesBorder, RoundedCornerShape(9999.dp))
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = activeTurn.statusText,
+                                fontSize = 13.sp,
+                                color = AccentIndigo,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
                     }
                 }
             }
@@ -200,23 +215,26 @@ fun ChatScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .background(HermesBg)
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                // Floating Composer Pill
                 Box(
                     modifier = Modifier
                         .weight(1f)
+                        .shadow(4.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x0F000000), spotColor = Color(0x0F000000))
                         .clip(RoundedCornerShape(24.dp))
-                        .background(Zinc850)
-                        .border(1.dp, Zinc800, RoundedCornerShape(24.dp))
+                        .background(HermesPanel)
+                        .border(1.dp, HermesBorder, RoundedCornerShape(24.dp))
                         .padding(horizontal = 16.dp, vertical = 12.dp)
                 ) {
                     if (inputText.isBlank()) {
                         Text(
                             text = "Message Hermes…",
                             fontSize = 15.sp,
-                            color = Zinc400
+                            color = HermesQuiet
                         )
                     }
                     BasicTextField(
@@ -224,9 +242,9 @@ fun ChatScreen(
                         onValueChange = { inputText = it },
                         textStyle = TextStyle(
                             fontSize = 15.sp,
-                            color = White
+                            color = HermesText
                         ),
-                        cursorBrush = SolidColor(White),
+                        cursorBrush = SolidColor(HermesText),
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
@@ -234,9 +252,11 @@ fun ChatScreen(
                 // Send Button
                 Box(
                     modifier = Modifier
-                        .size(44.dp)
+                        .size(42.dp)
+                        .shadow(2.dp, CircleShape)
                         .clip(CircleShape)
-                        .background(if (inputText.isNotBlank()) White else Zinc800)
+                        .background(if (inputText.isNotBlank()) HermesText else HermesSurface)
+                        .border(1.dp, if (inputText.isNotBlank()) HermesText else HermesBorder, CircleShape)
                         .clickable(enabled = inputText.isNotBlank()) {
                             val prompt = inputText.trim()
                             if (prompt.isNotBlank()) {
@@ -249,8 +269,8 @@ fun ChatScreen(
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.Send,
                         contentDescription = "Send",
-                        tint = if (inputText.isNotBlank()) Zinc900 else Zinc700,
-                        modifier = Modifier.size(20.dp)
+                        tint = if (inputText.isNotBlank()) White else HermesQuiet,
+                        modifier = Modifier.size(18.dp)
                     )
                 }
             }

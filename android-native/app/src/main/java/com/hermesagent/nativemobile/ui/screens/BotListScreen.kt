@@ -18,7 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -32,12 +32,14 @@ import com.hermesagent.nativemobile.data.model.LiveProfile
 import com.hermesagent.nativemobile.data.model.LiveSession
 import com.hermesagent.nativemobile.data.repository.ActiveTurn
 import com.hermesagent.nativemobile.ui.theme.AccentAmber
+import com.hermesagent.nativemobile.ui.theme.AccentIndigo
+import com.hermesagent.nativemobile.ui.theme.HermesBg
+import com.hermesagent.nativemobile.ui.theme.HermesBorder
+import com.hermesagent.nativemobile.ui.theme.HermesBorderSubtle
+import com.hermesagent.nativemobile.ui.theme.HermesMuted
+import com.hermesagent.nativemobile.ui.theme.HermesSurface
+import com.hermesagent.nativemobile.ui.theme.HermesText
 import com.hermesagent.nativemobile.ui.theme.White
-import com.hermesagent.nativemobile.ui.theme.Zinc100
-import com.hermesagent.nativemobile.ui.theme.Zinc400
-import com.hermesagent.nativemobile.ui.theme.Zinc800
-import com.hermesagent.nativemobile.ui.theme.Zinc850
-import com.hermesagent.nativemobile.ui.theme.Zinc900
 
 @Composable
 fun BotListScreen(
@@ -46,29 +48,57 @@ fun BotListScreen(
     onBotClick: (LiveProfile, LiveSession?) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    LazyColumn(
-        modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        items(profiles, key = { it.name }) { profile ->
-            val session = profile.canonicalSession ?: profile.lastSession
-            val activeTurn = activeTurns[profile.name]
-            val isWorking = activeTurn != null
+    if (profiles.isEmpty()) {
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .background(HermesBg),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = "No bots found",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = HermesText
+                )
+                Text(
+                    text = "Connect to your Hermes host to load bots",
+                    fontSize = 13.sp,
+                    color = HermesMuted
+                )
+            }
+        }
+    } else {
+        LazyColumn(
+            modifier = modifier
+                .fillMaxSize()
+                .background(HermesBg),
+            contentPadding = PaddingValues(bottom = 90.dp)
+        ) {
+            items(profiles, key = { it.name }) { profile ->
+                val session = profile.canonicalSession ?: profile.lastSession
+                val activeTurn = activeTurns[profile.name]
+                val isWorking = activeTurn != null
 
-            BotCardRow(
-                profile = profile,
-                session = session,
-                isWorking = isWorking,
-                statusText = activeTurn?.statusText ?: "Working…",
-                onClick = { onBotClick(profile, session) }
-            )
+                BotRow(
+                    profile = profile,
+                    session = session,
+                    isWorking = isWorking,
+                    statusText = activeTurn?.statusText ?: "Thinking…",
+                    onClick = { onBotClick(profile, session) }
+                )
+                HorizontalDivider(color = HermesBorderSubtle, thickness = 1.dp)
+            }
         }
     }
 }
 
 @Composable
-fun BotCardRow(
+fun BotRow(
     profile: LiveProfile,
     session: LiveSession?,
     isWorking: Boolean,
@@ -79,34 +109,44 @@ fun BotCardRow(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(Zinc900)
-            .border(1.dp, Zinc850, RoundedCornerShape(16.dp))
             .clickable { onClick() }
-            .padding(16.dp),
+            .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp)
+        horizontalArrangement = Arrangement.spacedBy(13.dp)
     ) {
-        // Avatar circle
+        // Bot Avatar Circle (44dp)
         Box(
             modifier = Modifier
                 .size(44.dp)
                 .clip(CircleShape)
-                .background(Zinc800),
+                .background(HermesSurface)
+                .border(1.dp, HermesBorder, CircleShape),
             contentAlignment = Alignment.Center
         ) {
             Text(
                 text = (profile.displayName ?: profile.name).take(1).uppercase(),
-                fontSize = 18.sp,
+                fontSize = 17.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = White
+                color = HermesText
             )
+
+            // Pulsing live indicator pip if working
+            if (isWorking) {
+                Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .align(Alignment.BottomEnd)
+                        .clip(CircleShape)
+                        .background(AccentAmber)
+                        .border(1.5.dp, HermesBg, CircleShape)
+                )
+            }
         }
 
-        // Details
+        // Middle Info (Name + Preview)
         Column(
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            verticalArrangement = Arrangement.spacedBy(3.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -115,41 +155,30 @@ fun BotCardRow(
             ) {
                 Text(
                     text = profile.displayName ?: profile.name,
-                    fontSize = 16.sp,
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = Zinc100
+                    color = HermesText
                 )
 
-                // Live working indicator
+                // Working phrase badge
                 AnimatedVisibility(
                     visible = isWorking,
                     enter = fadeIn(),
                     exit = fadeOut()
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .clip(CircleShape)
-                                .background(AccentAmber)
-                        )
-                        Text(
-                            text = statusText,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = AccentAmber
-                        )
-                    }
+                    Text(
+                        text = statusText,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = AccentIndigo
+                    )
                 }
             }
 
             Text(
-                text = if (isWorking) "Generating response…" else (session?.preview ?: "No messages yet"),
+                text = if (isWorking) "Generating response…" else (session?.preview?.ifBlank { "No messages yet" } ?: "No messages yet"),
                 fontSize = 13.sp,
-                color = Zinc400,
+                color = HermesMuted,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )

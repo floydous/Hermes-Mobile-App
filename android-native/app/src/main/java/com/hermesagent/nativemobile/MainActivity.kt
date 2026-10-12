@@ -24,28 +24,28 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import com.hermesagent.nativemobile.data.api.HermesApiClient
-import com.hermesagent.nativemobile.data.gateway.HermesGatewayClient
+import com.hermesagent.nativemobile.data.auth.HermesAuthClient
+import com.hermesagent.nativemobile.data.auth.HermesAuthStore
 import com.hermesagent.nativemobile.data.model.LiveProfile
 import com.hermesagent.nativemobile.data.model.LiveSession
 import com.hermesagent.nativemobile.data.repository.HermesRepository
 import com.hermesagent.nativemobile.ui.components.BottomNavIsland
+import com.hermesagent.nativemobile.ui.components.ConnectionDialog
 import com.hermesagent.nativemobile.ui.components.NavigationTab
 import com.hermesagent.nativemobile.ui.components.TopHeaderBar
 import com.hermesagent.nativemobile.ui.screens.BotListScreen
 import com.hermesagent.nativemobile.ui.screens.ChatScreen
 import com.hermesagent.nativemobile.ui.screens.SessionListScreen
 import com.hermesagent.nativemobile.ui.screens.TaskListScreen
+import com.hermesagent.nativemobile.ui.theme.HermesBg
 import com.hermesagent.nativemobile.ui.theme.HermesTheme
-import com.hermesagent.nativemobile.ui.theme.Zinc950
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
-    private val endpoint = "http://10.0.0.130:9119"
-    private val apiClient by lazy { HermesApiClient(endpointProvider = { endpoint }) }
-    private val gatewayClient by lazy { HermesGatewayClient(endpointProvider = { endpoint }) }
-    private val repository by lazy { HermesRepository(apiClient, gatewayClient) }
+    private val authStore by lazy { HermesAuthStore(this) }
+    private val authClient by lazy { HermesAuthClient() }
+    private val repository by lazy { HermesRepository(authStore, authClient) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -53,21 +53,27 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             HermesTheme {
-                MainAppScreen(repository = repository)
+                MainAppScreen(
+                    authStore = authStore,
+                    repository = repository
+                )
             }
         }
     }
 }
 
 @Composable
-fun MainAppScreen(repository: HermesRepository) {
+fun MainAppScreen(
+    authStore: HermesAuthStore,
+    repository: HermesRepository
+) {
     val scope = rememberCoroutineScope()
     var currentTab by remember { mutableStateOf(NavigationTab.BOTS) }
     var selectedSession by remember { mutableStateOf<LiveSession?>(null) }
-    var isConnected by remember { mutableStateOf(false) }
     var showConnectionDialog by remember { mutableStateOf(false) }
-    var currentEndpoint by remember { mutableStateOf("http://10.0.0.130:9119") }
 
+    val savedEndpoint by authStore.endpointFlow.collectAsState()
+    val connectionStatus by repository.connectionStatus.collectAsState()
     val profiles by repository.profiles.collectAsState()
     val sessions by repository.sessions.collectAsState()
     val cronJobs by repository.cronJobs.collectAsState()
@@ -76,28 +82,23 @@ fun MainAppScreen(repository: HermesRepository) {
     val pendingClarify by repository.pendingClarify.collectAsState()
 
     LaunchedEffect(Unit) {
-        try {
-            repository.refresh()
-            isConnected = true
-        } catch (_: Exception) {
-            isConnected = false
-        }
+        repository.refresh()
     }
 
-    // Handle Hardware Back Button
+    // Handle Android Hardware Back Button
     BackHandler(enabled = selectedSession != null) {
         selectedSession = null
     }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
-        containerColor = Zinc950
+        containerColor = HermesBg
     ) { innerPadding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .background(Zinc950)
+                .background(HermesBg)
         ) {
             if (selectedSession != null) {
                 // Active 1-on-1 Chat Screen
@@ -136,34 +137,28 @@ fun MainAppScreen(repository: HermesRepository) {
                     }
                 )
             } else {
-                // Main Multi-tab Roster Layout
+                // Main Roster Layout with Top Header, Tabs, and Bottom Island
                 Column(modifier = Modifier.fillMaxSize()) {
                     TopHeaderBar(
-                        title = "Hermes",
-                        isConnected = isConnected,
-                        onHostClick = {
-                            showConnectionDialog = true
+                        isConnected = connectionStatus == "connected",
+                        isConnecting = connectionStatus == "connecting",
+                        currentTab = currentTab,
+                        onHostClick = { showConnectionDialog = true },
+                        onSearchClick = { /* Search dialog */ },
+                        onSettingsClick = { showConnectionDialog = true },
+                        onNewSessionClick = {
+                            val defaultBot = profiles.firstOrNull() ?: LiveProfile(name = "default", displayName = "Hermes")
+                            val newSession = LiveSession(
+                                id = "session-client-${System.currentTimeMillis()}",
+                                title = "New chat",
+                                profile = defaultBot.name
+                            )
+                            selectedSession = newSession
+                            scope.launch {
+                                repository.loadSession(newSession)
+                            }
                         }
                     )
-
-                    if (showConnectionDialog) {
-                        com.hermesagent.nativemobile.ui.components.ConnectionDialog(
-                            currentEndpoint = currentEndpoint,
-                            onDismiss = { showConnectionDialog = false },
-                            onSave = { newEp ->
-                                currentEndpoint = newEp
-                                showConnectionDialog = false
-                                scope.launch {
-                                    try {
-                                        repository.refresh()
-                                        isConnected = true
-                                    } catch (_: Exception) {
-                                        isConnected = false
-                                    }
-                                }
-                            }
-                        )
-                    }
 
                     Box(modifier = Modifier.weight(1f)) {
                         AnimatedContent(
@@ -209,7 +204,7 @@ fun MainAppScreen(repository: HermesRepository) {
                                 NavigationTab.TASKS -> {
                                     TaskListScreen(
                                         tasks = cronJobs,
-                                        onTaskClick = { /* View task details */ }
+                                        onTaskClick = { /* Task details */ }
                                     )
                                 }
                             }
@@ -219,6 +214,20 @@ fun MainAppScreen(repository: HermesRepository) {
                     BottomNavIsland(
                         currentTab = currentTab,
                         onTabSelected = { currentTab = it }
+                    )
+                }
+
+                // Security & Connection Dialog
+                if (showConnectionDialog) {
+                    ConnectionDialog(
+                        currentEndpoint = savedEndpoint,
+                        onDismiss = { showConnectionDialog = false },
+                        onSave = { newEndpoint, username, password ->
+                            showConnectionDialog = false
+                            scope.launch {
+                                repository.updateEndpoint(newEndpoint, username, password)
+                            }
+                        }
                     )
                 }
             }

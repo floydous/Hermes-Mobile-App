@@ -64,6 +64,7 @@ data class SubmitPromptOptions(
 class HermesGatewayClient(
     private val endpointProvider: () -> String,
     private val authHeadersProvider: () -> Map<String, String> = { emptyMap() },
+    private val ticketProvider: suspend () -> String? = { null },
     private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.SECONDS) // Keep alive for WebSocket
@@ -92,10 +93,21 @@ class HermesGatewayClient(
         if (isConnected && webSocket != null) return
 
         val endpoint = endpointProvider().trimEnd('/')
-        val wsUrl = if (endpoint.startsWith("https://")) {
-            endpoint.replaceFirst("https://", "wss://") + "/ws"
+        val wsBase = if (endpoint.startsWith("https://")) {
+            endpoint.replaceFirst("https://", "wss://") + "/api/ws"
         } else {
-            endpoint.replaceFirst("http://", "ws://") + "/ws"
+            endpoint.replaceFirst("http://", "ws://") + "/api/ws"
+        }
+
+        val ticket = try { ticketProvider() } catch (_: Exception) { null }
+        val wsUrl = if (!ticket.isNullOrBlank()) {
+            if (ticket.startsWith("token:")) {
+                "$wsBase?token=${ticket.removePrefix("token:")}"
+            } else {
+                "$wsBase?ticket=$ticket"
+            }
+        } else {
+            wsBase
         }
 
         val requestBuilder = Request.Builder().url(wsUrl)
@@ -274,6 +286,18 @@ class HermesGatewayClient(
         return withTimeout(timeoutMs) {
             deferred.await()
         }
+    }
+
+    suspend fun listProfiles(): List<com.hermesagent.nativemobile.data.model.LiveProfile> {
+        val params = buildJsonObject {
+            put("include_sessions", true)
+        }
+        val result = call("profiles.list", params).jsonObject
+        val profilesElement = result["profiles"] ?: return emptyList()
+        return json.decodeFromJsonElement(
+            kotlinx.serialization.builtins.ListSerializer(com.hermesagent.nativemobile.data.model.LiveProfile.serializer()),
+            profilesElement
+        )
     }
 
     suspend fun resumeSession(sessionId: String, profile: String? = null): String {
