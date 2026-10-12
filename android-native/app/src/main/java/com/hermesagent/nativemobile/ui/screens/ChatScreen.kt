@@ -66,6 +66,7 @@ fun ChatScreen(
     messages: List<LiveMessage>,
     activeTurn: ActiveTurn?,
     pendingClarify: ClarifyRequest?,
+    profile: com.hermesagent.nativemobile.data.model.LiveProfile? = null,
     onBackClick: () -> Unit,
     onSendMessage: (String) -> Unit,
     onClearChat: () -> Unit,
@@ -109,16 +110,23 @@ fun ChatScreen(
                         tint = HermesText
                     )
                 }
+
+                com.hermesagent.nativemobile.ui.components.BotAvatar(
+                    profile = profile,
+                    fallbackName = session.profile,
+                    size = 36.dp
+                )
+
                 Column {
                     Text(
-                        text = session.title.ifBlank { "Chat" },
-                        fontSize = 17.sp,
+                        text = session.title.ifBlank { profile?.displayName ?: session.profile },
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = HermesText
                     )
                     Text(
-                        text = session.profile,
-                        fontSize = 12.sp,
+                        text = session.model ?: profile?.model ?: session.profile,
+                        fontSize = 11.sp,
                         color = HermesMuted
                     )
                 }

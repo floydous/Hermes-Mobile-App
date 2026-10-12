@@ -78,6 +78,7 @@ fun MainAppScreen(
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { 3 })
     var selectedSession by remember { mutableStateOf<LiveSession?>(null) }
     var isSettingsOpen by remember { mutableStateOf(false) }
+    var showNewChatBotPicker by remember { mutableStateOf(false) }
 
     val connectionStatus by repository.connectionStatus.collectAsState()
     val profiles by repository.profiles.collectAsState()
@@ -128,15 +129,17 @@ fun MainAppScreen(
 
                 // 2. Active 1-on-1 Chat Screen
                 selectedSession != null -> {
-                    val session = selectedSession!!
-                    val turn = activeTurns[session.profile]
+                val session = selectedSession!!
+                val turn = activeTurns[session.profile]
+                val currentProfile = profiles.find { it.name == session.profile }
 
-                    ChatScreen(
-                        session = session,
-                        messages = messages,
-                        activeTurn = turn,
-                        pendingClarify = if (pendingClarify?.sessionId == session.id) pendingClarify else null,
-                        onBackClick = { selectedSession = null },
+                ChatScreen(
+                    session = session,
+                    messages = messages,
+                    activeTurn = turn,
+                    pendingClarify = if (pendingClarify?.sessionId == session.id) pendingClarify else null,
+                    profile = currentProfile,
+                    onBackClick = { selectedSession = null },
                         onSendMessage = { prompt ->
                             scope.launch {
                                 try {
@@ -179,14 +182,18 @@ fun MainAppScreen(
                             onSearchClick = { /* Search */ },
                             onSettingsClick = { isSettingsOpen = true },
                             onNewSessionClick = {
-                                scope.launch {
-                                    try {
-                                        val defaultProfile = profiles.firstOrNull()?.name ?: "default"
-                                        val newSession = repository.createNewSession(defaultProfile, "New chat")
-                                        selectedSession = newSession
-                                        repository.loadSession(newSession)
-                                    } catch (e: Exception) {
-                                        RemoteLogger.e("MainAppScreen", "Error creating new session", e)
+                                if (profiles.size > 1) {
+                                    showNewChatBotPicker = true
+                                } else {
+                                    scope.launch {
+                                        try {
+                                            val defaultProfile = profiles.firstOrNull()?.name ?: "default"
+                                            val newSession = repository.createNewSession(defaultProfile, "New chat")
+                                            selectedSession = newSession
+                                            repository.loadSession(newSession)
+                                        } catch (e: Exception) {
+                                            RemoteLogger.e("MainAppScreen", "Error creating new session", e)
+                                        }
                                     }
                                 }
                             }
@@ -218,6 +225,7 @@ fun MainAppScreen(
                                 1 -> {
                                     SessionListScreen(
                                         sessions = sessions,
+                                        profiles = profiles,
                                         onSessionClick = { session ->
                                             selectedSession = session
                                             scope.launch {
@@ -229,7 +237,12 @@ fun MainAppScreen(
                                 2 -> {
                                     TaskListScreen(
                                         tasks = cronJobs,
-                                        onTaskClick = { /* Task details */ }
+                                        onTaskClick = { /* Task details */ },
+                                        onTriggerTask = { job ->
+                                            scope.launch {
+                                                repository.triggerTask(job.jobId, job.profile)
+                                            }
+                                        }
                                     )
                                 }
                             }
@@ -244,6 +257,58 @@ fun MainAppScreen(
                                 }
                             }
                         )
+                    }
+                }
+            }
+
+            // New Chat Bot Picker Dialog
+            if (showNewChatBotPicker) {
+                androidx.compose.ui.window.Dialog(onDismissRequest = { showNewChatBotPicker = false }) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .androidx.compose.ui.draw.clip(androidx.compose.foundation.shape.RoundedCornerShape(20.dp))
+                            .background(com.hermesagent.nativemobile.ui.theme.HermesPanel)
+                            .border(1.dp, com.hermesagent.nativemobile.ui.theme.HermesBorder, androidx.compose.foundation.shape.RoundedCornerShape(20.dp))
+                            .padding(20.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            text = "New chat with",
+                            fontSize = 17.sp,
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                            color = com.hermesagent.nativemobile.ui.theme.HermesText
+                        )
+                        profiles.forEach { profile ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .androidx.compose.ui.draw.clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                                    .clickable {
+                                        showNewChatBotPicker = false
+                                        scope.launch {
+                                            val newSession = repository.createNewSession(profile.name, "New chat")
+                                            selectedSession = newSession
+                                            repository.loadSession(newSession)
+                                        }
+                                    }
+                                    .padding(10.dp),
+                                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                com.hermesagent.nativemobile.ui.components.BotAvatar(
+                                    profile = profile,
+                                    fallbackName = profile.name,
+                                    size = 36.dp
+                                )
+                                Text(
+                                    text = profile.displayName ?: profile.name,
+                                    fontSize = 15.sp,
+                                    fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                                    color = com.hermesagent.nativemobile.ui.theme.HermesText
+                                )
+                            }
+                        }
                     }
                 }
             }

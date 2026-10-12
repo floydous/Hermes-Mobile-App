@@ -33,6 +33,7 @@ import com.hermesagent.nativemobile.ui.theme.White
 @Composable
 fun SessionListScreen(
     sessions: List<LiveSession>,
+    profiles: List<com.hermesagent.nativemobile.data.model.LiveProfile> = emptyList(),
     onSessionClick: (LiveSession) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -57,8 +58,10 @@ fun SessionListScreen(
             contentPadding = PaddingValues(bottom = 90.dp)
         ) {
             items(sessions, key = { it.id }) { session ->
+                val profile = profiles.find { it.name == session.profile }
                 SessionRow(
                     session = session,
+                    profile = profile,
                     onClick = { onSessionClick(session) }
                 )
                 HorizontalDivider(color = HermesBorderSubtle, thickness = 1.dp)
@@ -70,6 +73,7 @@ fun SessionListScreen(
 @Composable
 fun SessionRow(
     session: LiveSession,
+    profile: com.hermesagent.nativemobile.data.model.LiveProfile?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -81,6 +85,13 @@ fun SessionRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+        // Session Avatar
+        com.hermesagent.nativemobile.ui.components.BotAvatar(
+            profile = profile,
+            fallbackName = session.profile,
+            size = 44.dp
+        )
+
         Column(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(3.dp)

@@ -129,6 +129,23 @@ class HermesApiClient(
         }
     }
 
+    suspend fun triggerCronJob(jobId: String, profile: String? = null): Boolean = withContext(Dispatchers.IO) {
+        val encoded = URLEncoder.encode(jobId, "UTF-8")
+        val query = if (!profile.isNullOrBlank()) "?profile=${URLEncoder.encode(profile, "UTF-8")}" else ""
+        val path = "/api/cron/jobs/$encoded/trigger$query"
+        RemoteLogger.d("ApiClient", "POST $path")
+        try {
+            val request = buildRequest(path).post(okhttp3.RequestBody.create(null, ByteArray(0))).build()
+            client.newCall(request).execute().use { response ->
+                RemoteLogger.d("ApiClient", "POST $path -> HTTP ${response.code}")
+                response.isSuccessful
+            }
+        } catch (e: Exception) {
+            RemoteLogger.e("ApiClient", "Failed to trigger cron job", e)
+            false
+        }
+    }
+
     suspend fun getCronJobs(): List<CronJob> = withContext(Dispatchers.IO) {
         val path = "/api/cron/jobs"
         try {

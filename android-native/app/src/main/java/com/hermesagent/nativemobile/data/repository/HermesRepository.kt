@@ -290,6 +290,12 @@ class HermesRepository(
         _pendingClarify.value = null
     }
 
+    suspend fun triggerTask(jobId: String, profile: String? = null): Boolean {
+        val success = apiClient.triggerCronJob(jobId, profile)
+        refresh()
+        return success
+    }
+
     suspend fun clearSession(sessionId: String, profile: String) {
         inFlightTurns.remove(sessionId)
         inFlightTurns.remove(profile)

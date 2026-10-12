@@ -114,34 +114,13 @@ fun BotRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(13.dp)
     ) {
-        // Bot Avatar Circle (44dp)
-        Box(
-            modifier = Modifier
-                .size(44.dp)
-                .clip(CircleShape)
-                .background(HermesSurface)
-                .border(1.dp, HermesBorder, CircleShape),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = (profile.displayName ?: profile.name).take(1).uppercase(),
-                fontSize = 17.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = HermesText
-            )
-
-            // Pulsing live indicator pip if working
-            if (isWorking) {
-                Box(
-                    modifier = Modifier
-                        .size(10.dp)
-                        .align(Alignment.BottomEnd)
-                        .clip(CircleShape)
-                        .background(AccentAmber)
-                        .border(1.5.dp, HermesBg, CircleShape)
-                )
-            }
-        }
+        // Bot Avatar Circle (44dp) with full asset/gradient support
+        BotAvatar(
+            profile = profile,
+            fallbackName = profile.name,
+            size = 44.dp,
+            isWorking = isWorking
+        )
 
         // Middle Info (Name + Preview)
         Column(

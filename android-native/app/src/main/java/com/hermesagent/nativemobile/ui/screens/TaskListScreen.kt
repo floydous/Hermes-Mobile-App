@@ -37,6 +37,7 @@ import com.hermesagent.nativemobile.ui.theme.HermesText
 fun TaskListScreen(
     tasks: List<CronJob>,
     onTaskClick: (CronJob) -> Unit,
+    onTriggerTask: (CronJob) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     if (tasks.isEmpty()) {
@@ -63,7 +64,8 @@ fun TaskListScreen(
             items(tasks, key = { it.jobId }) { task ->
                 TaskCard(
                     task = task,
-                    onClick = { onTaskClick(task) }
+                    onClick = { onTaskClick(task) },
+                    onTrigger = { onTriggerTask(task) }
                 )
             }
         }
@@ -74,6 +76,7 @@ fun TaskListScreen(
 fun TaskCard(
     task: CronJob,
     onClick: () -> Unit,
+    onTrigger: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -85,7 +88,7 @@ fun TaskCard(
             .border(1.dp, HermesBorder, RoundedCornerShape(14.dp))
             .clickable { onClick() }
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -99,18 +102,40 @@ fun TaskCard(
                 color = HermesText
             )
 
-            if (task.enabled) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (task.enabled) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(9999.dp))
+                            .background(Color(0x14059669))
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = "Scheduled",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = AccentGreen
+                        )
+                    }
+                }
+
+                // Trigger / Run Now pill button
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(9999.dp))
-                        .background(Color(0x14059669))
-                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                        .background(HermesSurface)
+                        .border(1.dp, HermesBorder, RoundedCornerShape(9999.dp))
+                        .clickable { onTrigger() }
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
                 ) {
                     Text(
-                        text = "Scheduled",
+                        text = "Run now",
                         fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = AccentGreen
+                        fontWeight = FontWeight.Medium,
+                        color = HermesText
                     )
                 }
             }
