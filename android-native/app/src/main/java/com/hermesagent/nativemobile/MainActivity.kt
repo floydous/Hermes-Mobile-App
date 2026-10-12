@@ -65,6 +65,8 @@ fun MainAppScreen(repository: HermesRepository) {
     var currentTab by remember { mutableStateOf(NavigationTab.BOTS) }
     var selectedSession by remember { mutableStateOf<LiveSession?>(null) }
     var isConnected by remember { mutableStateOf(false) }
+    var showConnectionDialog by remember { mutableStateOf(false) }
+    var currentEndpoint by remember { mutableStateOf("http://10.0.0.130:9119") }
 
     val profiles by repository.profiles.collectAsState()
     val sessions by repository.sessions.collectAsState()
@@ -140,11 +142,28 @@ fun MainAppScreen(repository: HermesRepository) {
                         title = "Hermes",
                         isConnected = isConnected,
                         onHostClick = {
-                            scope.launch {
-                                repository.refresh()
-                            }
+                            showConnectionDialog = true
                         }
                     )
+
+                    if (showConnectionDialog) {
+                        com.hermesagent.nativemobile.ui.components.ConnectionDialog(
+                            currentEndpoint = currentEndpoint,
+                            onDismiss = { showConnectionDialog = false },
+                            onSave = { newEp ->
+                                currentEndpoint = newEp
+                                showConnectionDialog = false
+                                scope.launch {
+                                    try {
+                                        repository.refresh()
+                                        isConnected = true
+                                    } catch (_: Exception) {
+                                        isConnected = false
+                                    }
+                                }
+                            }
+                        )
+                    }
 
                     Box(modifier = Modifier.weight(1f)) {
                         AnimatedContent(
