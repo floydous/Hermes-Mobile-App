@@ -17,10 +17,16 @@ on:
       - '.github/workflows/build-native-android.yml'
   workflow_dispatch:
 
+concurrency:
+  group: native-android-build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-native-apk:
     name: Build Native Kotlin Compose APK
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout repository
@@ -42,13 +48,34 @@ jobs:
         working-directory: android-native
         run: ./gradlew testDebugUnitTest --stacktrace
 
-      - name: Build Debug APK
+      - name: Build Release APK
         working-directory: android-native
-        run: ./gradlew assembleDebug --stacktrace
+        run: ./gradlew assembleRelease --stacktrace
 
-      - name: Upload Debug APK Artifact
+      - name: Upload Release APK to Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: hermes-native-debug-apk
-          path: android-native/app/build/outputs/apk/debug/app-debug.apk
+          name: hermes-native-release-apk
+          path: android-native/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish Release APK to GitHub Releases
+        if: (github.ref == 'refs/heads/native-android' || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') && github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: native-latest-apk
+          name: "Hermes Native Kotlin (Latest Release APK)"
+          body: |
+            ### 📱 Hermes Native Android APK (Kotlin / Jetpack Compose)
+            - **Commit**: `${{ github.sha }}`
+            - **Branch**: `${{ github.ref_name }}`
+
+            #### 📥 Direct Installation:
+            Download and install `app-release.apk` below directly on your Android phone!
+          prerelease: true
+          make_latest: false
+          files: |
+            android-native/app/build/outputs/apk/release/app-release.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
