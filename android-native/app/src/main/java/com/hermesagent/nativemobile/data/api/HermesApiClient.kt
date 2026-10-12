@@ -5,17 +5,13 @@ import com.hermesagent.nativemobile.data.model.CronList
 import com.hermesagent.nativemobile.data.model.LiveMessage
 import com.hermesagent.nativemobile.data.model.LiveProfile
 import com.hermesagent.nativemobile.data.model.LiveSession
+import com.hermesagent.nativemobile.util.RemoteLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
-import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import java.io.IOException
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
@@ -23,8 +19,8 @@ class HermesApiClient(
     private val endpointProvider: () -> String,
     private val authHeadersProvider: () -> Map<String, String> = { emptyMap() },
     private val client: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
+        .connectTimeout(12, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
         .build()
 ) {
     private val json = Json {
@@ -43,75 +39,108 @@ class HermesApiClient(
     }
 
     suspend fun getProfiles(): List<LiveProfile> = withContext(Dispatchers.IO) {
-        val request = buildRequest("/api/profiles").get().build()
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) throw IOException("Failed to fetch profiles: HTTP ${response.code}")
-            val body = response.body?.string() ?: "[]"
-            // Handles both {"profiles": [...]} and direct list [...]
-            val element = json.parseToJsonElement(body)
-            if (element is JsonObject && element.containsKey("profiles")) {
-                json.decodeFromJsonElement(kotlinx.serialization.builtins.ListSerializer(LiveProfile.serializer()), element["profiles"]!!)
-            } else {
-                json.decodeFromString<List<LiveProfile>>(body)
+        val path = "/api/profiles"
+        RemoteLogger.d("ApiClient", "GET $path")
+        try {
+            val request = buildRequest(path).get().build()
+            client.newCall(request).execute().use { response ->
+                RemoteLogger.d("ApiClient", "GET $path -> HTTP ${response.code}")
+                if (!response.isSuccessful) return@withContext emptyList()
+                val body = response.body?.string() ?: "[]"
+                val element = json.parseToJsonElement(body)
+                if (element is JsonObject && element.containsKey("profiles")) {
+                    json.decodeFromJsonElement(kotlinx.serialization.builtins.ListSerializer(LiveProfile.serializer()), element["profiles"]!!)
+                } else {
+                    json.decodeFromString<List<LiveProfile>>(body)
+                }
             }
+        } catch (e: Exception) {
+            RemoteLogger.w("ApiClient", "GET $path failed: ${e.message}")
+            emptyList()
         }
     }
 
     suspend fun getSessions(limit: Int = 100, offset: Int = 0): List<LiveSession> = withContext(Dispatchers.IO) {
         val path = "/api/profiles/sessions?limit=$limit&offset=$offset&min_messages=1&archived=exclude&order=recent&profile=all&exclude_sources=cron,kanban,tool,oneshot"
-        val request = buildRequest(path).get().build()
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) throw IOException("Failed to fetch sessions: HTTP ${response.code}")
-            val body = response.body?.string() ?: "{}"
-            val element = json.parseToJsonElement(body)
-            if (element is JsonObject && element.containsKey("sessions")) {
-                val sessionsObj = element["sessions"]
-                if (sessionsObj is JsonObject && sessionsObj.containsKey("sessions")) {
-                    json.decodeFromJsonElement(kotlinx.serialization.builtins.ListSerializer(LiveSession.serializer()), sessionsObj["sessions"]!!)
-                } else if (sessionsObj != null) {
-                    json.decodeFromJsonElement(kotlinx.serialization.builtins.ListSerializer(LiveSession.serializer()), sessionsObj)
+        RemoteLogger.d("ApiClient", "GET $path")
+        try {
+            val request = buildRequest(path).get().build()
+            client.newCall(request).execute().use { response ->
+                RemoteLogger.d("ApiClient", "GET sessions -> HTTP ${response.code}")
+                if (!response.isSuccessful) return@withContext emptyList()
+                val body = response.body?.string() ?: "{}"
+                val element = json.parseToJsonElement(body)
+                if (element is JsonObject && element.containsKey("sessions")) {
+                    val sessionsObj = element["sessions"]
+                    if (sessionsObj is JsonObject && sessionsObj.containsKey("sessions")) {
+                        json.decodeFromJsonElement(kotlinx.serialization.builtins.ListSerializer(LiveSession.serializer()), sessionsObj["sessions"]!!)
+                    } else if (sessionsObj != null) {
+                        json.decodeFromJsonElement(kotlinx.serialization.builtins.ListSerializer(LiveSession.serializer()), sessionsObj)
+                    } else {
+                        emptyList()
+                    }
                 } else {
                     emptyList()
                 }
-            } else {
-                emptyList()
             }
+        } catch (e: Exception) {
+            RemoteLogger.w("ApiClient", "GET sessions failed: ${e.message}")
+            emptyList()
         }
     }
 
     suspend fun getSessionMessages(sessionId: String, limit: Int = 50, offset: Int = 0): List<LiveMessage> = withContext(Dispatchers.IO) {
+        if (sessionId.startsWith("draft:") || sessionId.startsWith("session-client-")) {
+            return@withContext emptyList()
+        }
         val encoded = URLEncoder.encode(sessionId, "UTF-8")
         val path = "/api/sessions/$encoded/messages?limit=$limit&offset=$offset"
-        val request = buildRequest(path).get().build()
-        client.newCall(request).execute().use { response ->
-            if (response.code == 404) return@withContext emptyList()
-            if (!response.isSuccessful) throw IOException("Failed to fetch session messages: HTTP ${response.code}")
-            val body = response.body?.string() ?: "[]"
-            val element = json.parseToJsonElement(body)
-            if (element is JsonObject && element.containsKey("messages")) {
-                json.decodeFromJsonElement(kotlinx.serialization.builtins.ListSerializer(LiveMessage.serializer()), element["messages"]!!)
-            } else {
-                json.decodeFromString<List<LiveMessage>>(body)
+        RemoteLogger.d("ApiClient", "GET $path")
+        try {
+            val request = buildRequest(path).get().build()
+            client.newCall(request).execute().use { response ->
+                RemoteLogger.d("ApiClient", "GET messages -> HTTP ${response.code}")
+                if (response.code == 404) return@withContext emptyList()
+                if (!response.isSuccessful) return@withContext emptyList()
+                val body = response.body?.string() ?: "[]"
+                val element = json.parseToJsonElement(body)
+                if (element is JsonObject && element.containsKey("messages")) {
+                    json.decodeFromJsonElement(kotlinx.serialization.builtins.ListSerializer(LiveMessage.serializer()), element["messages"]!!)
+                } else {
+                    json.decodeFromString<List<LiveMessage>>(body)
+                }
             }
+        } catch (e: Exception) {
+            RemoteLogger.w("ApiClient", "GET messages failed: ${e.message}")
+            emptyList()
         }
     }
 
     suspend fun deleteSession(sessionId: String): Boolean = withContext(Dispatchers.IO) {
         val encoded = URLEncoder.encode(sessionId, "UTF-8")
         val path = "/api/sessions/$encoded"
-        val request = buildRequest(path).delete().build()
-        client.newCall(request).execute().use { response ->
-            response.isSuccessful
+        try {
+            val request = buildRequest(path).delete().build()
+            client.newCall(request).execute().use { response ->
+                response.isSuccessful
+            }
+        } catch (e: Exception) {
+            false
         }
     }
 
     suspend fun getCronJobs(): List<CronJob> = withContext(Dispatchers.IO) {
-        val request = buildRequest("/api/cron/jobs").get().build()
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) return@withContext emptyList()
-            val body = response.body?.string() ?: "{}"
-            val list = json.decodeFromString<CronList>(body)
-            list.jobs
+        val path = "/api/cron/jobs"
+        try {
+            val request = buildRequest(path).get().build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext emptyList()
+                val body = response.body?.string() ?: "{}"
+                val list = json.decodeFromString<CronList>(body)
+                list.jobs
+            }
+        } catch (e: Exception) {
+            emptyList()
         }
     }
 }

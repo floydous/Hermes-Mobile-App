@@ -173,6 +173,24 @@ class HermesRepository(
         }
     }
 
+    suspend fun createNewSession(profile: String = "default", title: String = "New chat"): LiveSession {
+        return try {
+            val session = gatewayClient.createSession(profile, title)
+            _sessions.value = listOf(session) + _sessions.value.filter { it.id != session.id }
+            session
+        } catch (e: Exception) {
+            com.hermesagent.nativemobile.util.RemoteLogger.e("Repository", "Failed to create session", e)
+            val fallback = LiveSession(
+                id = "session-client-${System.currentTimeMillis()}",
+                title = title,
+                profile = profile,
+                lastActive = System.currentTimeMillis()
+            )
+            _sessions.value = listOf(fallback) + _sessions.value
+            fallback
+        }
+    }
+
     suspend fun loadSession(session: LiveSession): List<LiveMessage> {
         val cached = messageCache[session.id]
         if (cached != null && cached.isNotEmpty()) {

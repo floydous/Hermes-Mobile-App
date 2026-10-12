@@ -3,6 +3,7 @@ package com.hermesagent.nativemobile.data.gateway
 import com.hermesagent.nativemobile.data.model.JsonRpcError
 import com.hermesagent.nativemobile.data.model.JsonRpcRequest
 import com.hermesagent.nativemobile.data.model.JsonRpcResponse
+import com.hermesagent.nativemobile.util.RemoteLogger
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -115,24 +116,29 @@ class HermesGatewayClient(
             requestBuilder.addHeader(k, v)
         }
 
+        RemoteLogger.d("GatewayClient", "Connecting to WebSocket: $wsUrl")
         val deferred = CompletableDeferred<Unit>()
 
         webSocket = client.newWebSocket(requestBuilder.build(), object : WebSocketListener() {
             override fun onOpen(ws: WebSocket, response: Response) {
+                RemoteLogger.i("GatewayClient", "WebSocket OPEN to $wsUrl, HTTP ${response.code}")
                 isConnected = true
                 deferred.complete(Unit)
             }
 
             override fun onMessage(ws: WebSocket, text: String) {
+                RemoteLogger.d("GatewayClient", "WS INBOUND: ${text.take(120)}")
                 handleInboundMessage(text)
             }
 
             override fun onClosing(ws: WebSocket, code: Int, reason: String) {
+                RemoteLogger.w("GatewayClient", "WebSocket CLOSING: code=$code, reason=$reason")
                 ws.close(code, reason)
                 handleDisconnected()
             }
 
             override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
+                RemoteLogger.e("GatewayClient", "WebSocket FAILURE: HTTP ${response?.code}, error=${t.message}", t)
                 handleDisconnected()
                 if (!deferred.isCompleted) {
                     deferred.completeExceptionally(t)
@@ -297,6 +303,33 @@ class HermesGatewayClient(
         return json.decodeFromJsonElement(
             kotlinx.serialization.builtins.ListSerializer(com.hermesagent.nativemobile.data.model.LiveProfile.serializer()),
             profilesElement
+        )
+    }
+
+    suspend fun createSession(profile: String, title: String = "New chat"): com.hermesagent.nativemobile.data.model.LiveSession {
+        val params = buildJsonObject {
+            put("profile", profile)
+            put("title", title)
+            put("hidden", false)
+            put("follow_profile_config", true)
+        }
+        val result = call("session.create", params).jsonObject
+        val sid = result["stored_session_id"]?.jsonPrimitive?.content
+            ?: result["session_id"]?.jsonPrimitive?.content
+            ?: result["id"]?.jsonPrimitive?.content
+            ?: "session-client-${System.currentTimeMillis()}"
+
+        val runtimeId = result["session_id"]?.jsonPrimitive?.content
+        if (runtimeId != null) {
+            resolvedSessions[sid] = runtimeId
+            resolvedSessions[runtimeId] = sid
+        }
+
+        return com.hermesagent.nativemobile.data.model.LiveSession(
+            id = sid,
+            title = title,
+            profile = profile,
+            lastActive = System.currentTimeMillis()
         )
     }
 

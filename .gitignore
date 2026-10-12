@@ -4,6 +4,8 @@ dist/
 app-debug.apk
 android-native/.gradle/
 android-native/app/build/
+android-debug.log
+scripts/__pycache__/
 src-tauri/target/
 .DS_Store
 .env
