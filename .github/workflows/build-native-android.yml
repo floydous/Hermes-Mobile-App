@@ -38,6 +38,10 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x android-native/gradlew
 
+      - name: Run Unit Tests
+        working-directory: android-native
+        run: ./gradlew testDebugUnitTest --stacktrace
+
       - name: Build Debug APK
         working-directory: android-native
         run: ./gradlew assembleDebug --stacktrace

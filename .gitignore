@@ -1,5 +1,9 @@
 node_modules/
 dist/
+*.apk
+app-debug.apk
+android-native/.gradle/
+android-native/app/build/
 src-tauri/target/
 .DS_Store
 .env
