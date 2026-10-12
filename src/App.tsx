@@ -675,7 +675,25 @@ export default function App() {
     return () => document.removeEventListener('visibilitychange', resumeSavedConnection)
   }, [])
 
-  const adhocSessionIds = useMemo(() => new Set(sessions.map(s => s.id)), [sessions])
+  const canonicalSessionIds = useMemo(() => {
+    const set = new Set<string>()
+    for (const p of profiles) {
+      if (p.canonical_session?.id) set.add(p.canonical_session.id)
+      if (p.canonical_session?.resolved_id) set.add(p.canonical_session.resolved_id)
+      if (p.last_session?.id && p.last_session.title === 'Bot Chat') set.add(p.last_session.id)
+    }
+    return set
+  }, [profiles])
+
+  const adhocSessionIds = useMemo(() => {
+    const set = new Set<string>()
+    for (const s of sessions) {
+      if (!canonicalSessionIds.has(s.id) && s.title !== 'Bot Chat') {
+        set.add(s.id)
+      }
+    }
+    return set
+  }, [sessions, canonicalSessionIds])
 
   const rows = useMemo(() => buildBotRows(profiles, sessions).map(({ profile, session }) => {
     const sid = session ? resolveCanonicalSessionId(session) : ''
@@ -707,16 +725,6 @@ export default function App() {
       } satisfies LiveSession : null,
     }
   }).filter(row => `${row.profile.name} ${row.profile.display_name || ''} ${row.session?.preview || ''}`.toLowerCase().includes(query.toLowerCase())), [profiles, sessions, activeTurns, selected?.id, query, adhocSessionIds])
-
-  const canonicalSessionIds = useMemo(() => {
-    const set = new Set<string>()
-    for (const p of profiles) {
-      if (p.canonical_session?.id) set.add(p.canonical_session.id)
-      if (p.canonical_session?.resolved_id) set.add(p.canonical_session.resolved_id)
-      if (p.last_session?.id && p.last_session.title === 'Bot Chat') set.add(p.last_session.id)
-    }
-    return set
-  }, [profiles])
 
   const visibleSessions = useMemo(() => {
     const seenIds = new Set<string>()
@@ -789,6 +797,7 @@ export default function App() {
     const candidateIds = [
       safeSession.id,
       getResolvedSessionId(safeSession.id, activeEndpointRef.current),
+      isCanonical ? `draft:${safeSession.profile}` : undefined,
       isCanonical ? profiles.find(p => p.name === safeSession.profile)?.canonical_session?.id : undefined,
       isCanonical ? profiles.find(p => p.name === safeSession.profile)?.canonical_session?.resolved_id : undefined,
     ].filter((id): id is string => Boolean(id))
@@ -834,7 +843,10 @@ export default function App() {
     setError('')
 
     const isTurnInFlight = Boolean(
-      (isCanonical && activeInFlightTurnsRef.current.has(safeSession.profile)) ||
+      (isCanonical && (
+        activeInFlightTurnsRef.current.has(safeSession.profile) ||
+        activeInFlightTurnsRef.current.has(`draft:${safeSession.profile}`)
+      )) ||
       activeInFlightTurnsRef.current.has(safeSession.id)
     )
     const isCachedSettled = isTurnSettledByTranscript(activeTurn, cached, isTurnInFlight)
@@ -882,7 +894,10 @@ export default function App() {
             t && doesSessionMatchTurn(safeSession, t.sessionId || '', t.profile, profiles, id => getResolvedSessionId(id, activeEndpointRef.current), adhocSessionIds)
           ) ||
           activeInFlightTurnsRef.current.has(safeSession.id) ||
-          (isCanonical && activeInFlightTurnsRef.current.has(safeSession.profile))
+          (isCanonical && (
+            activeInFlightTurnsRef.current.has(safeSession.profile) ||
+            activeInFlightTurnsRef.current.has(`draft:${safeSession.profile}`)
+          ))
         )
         const existingMessages = (() => {
           for (const cid of candidateIds) {
@@ -911,7 +926,10 @@ export default function App() {
         )
         const isTurnInFlightAsync = Boolean(
           activeInFlightTurnsRef.current.has(safeSession.id) ||
-          (isCanonical && activeInFlightTurnsRef.current.has(safeSession.profile))
+          (isCanonical && (
+            activeInFlightTurnsRef.current.has(safeSession.profile) ||
+            activeInFlightTurnsRef.current.has(`draft:${safeSession.profile}`)
+          ))
         )
         const isTranscriptSettled = isTurnSettledByTranscript(currentActive, resolvedLoaded, isTurnInFlightAsync)
 
@@ -1667,17 +1685,6 @@ export default function App() {
 
   const handleClearChat = useCallback(async (session: LiveSession): Promise<void> => {
     console.log('[Hermes Debug] handleClearChat invoked for:', session.id, session.profile)
-    setActiveTurns(prev => {
-      const next = { ...prev }
-      delete next[session.profile]
-      return next
-    })
-    setMessages([])
-    setSending(false)
-    setStreaming('')
-    setToolActivities([])
-    setSettledAssistant(null)
-    setError('')
 
     const botProfile = profiles.find(p => p.name === session.profile)
     const isCanonical = Boolean(
@@ -1696,19 +1703,38 @@ export default function App() {
     const extraIds: string[] = []
     if (botProfile?.canonical_session?.id) extraIds.push(botProfile.canonical_session.id)
     if (botProfile?.canonical_session?.resolved_id) extraIds.push(botProfile.canonical_session.resolved_id)
+    const allSessionIds = new Set<string>([session.id, ...extraIds, `draft:${session.profile}`].filter(Boolean))
 
-    for (const id of [session.id, ...extraIds]) {
-      if (id) {
-        messageCacheRef.current.delete(id)
-        removeCachedSessionMessages(id)
-      }
+    for (const sid of allSessionIds) {
+      activeInFlightTurnsRef.current.end(sid)
+      recentEndedTurnsRef.current.set(sid, Date.now())
+      delete pendingClarifyRef.current[sid]
+      clearPersistedClarify(sid)
+      messageCacheRef.current.delete(sid)
+      removeCachedSessionMessages(sid)
     }
-    delete pendingClarifyRef.current[session.id]
-    for (const extra of extraIds) delete pendingClarifyRef.current[extra]
-    if (isCanonical) delete pendingClarifyByProfileRef.current[session.profile]
-    clearPersistedClarify(session.id, isCanonical ? session.profile : null)
-    for (const extra of extraIds) clearPersistedClarify(extra)
+    if (session.profile) {
+      activeInFlightTurnsRef.current.end(session.profile)
+      recentEndedTurnsRef.current.set(session.profile, Date.now())
+      delete pendingClarifyByProfileRef.current[session.profile]
+      clearPersistedClarify(session.profile)
+    }
+
+    setActiveTurns(prev => {
+      const next = { ...prev }
+      delete next[session.profile]
+      for (const sid of allSessionIds) {
+        delete next[sid]
+      }
+      return next
+    })
+    setMessages([])
+    setSending(false)
+    setStreaming('')
+    setToolActivities([])
+    setSettledAssistant(null)
     setPendingClarify(null)
+    setError('')
 
     try {
       const fresh = await clearSession(session.id, session.profile, {
@@ -1751,6 +1777,10 @@ export default function App() {
     void openSession(draftSession)
     try {
       const fresh = await createSession(profile.name, 'Bot Chat', { canonical: true, hidden: true })
+      setProfiles(prev => prev.map(p => p.name === profile.name ? {
+        ...p,
+        canonical_session: fresh,
+      } : p))
       setSelected(current => current?.id === draftSession.id ? {
         ...fresh,
         title: profile.display_name || titleize(profile.name),

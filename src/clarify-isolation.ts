@@ -21,24 +21,36 @@ export function isSessionCanonical(
   adhocSessionIds?: Set<string>
 ): boolean {
   if (!session) return false
-  if (session.id && adhocSessionIds?.has(session.id)) return false
   if (session.id?.startsWith('draft:')) return true
   if (session.title === 'Bot Chat') return true
+
   const profName = session.profile || ''
   const profile = profiles.find(p => p.name === profName)
   if (profile) {
     if (profile.canonical_session) {
-      if (session.id && session.id === profile.canonical_session.id) return true
-      if (session.id && profile.canonical_session.resolved_id && session.id === profile.canonical_session.resolved_id) return true
+      if (session.id && (session.id === profile.canonical_session.id || session.id === profile.canonical_session.resolved_id)) {
+        return true
+      }
     }
     if (session.title && (session.title === profile.display_name || session.title === profile.name || session.title === titleize(profile.name))) {
+      if (session.id && adhocSessionIds?.has(session.id)) {
+        return false
+      }
       return true
     }
   } else if (profName) {
     if (session.title && (session.title === profName || session.title === titleize(profName))) {
+      if (session.id && adhocSessionIds?.has(session.id)) {
+        return false
+      }
       return true
     }
   }
+
+  if (session.id && adhocSessionIds?.has(session.id)) {
+    return false
+  }
+
   return false
 }
 
@@ -54,7 +66,6 @@ export function isTurnCanonicalForProfile(
   adhocSessionIds?: Set<string>
 ): boolean {
   if (!turnSessionId || !turnProfile) return false
-  if (adhocSessionIds?.has(turnSessionId)) return false
   if (turnSessionId === `draft:${turnProfile}`) return true
   if (turnSessionId.startsWith(`dispatched:${turnProfile}`)) return true
 
@@ -70,6 +81,9 @@ export function isTurnCanonicalForProfile(
       if (rId && resolved === rId) return true
     }
   }
+
+  if (adhocSessionIds?.has(turnSessionId)) return false
+
   return false
 }
 
