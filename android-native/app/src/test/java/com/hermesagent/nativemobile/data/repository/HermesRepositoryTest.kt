@@ -34,7 +34,7 @@ class HermesRepositoryTest {
             id = -12345L,
             role = "user",
             content = prompt,
-            timestamp = System.currentTimeMillis(),
+            timestamp = System.currentTimeMillis().toDouble(),
             local = true
         )
 

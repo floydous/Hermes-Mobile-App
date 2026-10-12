@@ -184,7 +184,7 @@ class HermesRepository(
                 id = "session-client-${System.currentTimeMillis()}",
                 title = title,
                 profile = profile,
-                lastActive = System.currentTimeMillis()
+                lastActive = System.currentTimeMillis().toDouble()
             )
             _sessions.value = listOf(fallback) + _sessions.value
             fallback
@@ -216,7 +216,7 @@ class HermesRepository(
             id = -System.currentTimeMillis(),
             role = "user",
             content = prompt,
-            timestamp = System.currentTimeMillis(),
+            timestamp = System.currentTimeMillis().toDouble(),
             local = true
         )
 

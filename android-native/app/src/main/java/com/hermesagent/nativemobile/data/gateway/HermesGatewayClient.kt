@@ -329,7 +329,7 @@ class HermesGatewayClient(
             id = sid,
             title = title,
             profile = profile,
-            lastActive = System.currentTimeMillis()
+            lastActive = System.currentTimeMillis().toDouble()
         )
     }
 
@@ -352,13 +352,19 @@ class HermesGatewayClient(
         val resolvedSid = resolvedSessions[sessionId] ?: sessionId
         val params = buildJsonObject {
             put("session_id", resolvedSid)
-            put("prompt", prompt)
+            put("text", prompt)
             if (options.truncateRowId != null) {
+                put("confirm_truncate", true)
                 put("truncate_before_row_id", options.truncateRowId)
+                if (options.truncateRowId == 0L || options.truncateRowId == 1L) {
+                    put("confirm_empty_truncate", true)
+                }
             } else if (options.truncateMessageId != null) {
+                put("confirm_truncate", true)
                 put("truncate_before_message_id", options.truncateMessageId)
             }
             if (options.truncateOrdinal != null) {
+                put("confirm_truncate", true)
                 put("truncate_ordinal", options.truncateOrdinal)
             }
         }

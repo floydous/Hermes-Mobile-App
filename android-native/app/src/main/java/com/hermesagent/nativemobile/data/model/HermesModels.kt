@@ -27,13 +27,13 @@ data class LiveSession(
     val unread: Boolean = false,
     @SerialName("unread_count") val unreadCount: Int = 0,
     @SerialName("message_count") val messageCount: Int = 0,
-    @SerialName("last_active") val lastActive: Long = 0L,
+    @SerialName("last_active") val lastActive: Double? = null,
     @SerialName("resolved_id") val resolvedId: String? = null
 )
 
 @Serializable
 data class LiveMessage(
-    val id: Long,
+    val id: Long = 0L,
     val role: String, // "user", "assistant", "tool", "system"
     val content: String,
     @SerialName("display_content") val displayContent: String? = null,
@@ -42,7 +42,7 @@ data class LiveMessage(
     @SerialName("tool_status") val toolStatus: String? = null, // "running", "done", "failed"
     @SerialName("duration_s") val durationS: Double? = null,
     val reasoning: String? = null,
-    val timestamp: Long = 0L,
+    val timestamp: Double? = null,
     @SerialName("token_count") val tokenCount: Long? = null,
     val usage: LiveUsage? = null,
     @SerialName("row_id") val rowId: Long? = null,

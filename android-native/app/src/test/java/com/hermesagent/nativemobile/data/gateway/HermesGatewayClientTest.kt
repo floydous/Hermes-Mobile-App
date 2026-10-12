@@ -35,10 +35,12 @@ class HermesGatewayClientTest {
         val options = SubmitPromptOptions(truncateRowId = 42L, truncateMessageId = "msg-1")
         val params = buildJsonObject {
             put("session_id", "sess-123")
-            put("prompt", "Hello world")
+            put("text", "Hello world")
             if (options.truncateRowId != null) {
+                put("confirm_truncate", true)
                 put("truncate_before_row_id", options.truncateRowId!!)
             } else if (options.truncateMessageId != null) {
+                put("confirm_truncate", true)
                 put("truncate_before_message_id", options.truncateMessageId!!)
             }
         }
