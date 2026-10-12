@@ -39,14 +39,6 @@ val HermesBorderAurora = Color(0x298EC2FF)
 val HermesAccentAurora = Color(0xFF74D7C2)
 val HermesUserBubbleAurora = Color(0xFF18283D)
 
-// Common Accent Tokens
-val AccentGreen = Color(0xFF22C55E)
-val AccentRed = Color(0xFFEF4444)
-val AccentAmber = Color(0xFFF59E0B)
-val AccentIndigo = Color(0xFF6366F1)
-val White = Color(0xFFFFFFFF)
-val Black = Color(0xFF000000)
-
 val LightScheme = lightColorScheme(
     primary = HermesTextLight,
     onPrimary = White,
