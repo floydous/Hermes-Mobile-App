@@ -24,6 +24,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.hermesagent.nativemobile.data.auth.HermesAuthClient
 import com.hermesagent.nativemobile.data.auth.HermesAuthStore
+import com.hermesagent.nativemobile.data.model.CronJob
 import com.hermesagent.nativemobile.data.model.LiveProfile
 import com.hermesagent.nativemobile.data.model.LiveSession
 import com.hermesagent.nativemobile.data.repository.HermesRepository
@@ -184,8 +185,9 @@ fun MainAppScreen(
 
                 // Bot Profile Sheet (SOUL, Model, Capabilities)
                 selectedProfileForSheet != null -> {
+                    val profileToView = selectedProfileForSheet!!
                     com.hermesagent.nativemobile.ui.screens.BotProfileSheet(
-                        profile = selectedProfileForSheet!!,
+                        profile = profileToView,
                         repository = repository,
                         onClose = { selectedProfileForSheet = null }
                     )
@@ -193,8 +195,9 @@ fun MainAppScreen(
 
                 // Task Detail & Execution Sheet
                 selectedTaskForDetail != null -> {
+                    val taskToView = selectedTaskForDetail!!
                     com.hermesagent.nativemobile.ui.screens.TaskDetailSheet(
-                        task = selectedTaskForDetail!!,
+                        task = taskToView,
                         repository = repository,
                         onBack = { selectedTaskForDetail = null }
                     )
