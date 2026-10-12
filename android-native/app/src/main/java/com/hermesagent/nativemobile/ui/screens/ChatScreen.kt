@@ -48,6 +48,7 @@ import com.hermesagent.nativemobile.data.model.LiveSession
 import com.hermesagent.nativemobile.data.repository.ActiveTurn
 import com.hermesagent.nativemobile.ui.components.ChatBubble
 import com.hermesagent.nativemobile.ui.components.ClarifyCard
+import com.hermesagent.nativemobile.ui.components.MessageActionSheetModal
 import com.hermesagent.nativemobile.ui.components.SmoothStreamingText
 import com.hermesagent.nativemobile.ui.theme.AccentAmber
 import com.hermesagent.nativemobile.ui.theme.AccentIndigo
@@ -78,6 +79,7 @@ fun ChatScreen(
 ) {
     var inputText by remember { mutableStateOf("") }
     var editingRowId by remember { mutableStateOf<Long?>(null) }
+    var activeActionMessage by remember { mutableStateOf<LiveMessage?>(null) }
     val listState = rememberLazyListState()
 
     // Auto-scroll on new message
@@ -166,9 +168,8 @@ fun ChatScreen(
             items(messages, key = { it.id }) { msg ->
                 ChatBubble(
                     message = msg,
-                    onEditMessage = { msgToEdit ->
-                        inputText = msgToEdit.content
-                        editingRowId = msgToEdit.rowId
+                    onLongPress = { longPressedMsg ->
+                        activeActionMessage = longPressedMsg
                     }
                 )
             }
@@ -289,6 +290,19 @@ fun ChatScreen(
                     )
                 }
             }
+        }
+
+        // Fullscreen Frosted Blurred Backdrop Action Sheet (React Hermes Parity)
+        if (activeActionMessage != null) {
+            MessageActionSheetModal(
+                message = activeActionMessage!!,
+                onDismiss = { activeActionMessage = null },
+                onEdit = { msg ->
+                    inputText = msg.text
+                    editingRowId = msg.rowId
+                    activeActionMessage = null
+                }
+            )
         }
     }
 }

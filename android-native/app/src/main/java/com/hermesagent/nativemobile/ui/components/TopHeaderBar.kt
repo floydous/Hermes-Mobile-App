@@ -29,6 +29,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.hermesagent.nativemobile.ui.theme.AccentAmber
 import com.hermesagent.nativemobile.ui.theme.AccentGreen
 import com.hermesagent.nativemobile.ui.theme.AccentRed
@@ -76,21 +77,21 @@ fun TopHeaderBar(
                 .clickable { onHostClick() },
             contentAlignment = Alignment.Center
         ) {
-            // Circular Host Avatar
+            // Circular Host Avatar with official Hermes Icon
             Box(
                 modifier = Modifier
                     .size(34.dp)
                     .shadow(3.dp, CircleShape)
                     .clip(CircleShape)
                     .background(HermesPanel)
-                    .border(1.dp, HermesBorder, CircleShape),
+                    .border(1.dp, HermesBorder, CircleShape)
+                    .padding(6.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = "H",
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = HermesText
+                AsyncImage(
+                    model = "file:///android_asset/hermes-agent-icon-transparent.svg",
+                    contentDescription = "Hermes Host",
+                    modifier = Modifier.size(22.dp)
                 )
             }
 

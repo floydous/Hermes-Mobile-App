@@ -51,6 +51,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.window.Dialog
 import kotlinx.coroutines.launch
 
@@ -72,16 +76,31 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             var themeName by remember { mutableStateOf(authStore.getTheme()) }
-            HermesTheme(themeName = themeName) {
-                MainAppScreen(
-                    authStore = authStore,
-                    repository = repository,
-                    currentTheme = themeName,
-                    onThemeChange = {
-                        themeName = it
-                        authStore.setTheme(it)
-                    }
-                )
+            var uiScale by remember { mutableFloatStateOf(authStore.getUiScale()) }
+
+            val density = LocalDensity.current
+            val scaledDensity = Density(
+                density = density.density * uiScale,
+                fontScale = density.fontScale * uiScale
+            )
+
+            CompositionLocalProvider(LocalDensity provides scaledDensity) {
+                HermesTheme(themeName = themeName) {
+                    MainAppScreen(
+                        authStore = authStore,
+                        repository = repository,
+                        currentTheme = themeName,
+                        currentScale = uiScale,
+                        onThemeChange = {
+                            themeName = it
+                            authStore.setTheme(it)
+                        },
+                        onScaleChange = {
+                            uiScale = it
+                            authStore.setUiScale(it)
+                        }
+                    )
+                }
             }
         }
     }
@@ -93,7 +112,9 @@ fun MainAppScreen(
     authStore: HermesAuthStore,
     repository: HermesRepository,
     currentTheme: String = "light",
-    onThemeChange: (String) -> Unit = {}
+    currentScale: Float = 1.15f,
+    onThemeChange: (String) -> Unit = {},
+    onScaleChange: (Float) -> Unit = {}
 ) {
     val scope = rememberCoroutineScope()
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { 3 })
@@ -144,7 +165,9 @@ fun MainAppScreen(
                     SettingsScreen(
                         authStore = authStore,
                         repository = repository,
-                        onBack = { isSettingsOpen = false }
+                        onBack = { isSettingsOpen = false },
+                        onThemeChanged = onThemeChange,
+                        onScaleChanged = onScaleChange
                     )
                 }
 

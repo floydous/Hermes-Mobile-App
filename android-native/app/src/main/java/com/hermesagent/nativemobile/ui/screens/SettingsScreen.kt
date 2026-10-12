@@ -63,6 +63,8 @@ fun SettingsScreen(
     authStore: HermesAuthStore,
     repository: HermesRepository,
     onBack: () -> Unit,
+    onThemeChanged: (String) -> Unit = {},
+    onScaleChanged: (Float) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var subPage by remember { mutableStateOf<String?>("root") }
@@ -79,9 +81,11 @@ fun SettingsScreen(
             currentScale = authStore.getUiScale(),
             onThemeChanged = { newTheme ->
                 authStore.setTheme(newTheme)
+                onThemeChanged(newTheme)
             },
             onScaleChanged = { newScale ->
                 authStore.setUiScale(newScale)
+                onScaleChanged(newScale)
             },
             onBack = { subPage = "root" }
         )

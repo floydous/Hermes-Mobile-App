@@ -257,12 +257,7 @@ class HermesGatewayClient(
 
     private suspend fun advertiseCapabilities() {
         val payload = buildJsonObject {
-            put("client", "hermes-mobile-native")
-            put("version", "1.0.0")
-            putJsonObject("features") {
-                put("tools.clarify", true)
-                put("tools.command", true)
-            }
+            put("server_requests", true)
         }
         try {
             call("client.capabilities", payload, timeoutMs = 5000)

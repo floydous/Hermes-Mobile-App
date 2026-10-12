@@ -35,7 +35,7 @@ data class LiveSession(
 data class LiveMessage(
     val id: Long = 0L,
     val role: String, // "user", "assistant", "tool", "system"
-    val content: String,
+    val content: String? = null,
     @SerialName("display_content") val displayContent: String? = null,
     @SerialName("display_kind") val displayKind: String? = null,
     @SerialName("tool_name") val toolName: String? = null,
@@ -47,7 +47,9 @@ data class LiveMessage(
     val usage: LiveUsage? = null,
     @SerialName("row_id") val rowId: Long? = null,
     val local: Boolean = false
-)
+) {
+    val text: String get() = displayContent ?: content ?: ""
+}
 
 @Serializable
 data class LiveUsage(
