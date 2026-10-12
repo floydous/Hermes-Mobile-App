@@ -58,10 +58,16 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            HermesTheme {
+            var themeName by remember { mutableStateOf(authStore.getTheme()) }
+            HermesTheme(themeName = themeName) {
                 MainAppScreen(
                     authStore = authStore,
-                    repository = repository
+                    repository = repository,
+                    currentTheme = themeName,
+                    onThemeChange = {
+                        themeName = it
+                        authStore.setTheme(it)
+                    }
                 )
             }
         }
@@ -72,7 +78,9 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MainAppScreen(
     authStore: HermesAuthStore,
-    repository: HermesRepository
+    repository: HermesRepository,
+    currentTheme: String = "light",
+    onThemeChange: (String) -> Unit = {}
 ) {
     val scope = rememberCoroutineScope()
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { 3 })
@@ -109,13 +117,13 @@ fun MainAppScreen(
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
-        containerColor = HermesBg
+        containerColor = com.hermesagent.nativemobile.ui.theme.getBackgroundColor(currentTheme)
     ) { innerPadding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .background(HermesBg)
+                .background(com.hermesagent.nativemobile.ui.theme.getBackgroundColor(currentTheme))
         ) {
             when {
                 // 1. Dedicated Settings & Connection Screen

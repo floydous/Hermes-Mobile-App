@@ -38,6 +38,22 @@ class HermesAuthStore(context: Context) {
         prefs.edit().putString("basic_auth", header).apply()
     }
 
+    fun getTheme(): String {
+        return prefs.getString("theme", "light") ?: "light"
+    }
+
+    fun setTheme(theme: String) {
+        prefs.edit().putString("theme", theme).apply()
+    }
+
+    fun getUiScale(): Float {
+        return prefs.getFloat("ui_scale", 1.15f)
+    }
+
+    fun setUiScale(scale: Float) {
+        prefs.edit().putFloat("ui_scale", scale).apply()
+    }
+
     fun clearAuth() {
         prefs.edit()
             .remove("access_token")

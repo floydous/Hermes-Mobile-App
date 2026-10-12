@@ -134,6 +134,9 @@ fun LiveWaveIndicator(modifier: Modifier = Modifier) {
         Box(modifier = Modifier.size(3.5.dp).offset(y = dot3.dp).clip(CircleShape).background(AccentIndigo))
     }
 }
+
+@Composable
+fun BotRow(
     profile: LiveProfile,
     session: LiveSession?,
     isWorking: Boolean,

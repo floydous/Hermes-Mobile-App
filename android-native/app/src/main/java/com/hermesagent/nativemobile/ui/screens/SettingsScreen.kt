@@ -73,12 +73,25 @@ fun SettingsScreen(
             repository = repository,
             onBack = { subPage = "root" }
         )
+    } else if (subPage == "appearance") {
+        AppearanceSettingsScreen(
+            currentTheme = authStore.getTheme(),
+            currentScale = authStore.getUiScale(),
+            onThemeChanged = { newTheme ->
+                authStore.setTheme(newTheme)
+            },
+            onScaleChanged = { newScale ->
+                authStore.setUiScale(newScale)
+            },
+            onBack = { subPage = "root" }
+        )
     } else {
         SettingsRootScreen(
             authStore = authStore,
             repository = repository,
             onBack = onBack,
             onOpenPairing = { subPage = "pairing" },
+            onOpenAppearance = { subPage = "appearance" },
             modifier = modifier
         )
     }
@@ -90,6 +103,7 @@ fun SettingsRootScreen(
     repository: HermesRepository,
     onBack: () -> Unit,
     onOpenPairing: () -> Unit,
+    onOpenAppearance: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val scope = rememberCoroutineScope()
@@ -247,6 +261,12 @@ fun SettingsRootScreen(
                     .background(HermesPanel)
                     .border(1.dp, HermesBorder, RoundedCornerShape(16.dp))
             ) {
+                MenuRow(
+                    label = "Appearance",
+                    trailing = "›",
+                    onClick = onOpenAppearance
+                )
+                HorizontalDivider(color = HermesBorderSubtle, thickness = 1.dp)
                 MenuRow(
                     label = "Security & pairing",
                     trailing = if (isConnected) "Connected ›" else "Disconnected ›",
