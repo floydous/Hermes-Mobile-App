@@ -39,6 +39,19 @@ import com.hermesagent.nativemobile.ui.theme.HermesBg
 import com.hermesagent.nativemobile.ui.theme.HermesTheme
 import com.hermesagent.nativemobile.util.RemoteLogger
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -271,27 +284,27 @@ fun MainAppScreen(
 
             // New Chat Bot Picker Dialog
             if (showNewChatBotPicker) {
-                androidx.compose.ui.window.Dialog(onDismissRequest = { showNewChatBotPicker = false }) {
+                Dialog(onDismissRequest = { showNewChatBotPicker = false }) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .androidx.compose.ui.draw.clip(androidx.compose.foundation.shape.RoundedCornerShape(20.dp))
+                            .clip(RoundedCornerShape(20.dp))
                             .background(com.hermesagent.nativemobile.ui.theme.HermesPanel)
-                            .border(1.dp, com.hermesagent.nativemobile.ui.theme.HermesBorder, androidx.compose.foundation.shape.RoundedCornerShape(20.dp))
+                            .border(1.dp, com.hermesagent.nativemobile.ui.theme.HermesBorder, RoundedCornerShape(20.dp))
                             .padding(20.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Text(
                             text = "New chat with",
                             fontSize = 17.sp,
-                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                            fontWeight = FontWeight.Bold,
                             color = com.hermesagent.nativemobile.ui.theme.HermesText
                         )
                         profiles.forEach { profile ->
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .androidx.compose.ui.draw.clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                                    .clip(RoundedCornerShape(12.dp))
                                     .clickable {
                                         showNewChatBotPicker = false
                                         scope.launch {
@@ -301,7 +314,7 @@ fun MainAppScreen(
                                         }
                                     }
                                     .padding(10.dp),
-                                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                                verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 com.hermesagent.nativemobile.ui.components.BotAvatar(
@@ -312,7 +325,7 @@ fun MainAppScreen(
                                 Text(
                                     text = profile.displayName ?: profile.name,
                                     fontSize = 15.sp,
-                                    fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                                    fontWeight = FontWeight.SemiBold,
                                     color = com.hermesagent.nativemobile.ui.theme.HermesText
                                 )
                             }
