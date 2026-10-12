@@ -369,7 +369,21 @@ class HermesGatewayClient(
     }
 
     suspend fun submitPrompt(sessionId: String, prompt: String, options: SubmitPromptOptions = SubmitPromptOptions()): JsonElement {
-        val resolvedSid = resolvedSessions[sessionId] ?: sessionId
+        var resolvedSid = resolvedSessions[sessionId] ?: sessionId
+        return try {
+            doSubmitPrompt(resolvedSid, prompt, options)
+        } catch (e: GatewayRpcException) {
+            if (e.code == 4001 || e.message.contains("session not found")) {
+                RemoteLogger.w("GatewayClient", "Caught 4001 session not found, resuming $sessionId and retrying prompt.submit")
+                resolvedSid = resumeSession(sessionId)
+                doSubmitPrompt(resolvedSid, prompt, options)
+            } else {
+                throw e
+            }
+        }
+    }
+
+    private suspend fun doSubmitPrompt(resolvedSid: String, prompt: String, options: SubmitPromptOptions): JsonElement {
         val params = buildJsonObject {
             put("session_id", resolvedSid)
             put("text", prompt)

@@ -94,7 +94,7 @@ fun parseMarkdownNodes(raw: String): List<MarkdownNode> {
         if (line.trim().startsWith("- ") || line.trim().startsWith("* ")) {
             val listItems = mutableListOf<String>()
             while (i < lines.size && (lines[i].trim().startsWith("- ") || lines[i].trim().startsWith("* "))) {
-                listItems.add(lines[i].trim().substring(2))
+                listItems.add(lines[i].trim().removePrefix("- ").removePrefix("* "))
                 i++
             }
             nodes.add(MarkdownNode.ListNode(listItems))
@@ -134,17 +134,23 @@ fun renderInlineFormatting(text: String): AnnotatedString {
             when {
                 value.startsWith("**") && value.endsWith("**") -> {
                     pushStyle(SpanStyle(fontWeight = FontWeight.Bold))
-                    append(value.substring(2, value.length - 2))
+                    if (value.length > 4) {
+                        append(value.substring(2, value.length - 2))
+                    }
                     pop()
                 }
                 value.startsWith("*") && value.endsWith("*") -> {
                     pushStyle(SpanStyle(fontStyle = FontStyle.Italic))
-                    append(value.substring(1, value.length - 1))
+                    if (value.length > 2) {
+                        append(value.substring(1, value.length - 1))
+                    }
                     pop()
                 }
                 value.startsWith("`") && value.endsWith("`") -> {
                     pushStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = Color(0x18000000)))
-                    append(" ${value.substring(1, value.length - 1)} ")
+                    if (value.length > 2) {
+                        append(" ${value.substring(1, value.length - 1)} ")
+                    }
                     pop()
                 }
                 value.startsWith("[") && value.contains("](") -> {
