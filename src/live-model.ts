@@ -42,8 +42,13 @@ export function buildBotRows(
           }
         }
       } else if (!activeSession && sessions && Array.isArray(sessions)) {
-        const fallback = sessions.find(s => s.profile === profile.name && s.title === 'Bot Chat')
-        if (fallback) activeSession = fallback
+        const matchingSessions = sessions.filter(s =>
+          s.profile === profile.name &&
+          (s.title === 'Bot Chat' || s.title === profile.display_name || s.title === profile.name)
+        )
+        if (matchingSessions.length > 0) {
+          activeSession = matchingSessions.slice().sort((a, b) => (b.last_active || 0) - (a.last_active || 0))[0]
+        }
       }
       return { profile, session: activeSession }
     })

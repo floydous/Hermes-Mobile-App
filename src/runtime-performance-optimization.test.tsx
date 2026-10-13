@@ -9,8 +9,9 @@ import {
   tokenizeStreamChunk,
   consolidateSettledNodes,
 } from './components/SmoothStreamingView'
-import { reconcileActiveTurns } from './chat-turn'
+import { reconcileActiveTurns, shouldRetainLocalMessages } from './chat-turn'
 import { doesSessionMatchTurn, reconcileSettledSessionTurn } from './clarify-isolation'
+import { buildBotRows } from './live-model'
 import type { LiveMessage } from './hermes'
 
 class MockDomNode {
@@ -266,6 +267,28 @@ describe('Runtime Performance & Resource Optimization', () => {
       // Sibling ad-hoc session sharing the 'default' profile remains intact!
       expect(nextTurns['session-beta']).toBeDefined()
       expect(nextTurns['session-beta'].sessionId).toBe('session-beta')
+    })
+
+    it('deterministically selects the newest session by last_active when multiple matching sessions exist for a bot', () => {
+      const profiles = [{ name: 'researcher', display_name: 'Researcher' }]
+      const sessions = [
+        { id: 'sess-old', profile: 'researcher', title: 'Researcher', last_active: 1000 },
+        { id: 'sess-newest', profile: 'researcher', title: 'Researcher', last_active: 5000 },
+        { id: 'sess-mid', profile: 'researcher', title: 'Bot Chat', last_active: 3000 },
+      ]
+
+      const rows = buildBotRows(profiles, sessions)
+      expect(rows[0].session?.id).toBe('sess-newest')
+    })
+
+    it('shouldRetainLocalMessages preserves optimistic messages when backend returns empty array', () => {
+      const backendLoaded: any[] = []
+      const localCached = [{ id: -1, role: 'user', content: 'Hi' }]
+      
+      // When backend is empty but local messages exist, must return true to prevent wiping
+      expect(shouldRetainLocalMessages(backendLoaded, localCached, false)).toBe(true)
+      // When backend has messages, should return false (allow authoritative sync)
+      expect(shouldRetainLocalMessages([{ id: 1, role: 'user', content: 'Hi' }], localCached, false)).toBe(false)
     })
   })
 })

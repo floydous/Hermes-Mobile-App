@@ -360,7 +360,25 @@ export default function App() {
     try {
       const data = await loadSnapshot(endpoint)
       if (!refreshEpochRef.current.isCurrent(epoch)) return null
-      setProfiles(data.profiles)
+      setProfiles(prevProfiles => {
+        return data.profiles.map(p => {
+          const prev = prevProfiles.find(old => old.name === p.name)
+          if (!p.canonical_session && prev?.canonical_session) {
+            const prevId = prev.canonical_session.id
+            const isFreshOrInFlight = Boolean(
+              activeInFlightTurnsRef.current.has(prevId) ||
+              activeInFlightTurnsRef.current.has(p.name) ||
+              selectedRef.current?.id === prevId ||
+              (messageCacheRef.current.get(prevId)?.length || 0) > 0 ||
+              getCachedSessionMessages(prevId)?.length
+            )
+            if (isFreshOrInFlight) {
+              return { ...p, canonical_session: prev.canonical_session }
+            }
+          }
+          return p
+        })
+      })
       setSessions(prevSessions => {
         const nextMap = new Map<string, LiveSession>(data.sessions.map(s => [s.id, s]))
         // Preserve any session that is currently selected, in-flight, or has local optimistic messages
@@ -372,7 +390,7 @@ export default function App() {
             getResolvedSessionId(prev.id, endpoint) === existingId
           )
           if (!isAlreadyPresent) {
-            const isPrevCanonical = isSessionCanonical(prev, data.profiles, adhocSessionIds)
+            const isPrevCanonical = isSessionCanonical(prev, data.profiles, adhocSessionIdsRef.current)
             const isInFlight = Boolean(
               activeInFlightTurnsRef.current.has(prev.id) ||
               (isPrevCanonical && activeInFlightTurnsRef.current.has(prev.profile)) ||
@@ -965,6 +983,9 @@ export default function App() {
           // Do not overwrite optimistic user messages with empty array from unset SQLite backend
           if (requestId === sessionLoadRef.current) {
             setConversationLoading(false)
+            if (existingMessages.length > 0) {
+              setMessages(existingMessages)
+            }
           }
           return
         }
@@ -1847,6 +1868,32 @@ export default function App() {
       void openSession(existingSession)
       return
     }
+
+    // Check if canonical session exists in profilesRef or sessionsRef before minting new
+    const canonicalSession = profile.canonical_session
+      || profilesRef.current.find(p => p.name === profile.name)?.canonical_session
+    if (canonicalSession) {
+      const canonicalId = resolveCanonicalSessionId(canonicalSession)
+      void openSession({
+        id: canonicalId,
+        title: profile.display_name || titleize(profile.name),
+        preview: canonicalSession.preview || '',
+        profile: profile.name,
+        model: profile.model,
+        last_active: canonicalSession.last_active,
+      })
+      return
+    }
+
+    const fallbackSession = sessionsRef.current.find(s =>
+      s.profile === profile.name &&
+      (s.title === 'Bot Chat' || s.title === profile.display_name || s.title === profile.name || isSessionCanonical(s, profilesRef.current, adhocSessionIdsRef.current))
+    )
+    if (fallbackSession) {
+      void openSession(fallbackSession)
+      return
+    }
+
     // Optimistically open an instant draft session so the UI transitions in 0ms
     const draftSession: LiveSession = {
       id: `draft:${profile.name}`,
