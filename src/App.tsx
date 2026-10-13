@@ -359,7 +359,7 @@ export default function App() {
     setRemoteLoggerEndpoint(normalized)
     return normalized
   }
-  const refresh = useCallback(async (requestedEndpoint = activeEndpointRef.current, supersede = false): Promise<{ profiles: LiveProfile[]; sessions: LiveSession[] } | null> => {
+  const refresh = useCallback(async (requestedEndpoint = activeEndpointRef.current, supersede = false, shouldWarmUp = false): Promise<{ profiles: LiveProfile[]; sessions: LiveSession[] } | null> => {
     if ((pairingBusyRef.current || refreshInFlightRef.current) && !supersede) return null
     const endpoint = requestedEndpoint.replace(/\/$/, '')
     const epoch = refreshEpochRef.current.begin()
@@ -455,31 +455,36 @@ export default function App() {
         setActiveTurns(prev => reconcileActiveTurns(prev, activeList, map, Date.now(), endedSet, activeInFlightTurnsRef.current.toSet()))
       }).catch(() => {})
 
-      // Stagger background warm-up so we don't saturate the network/tunnel
-      window.setTimeout(() => {
-        const candidates = [
-          ...data.profiles.map(p => p.canonical_session ? { id: resolveCanonicalSessionId(p.canonical_session), profile: p.name } : null).filter((item): item is { id: string; profile: string } => Boolean(item?.id)),
-          ...data.sessions.slice(0, 8).map(s => ({ id: s.id, profile: s.profile })),
-        ]
-        candidates.forEach((candidate, idx) => {
-          if (!candidate?.id || messageCacheRef.current.has(candidate.id)) return
-          const delay = idx < 2 ? 0 : (idx - 1) * 200
-          window.setTimeout(() => {
-            void loadMessages(candidate.id, candidate.profile, endpoint).then(msgs => {
-              const existing = messageCacheRef.current.get(candidate.id) || []
-              const isTurnActive = Boolean(activeTurnsRef.current[candidate.profile] || activeInFlightTurnsRef.current.has(candidate.profile))
-              if (shouldRetainLocalMessages(msgs, existing, isTurnActive)) return
-              messageCacheRef.current.set(candidate.id, msgs)
-              setCachedSessionMessages(candidate.id, msgs)
-            }).catch(() => {})
-          }, delay)
-        })
-
-        // Pre-warm scheduled tasks so swiping to Tasks is instantaneous with zero delay
+      if (shouldWarmUp) {
+        // Stagger background warm-up so we don't saturate the network/tunnel
         window.setTimeout(() => {
-          void preloadTaskJobs(endpoint, data.profiles)
-        }, 80)
-      }, 50)
+          if (!refreshEpochRef.current.isCurrent(epoch)) return
+          const candidates = [
+            ...data.profiles.map(p => p.canonical_session ? { id: resolveCanonicalSessionId(p.canonical_session), profile: p.name } : null).filter((item): item is { id: string; profile: string } => Boolean(item?.id)),
+            ...data.sessions.slice(0, 8).map(s => ({ id: s.id, profile: s.profile })),
+          ]
+          candidates.forEach((candidate, idx) => {
+            if (!candidate?.id || messageCacheRef.current.has(candidate.id)) return
+            const delay = idx < 2 ? 0 : (idx - 1) * 200
+            window.setTimeout(() => {
+              if (!refreshEpochRef.current.isCurrent(epoch)) return
+              void loadMessages(candidate.id, candidate.profile, endpoint).then(msgs => {
+                const existing = messageCacheRef.current.get(candidate.id) || []
+                const isTurnActive = Boolean(activeTurnsRef.current[candidate.profile] || activeInFlightTurnsRef.current.has(candidate.profile))
+                if (shouldRetainLocalMessages(msgs, existing, isTurnActive)) return
+                messageCacheRef.current.set(candidate.id, msgs)
+                setCachedSessionMessages(candidate.id, msgs)
+              }).catch(() => {})
+            }, delay)
+          })
+
+          // Pre-warm scheduled tasks so swiping to Tasks is instantaneous with zero delay
+          window.setTimeout(() => {
+            if (!refreshEpochRef.current.isCurrent(epoch)) return
+            void preloadTaskJobs(endpoint, data.profiles)
+          }, 80)
+        }, 50)
+      }
 
       return data
     } catch (reason) {
@@ -506,7 +511,7 @@ export default function App() {
   }, [])
   const pullRefreshRoster = async () => {
     setRosterPullRefreshing(true)
-    try { await refresh() } finally { setRosterPullRefreshing(false) }
+    try { await refresh(activeEndpointRef.current, true, true) } finally { setRosterPullRefreshing(false) }
   }
 
   useEffect(() => {
@@ -726,11 +731,11 @@ export default function App() {
       catch (reason) { if (active) setError(errorMessage(reason, 'Could not restore the saved Hermes host.')) }
       if (!active) return
       const endpoint = activateEndpoint(selectRestoredEndpoint(nativeEndpoint, localStorage.getItem('hermes-mobile-active-endpoint'), 'http://127.0.0.1:9119'))
-      await refresh(endpoint, true)
+      await refresh(endpoint, true, true)
       if (active) timer = window.setInterval(() => {
         if (navigationRef.current.selected || sendingRef.current) return
-        void refresh(activeEndpointRef.current)
-      }, 5_000)
+        void refresh(activeEndpointRef.current, false, false)
+      }, 10_000)
     }
     void bootstrap()
     return () => { active = false; if (timer) window.clearInterval(timer); refreshEpochRef.current.begin() }
@@ -2273,13 +2278,14 @@ export default function App() {
         {((loading && !profiles.length) || (tab === 'sessions' && loading && !sessions.length)) ? <Skeleton/> : (
           <>
             <section className="bot-list" style={{ display: tab === 'bots' ? undefined : 'none' }}>
-              {rows.map(({ profile, session }) => {
+              {rows.map(({ profile, session }, index) => {
                 const activeTurn = isBotRowWorking(profile.name, session || profile.canonical_session, activeTurns, adhocSessionIds)
                 const isWorking = Boolean(activeTurn)
                 const isWaitingInput = Boolean(activeTurn && (activeTurn.status === 'waiting' || activeTurn.needsInput))
                 return (
                   <button
-                    className={`bot-row ${isWorking ? 'working' : ''} ${isWaitingInput ? 'waiting' : ''}`}
+                    className={`bot-row enter ${isWorking ? 'working' : ''} ${isWaitingInput ? 'waiting' : ''}`}
+                    style={{ animationDelay: `${Math.min(index, 8) * 28}ms` }}
                     key={profile.name}
                     onPointerDown={handleRowPointerDown}
                     onClick={() => void openBot(profile, session)}
@@ -2332,7 +2338,7 @@ export default function App() {
                   </button>
                 </div>
               ) : (
-                visibleSessions.slice(0, 45).map(session => {
+                visibleSessions.slice(0, 45).map((session, index) => {
                   const activeTurn = isSessionRowWorking(session.id, session.profile, activeTurns)
                   const isWorking = Boolean(activeTurn)
                   const isWaitingInput = Boolean(activeTurn && (activeTurn.status === 'waiting' || activeTurn.needsInput))
@@ -2340,7 +2346,8 @@ export default function App() {
                   const profile = profileMap.get(session.profile)
                   return (
                     <button
-                      className={`bot-row ${isWorking ? 'working' : ''} ${isOpening ? 'opening' : ''} ${isWaitingInput ? 'waiting' : ''}`}
+                      className={`bot-row enter ${isWorking ? 'working' : ''} ${isOpening ? 'opening' : ''} ${isWaitingInput ? 'waiting' : ''}`}
+                      style={{ animationDelay: `${Math.min(index, 8) * 28}ms` }}
                       key={`${session.profile}:${session.id}`}
                       onPointerDown={handleRowPointerDown}
                       onClick={() => void openSession(session)}
