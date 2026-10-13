@@ -148,6 +148,7 @@ export default function App() {
   const [slideDirection, setSlideDirection] = useState<'forward' | 'backward'>('forward')
 
   const switchTab = useCallback((newTab: Tab) => {
+    remoteLog('DEBUG', 'Navigation', `switchTab requested -> ${newTab}`)
     setTab(current => {
       if (newTab === current) return current
       const tabOrder: Tab[] = ['bots', 'sessions', 'tasks']
@@ -311,6 +312,7 @@ export default function App() {
   }
 
   const handleRowPointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
+    remoteLog('DEBUG', 'Action', `Row pointerdown on ${event.currentTarget.className}`)
     setRowRipplePoint(event)
   }
   const navigationRef = useRef({ selected: false, profileSheet: false, settings: false, createOpen: false, tab: 'bots' as Tab })
@@ -882,16 +884,24 @@ export default function App() {
       isCanonical ? profilesRef.current.find(p => p.name === safeSession.profile)?.canonical_session?.resolved_id : undefined,
     ].filter((id): id is string => Boolean(id))
 
-    // Fast-path: check in-memory cache, then fallback to persistent localStorage cache for instant 0ms restoration
+    // Fast-path: check in-memory cache first across all candidate IDs (0ms)
     let cached: LiveMessage[] | undefined = undefined
     for (const cid of candidateIds) {
-      const found = messageCacheRef.current.get(cid) || getCachedSessionMessages(cid)
-      if (found && found.length > 0) {
-        cached = found
-        for (const alias of candidateIds) {
-          messageCacheRef.current.set(alias, found)
-        }
+      const memoryFound = messageCacheRef.current.get(cid)
+      if (memoryFound && memoryFound.length > 0) {
+        cached = memoryFound
         break
+      }
+    }
+    // If not in memory, check localStorage across candidate IDs until first match is found
+    if (!cached) {
+      for (const cid of candidateIds) {
+        const diskFound = getCachedSessionMessages(cid)
+        if (diskFound && diskFound.length > 0) {
+          cached = diskFound
+          messageCacheRef.current.set(cid, diskFound)
+          break
+        }
       }
     }
 
@@ -1895,6 +1905,7 @@ export default function App() {
   }, [profiles, sessions, refresh])
 
   const openBot = useCallback(async (profile: RosterProfile, existingSession: LiveSession | null) => {
+    remoteLog('DEBUG', 'Action', `openBot tapped: profile=${profile.name}, hasExistingSession=${Boolean(existingSession)}`)
     if (existingSession) {
       void openSession(existingSession)
       return
@@ -2023,10 +2034,19 @@ export default function App() {
     if (event.touches.length !== 1) return
     const target = event.target as HTMLElement | null
     if (target?.closest('input, textarea, select, [type="range"], .task-detail, .task-create-sheet, .task-modal-backdrop, .roster-nav, .roster-pinned, .nav-island')) return
+    
+    // A new touch interaction begins: immediately clear any trailing swipe blockage
+    justSwipedRef.current = false
+    if (swipeReleaseTimerRef.current != null) {
+      window.clearTimeout(swipeReleaseTimerRef.current)
+      swipeReleaseTimerRef.current = null
+    }
+
     swipeStartXRef.current = event.touches[0].clientX
     swipeStartYRef.current = event.touches[0].clientY
     swipeTrackingRef.current = true
     swipeIntentConfirmedRef.current = false
+    remoteLog('DEBUG', 'Gesture', `TouchStart on roster at x=${Math.round(event.touches[0].clientX)} y=${Math.round(event.touches[0].clientY)} target=${target?.tagName}.${target?.className}`)
   }
 
   const handleRosterTouchMove = (event: React.TouchEvent<HTMLElement>) => {
@@ -2039,6 +2059,7 @@ export default function App() {
     if (!swipeIntentConfirmedRef.current) {
       if (isHorizontalSwipeIntent(deltaX, deltaY, 10)) {
         swipeIntentConfirmedRef.current = true
+        remoteLog('DEBUG', 'Gesture', `Swipe intent confirmed: deltaX=${Math.round(deltaX)} deltaY=${Math.round(deltaY)}`)
       } else if (Math.hypot(deltaX, deltaY) >= 10) {
         // Vertical or diagonal movement: immediately yield to vertical scrolling
         swipeTrackingRef.current = false
@@ -2072,6 +2093,7 @@ export default function App() {
     // Require confirmed horizontal intent with at least 44px delta
     if (wasConfirmed) {
       const nextTab = computeNextSwipeTab(tab, deltaX, deltaY, 44)
+      remoteLog('DEBUG', 'Gesture', `TouchEnd evaluated: deltaX=${Math.round(deltaX)} confirmed=${wasConfirmed} nextTab=${nextTab || 'none'}`)
       if (nextTab) {
         justSwipedRef.current = true
         if (swipeReleaseTimerRef.current != null) window.clearTimeout(swipeReleaseTimerRef.current)
@@ -2102,10 +2124,16 @@ export default function App() {
       return
     }
     if (justSwipedRef.current) {
+      remoteLog('WARN', 'Gesture', `Click suppressed by justSwiped: target=${target?.tagName}.${target?.className}`)
       justSwipedRef.current = false
-      if (swipeReleaseTimerRef.current != null) window.clearTimeout(swipeReleaseTimerRef.current)
+      if (swipeReleaseTimerRef.current != null) {
+        window.clearTimeout(swipeReleaseTimerRef.current)
+        swipeReleaseTimerRef.current = null
+      }
       event.stopPropagation()
       event.preventDefault()
+    } else {
+      remoteLog('DEBUG', 'Gesture', `Click permitted: target=${target?.tagName}.${target?.className}`)
     }
   }
 

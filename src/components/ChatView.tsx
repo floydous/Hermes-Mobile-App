@@ -12,6 +12,7 @@ import { SCROLL_FOLLOW_THRESHOLD, shouldStickToBottom } from '../scroll-follow'
 import { formatResponseStats } from '../message-stats'
 import { getInitialSpinnerPhrase, getProgressiveSpinnerPhrase, getRandomToolThreshold } from '../spinner-phrases'
 import { useEdgeSwipeBack } from '../edge-swipe'
+import { remoteLog } from '../remote-logger'
 import { Composer, type ComposerDropFilesRef, type ComposerEditRequest } from './Composer'
 import type { LiveMessage, LiveProfile, LiveSession, LiveUsage } from '../hermes'
 
@@ -296,7 +297,9 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
       }
       prependingEarlierRef.current = true
     }
-    setRenderedLimit(prev => Math.min(messages.length, prev + 25))
+    const nextLimit = Math.min(messages.length, renderedLimit + 25)
+    remoteLog('DEBUG', 'ChatHistory', `Revealed earlier messages: showing ${nextLimit} of ${messages.length}`)
+    setRenderedLimit(nextLimit)
     return true
   }, [renderedLimit, messages.length])
 
@@ -304,6 +307,7 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
     if (loadingEarlier || !hasMoreEarlier || !loadEarlierMessages) return
     const thread = threadRef.current
     if (!thread) return
+    remoteLog('DEBUG', 'ChatHistory', `fetchEarlier: requesting older page from server (currently ${messages.length})`)
     setLoadingEarlier(true)
     prependingEarlierRef.current = true
     scrollAnchorRef.current = {
