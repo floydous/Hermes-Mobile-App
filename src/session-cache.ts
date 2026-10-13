@@ -1,4 +1,5 @@
 import type { LiveMessage } from './hermes'
+import { isPerformanceDiagnosticsEnabled, recordPerformanceEvent } from './remote-logger'
 
 const STORAGE_PREFIX = 'hermes-msgs-v1:'
 const MAX_CACHED_SESSIONS = 15
@@ -26,9 +27,11 @@ export function setCachedSessionMessages(sessionId: string, messages: LiveMessag
   if (typeof window === 'undefined' || !window.localStorage || !sessionId) return
   if (!Array.isArray(messages) || messages.length === 0) return
   try {
+    const perfStart = isPerformanceDiagnosticsEnabled() && typeof performance !== 'undefined' ? performance.now() : 0
     // Cache up to 250 latest messages per session for instant deep scrollback restoration
     const compactMessages = messages.length > 250 ? messages.slice(messages.length - 250) : messages
-    localStorage.setItem(`${STORAGE_PREFIX}${sessionId}`, JSON.stringify(compactMessages))
+    const serialized = JSON.stringify(compactMessages)
+    localStorage.setItem(`${STORAGE_PREFIX}${sessionId}`, serialized)
 
     // Manage index of cached session keys
     const indexKey = `${STORAGE_PREFIX}__index__`
@@ -43,6 +46,21 @@ export function setCachedSessionMessages(sessionId: string, messages: LiveMessag
       }
     }
     localStorage.setItem(indexKey, JSON.stringify(index))
+
+    if (perfStart > 0) {
+      const dur = performance.now() - perfStart
+      recordPerformanceEvent({
+        op: 'storage',
+        phase: 'write_messages',
+        traceId: sessionId,
+        durationMs: Math.round(dur * 100) / 100,
+        timestamp: new Date().toISOString(),
+        metrics: {
+          messageCount: compactMessages.length,
+          payloadBytes: serialized.length,
+        },
+      })
+    }
   } catch {}
 }
 

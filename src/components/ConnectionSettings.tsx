@@ -1,16 +1,27 @@
 import { invoke } from '@tauri-apps/api/core'
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, Check, CheckCircle2, Copy, ExternalLink, GitBranch, Globe2, Heart, LoaderCircle, LockKeyhole, RotateCcw, ShieldCheck, Smartphone, Wifi } from 'lucide-react'
+import { ArrowLeft, Check, CheckCircle2, Copy, ExternalLink, GitBranch, Globe2, Heart, LoaderCircle, LockKeyhole, RotateCcw, ShieldCheck, Smartphone, Wifi, Activity, FileJson, Trash2, Send } from 'lucide-react'
 
 import HermesAgentAppIcon from '../assets/hermes-agent-app-icon.png'
 import { errorMessage, supportsBasicAuth } from '../connection-state'
 import { useEdgeSwipeBack } from '../edge-swipe'
 import { nativeSignIn, passwordSignIn, probeHermesGateway } from '../hermes'
+import {
+  clearPerformanceBuffer,
+  createTraceId,
+  exportBufferedPerformanceEvents,
+  flushPerformanceEvents,
+  isPerformanceDiagnosticsEnabled,
+  recordPerformanceEvent,
+  setPerformanceAuthToken,
+  setPerformanceDiagnosticsEnabled,
+  setPerformanceLogHost,
+} from '../remote-logger'
 
 const HermesMobileLogo = HermesAgentAppIcon
 
 type Theme = 'dark' | 'light' | 'grey' | 'aurora'
-type Page = 'root' | 'pairing' | 'about' | 'appearance'
+type Page = 'root' | 'pairing' | 'about' | 'appearance' | 'diagnostics'
 
 type Props = {
   profiles: number
@@ -280,6 +291,169 @@ function AppearanceSettings({
   )
 }
 
+function DiagnosticsSettings({ back }: { back: () => void }) {
+  const shellRef = useRef<HTMLElement>(null)
+  useEdgeSwipeBack(shellRef, back)
+  const [enabled, setEnabled] = useState(() => isPerformanceDiagnosticsEnabled())
+  const [host, setHost] = useState(() => (typeof localStorage !== 'undefined' ? localStorage.getItem('hermes_perf_debug_host') || '100.117.86.67' : '100.117.86.67'))
+  const [token, setToken] = useState(() => (typeof localStorage !== 'undefined' ? localStorage.getItem('hermes_perf_debug_token') || '' : ''))
+  const [testStatus, setTestStatus] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+  const [bufferCount, setBufferCount] = useState(() => exportBufferedPerformanceEvents().length)
+
+  const toggleEnabled = (val: boolean) => {
+    setEnabled(val)
+    setPerformanceDiagnosticsEnabled(val)
+    setBufferCount(exportBufferedPerformanceEvents().length)
+  }
+
+  const updateHost = (val: string) => {
+    setHost(val)
+    setPerformanceLogHost(val.trim() || null)
+  }
+
+  const updateToken = (val: string) => {
+    setToken(val)
+    setPerformanceAuthToken(val.trim() || null)
+  }
+
+  const sendTestBatch = async () => {
+    setTestStatus('Sending test record…')
+    recordPerformanceEvent({
+      op: 'diagnostics_test',
+      phase: 'manual_ping',
+      traceId: createTraceId('diag'),
+      durationMs: 1.23,
+      timestamp: new Date().toISOString(),
+      metrics: { manual: true },
+    })
+    setBufferCount(exportBufferedPerformanceEvents().length)
+    try {
+      await flushPerformanceEvents()
+      setTestStatus('Sent successfully to debug server!')
+      setBufferCount(exportBufferedPerformanceEvents().length)
+      setTimeout(() => setTestStatus(null), 3000)
+    } catch {
+      setTestStatus('Failed to send (server unreachable)')
+      setTimeout(() => setTestStatus(null), 3000)
+    }
+  }
+
+  const exportJson = async () => {
+    const data = exportBufferedPerformanceEvents()
+    const str = JSON.stringify(data, null, 2)
+    try {
+      await navigator.clipboard.writeText(str)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {}
+  }
+
+  const clearBuffer = () => {
+    clearPerformanceBuffer()
+    setBufferCount(0)
+  }
+
+  return (
+    <main ref={shellRef} className="app panel appearance-screen">
+      <Header title="Diagnostics" subtitle="Remote Performance Telemetry" back={back}/>
+
+      <section className="appearance-group">
+        <p className="appearance-group-label">INSTRUMENTATION & TELEMETRY</p>
+        <div className="pairing-card" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <b style={{ fontSize: 15 }}>Performance Diagnostics</b>
+              <p style={{ margin: '3px 0 0', color: 'var(--muted)', fontSize: 12, lineHeight: 1.4 }}>
+                Batches interaction timings, render latency, and Long Tasks to debug server.
+              </p>
+            </div>
+            <button
+              type="button"
+              className={enabled ? 'primary' : 'secondary'}
+              style={{ minHeight: 34, padding: '0 14px', fontSize: 13, fontWeight: 600 }}
+              onClick={() => toggleEnabled(!enabled)}
+            >
+              {enabled ? 'Enabled' : 'Disabled'}
+            </button>
+          </div>
+
+          <label className="pairing-field" style={{ margin: '8px 0 0' }}>
+            <span>DEBUG LOG SERVER HOST / IP</span>
+            <input
+              value={host}
+              onChange={e => updateHost(e.target.value)}
+              placeholder="100.117.86.67"
+              autoCapitalize="none"
+              autoCorrect="off"
+            />
+          </label>
+
+          <label className="pairing-field" style={{ margin: '4px 0 0' }}>
+            <span>OPTIONAL DEBUG AUTH TOKEN</span>
+            <input
+              type="password"
+              value={token}
+              onChange={e => updateToken(e.target.value)}
+              placeholder="Leave blank for none"
+              autoCapitalize="none"
+              autoCorrect="off"
+            />
+          </label>
+        </div>
+      </section>
+
+      <section className="appearance-group">
+        <p className="appearance-group-label">DIAGNOSTIC ACTIONS</p>
+        <div className="pairing-card" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 13, color: 'var(--muted)' }}>Buffered records in queue:</span>
+            <b style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}>{bufferCount}</b>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="secondary"
+              style={{ flex: 1, minHeight: 38, fontSize: 12, gap: 6 }}
+              disabled={!enabled}
+              onClick={() => void sendTestBatch()}
+            >
+              <Send size={14}/> Test Log Batch
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              style={{ flex: 1, minHeight: 38, fontSize: 12, gap: 6 }}
+              onClick={() => void exportJson()}
+            >
+              <Copy size={14}/> {copied ? 'Copied JSON' : 'Export JSON'}
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              style={{ minHeight: 38, fontSize: 12, gap: 6 }}
+              onClick={clearBuffer}
+            >
+              <Trash2 size={14}/> Clear
+            </button>
+          </div>
+
+          {testStatus && (
+            <p style={{ margin: '6px 0 0', fontSize: 12, color: testStatus.includes('success') ? 'var(--secondary)' : 'var(--accent)' }}>
+              {testStatus}
+            </p>
+          )}
+        </div>
+
+        <p className="appearance-footnote">
+          Diagnostics run entirely non-blocking and asynchronously over Tailscale port 8765. Zero prompt text or private messages are ever logged.
+        </p>
+      </section>
+    </main>
+  )
+}
+
 export function ConnectionSettings({ profiles, sessions, connected, endpoint, theme, setTheme, uiScale, setUiScale, close, refresh, onPairingBusy, onPaired }: Props) {
   const shellRef = useRef<HTMLElement>(null)
   useEdgeSwipeBack(shellRef, close, true)
@@ -315,6 +489,7 @@ export function ConnectionSettings({ profiles, sessions, connected, endpoint, th
       />
     )
   }
+  if (page === 'diagnostics') return <DiagnosticsSettings back={() => setPage('root')}/>
   if (page === 'about') return <AboutHermesMobile back={() => setPage('root')}/>
   if (page === 'pairing') return <PairingSettings back={() => setPage('root')} onPaired={onPaired} onPairingBusy={onPairingBusy} initialEndpoint={endpoint}/>
   const displayEndpoint = endpoint?.replace(/^https?:\/\//, '')
@@ -332,6 +507,9 @@ export function ConnectionSettings({ profiles, sessions, connected, endpoint, th
       <button>Notifications <span>›</span></button>
       <button onClick={() => setPage('appearance')}>
         Appearance <span>›</span>
+      </button>
+      <button onClick={() => setPage('diagnostics')}>
+        Diagnostics & Performance <span>›</span>
       </button>
       <button onClick={() => setPage('pairing')}>Security & pairing <span className={connected ? '' : 'connection-attention'}>{connected ? 'Connected ›' : 'Disconnected ›'}</span></button>
       <button onClick={() => setPage('about')}>About Hermes Mobile <span>0.1.1 ›</span></button>

@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react'
+import React, { useEffect, useRef } from 'react'
+import { isPerformanceDiagnosticsEnabled, recordPerformanceEvent } from '../remote-logger'
 
 export function tokenizeStreamChunk(text: string): string[] {
   const rawTokens = text.match(/\S+|\s+/g) || []
@@ -35,6 +36,20 @@ export function consolidateSettledNodes(container: HTMLDivElement | any, targetC
       const doc = typeof document !== 'undefined' ? document : null
       const textNode = doc ? doc.createTextNode(settledText) : { nodeType: 3, textContent: settledText }
       container.insertBefore(textNode, first)
+    }
+
+    if (isPerformanceDiagnosticsEnabled()) {
+      recordPerformanceEvent({
+        op: 'stream_render',
+        phase: 'consolidate_nodes',
+        traceId: 'stream_dom',
+        durationMs: 0,
+        timestamp: new Date().toISOString(),
+        metrics: {
+          activeNodes: container.childNodes.length,
+          settledChars: settledText.length,
+        },
+      })
     }
   }
 }

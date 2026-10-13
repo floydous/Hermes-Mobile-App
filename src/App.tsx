@@ -40,7 +40,14 @@ import {
   resolveLatestSessionPreview,
   setCachedSessionMessages,
 } from './session-cache'
-import { remoteLog, setRemoteLoggerEndpoint } from './remote-logger'
+import {
+  finishPerformanceTrace,
+  recordPerformanceEvent,
+  recordTracePhase,
+  remoteLog,
+  setRemoteLoggerEndpoint,
+  startPerformanceTrace,
+} from './remote-logger'
 import {
   executeTurnSubmissionPipeline,
 } from './session-title'
@@ -888,6 +895,19 @@ export default function App() {
       }
     }
 
+    const perfTraceId = startPerformanceTrace('session_open')
+    recordTracePhase(perfTraceId, 'cache_hydrate', {
+      isCacheHit: Boolean(cached && cached.length > 0),
+      cachedCount: cached?.length || 0,
+      sessionId: safeSession.id,
+      profile: safeSession.profile,
+    })
+    if (typeof requestAnimationFrame !== 'undefined') {
+      requestAnimationFrame(() => {
+        recordTracePhase(perfTraceId, 'frame_0_paint')
+      })
+    }
+
     // Immediately mark session as read on Frame 0
     try {
       const nowMs = Date.now()
@@ -958,6 +978,7 @@ export default function App() {
     return (async () => {
       try {
         const loaded = await loadMessages(safeSession.id, safeSession.profile, activeEndpointRef.current)
+        recordTracePhase(perfTraceId, 'network_load', { loadedCount: loaded.length })
         if (requestId !== sessionLoadRef.current) return
         const latestAssistant = latestUsage ? [...loaded].reverse().findIndex(message => message.role === 'assistant') : -1
         const resolvedLoaded = latestAssistant >= 0 ? loaded.map((message, index) => index === loaded.length - latestAssistant - 1 ? { ...message, usage: latestUsage } : message) : loaded
@@ -1046,6 +1067,7 @@ export default function App() {
         } else {
           setMessages(deduplicateConsecutiveMessages(resolvedLoaded))
         }
+        finishPerformanceTrace(perfTraceId, 'settle', { totalMessages: resolvedLoaded.length })
       }
       catch (reason) {
         if (requestId === sessionLoadRef.current) {
@@ -1277,7 +1299,9 @@ export default function App() {
     const text = rawText.trim()
     if (!text && !attachmentRefs.length) return false
     const prompt = buildAttachmentPrompt(text, attachmentRefs)
-    remoteLog('INFO', 'PromptSubmit', `Submit prompt in ${turnSessionId} (${turnProfile}): "${prompt.slice(0, 60)}"`)
+    const perfTraceId = startPerformanceTrace('prompt_submit')
+    recordTracePhase(perfTraceId, 'input_handler', { promptLength: prompt.length })
+    remoteLog('INFO', 'PromptSubmit', `Submit prompt in ${turnSessionId} (${turnProfile}): length=${prompt.length}`)
     let completionUsage: LiveUsage | undefined
     let finalText = ''
     const settledSnapshot = settledAssistantRef.current
@@ -1384,6 +1408,7 @@ export default function App() {
       }
     }
 
+    let hasRecordedFirstDelta = false
     try {
       const { finalSessionId, finalText: finalOutput, completionUsage: usage } = await executeTurnSubmissionPipeline({
         turnSessionId,
@@ -1397,6 +1422,10 @@ export default function App() {
         },
         connectAndSubmitFn: connectAndSubmit,
         onDelta: text => {
+          if (!hasRecordedFirstDelta) {
+            hasRecordedFirstDelta = true
+            recordTracePhase(perfTraceId, 'first_delta', { textLength: text.length })
+          }
           finalText = text
           if (activeTurnsRef.current[turnSessionId]) {
             activeTurnsRef.current[turnSessionId].streamingText = text
@@ -1722,6 +1751,7 @@ export default function App() {
       }
 
       await refresh()
+      finishPerformanceTrace(perfTraceId, 'final_settle', { totalTextLength: finalText.length })
       return true
     } catch (reason) {
       for (const [_, prof] of inFlightDelegationByToolId.current.entries()) {
