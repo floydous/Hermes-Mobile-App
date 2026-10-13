@@ -85,5 +85,6 @@ describe('Markdown Content Rendering Safety & Syntax Highlighting', () => {
     expect(htmlMention).toContain('class="mention-link"')
     expect(htmlMention).toContain('@coder')
     expect(htmlMention).toContain('@tester')
+    expect(htmlMention).not.toContain('node=')
   })
 })

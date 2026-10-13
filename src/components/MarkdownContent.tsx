@@ -1114,10 +1114,10 @@ const MATH_REHYPE_PLUGINS = [rehypeHighlight, rehypeKatex]
 const URL_IDENTITY_TRANSFORM = (url: string) => url
 
 const MARKDOWN_COMPONENTS: React.ComponentProps<typeof Markdown>['components'] = {
-  a: ({ children: content, href, ...props }) => href?.startsWith('hermes-mention:')
+  a: ({ children: content, href, node: _node, ...props }) => href?.startsWith('hermes-mention:')
     ? <span className="mention-link" {...props}>{content}</span>
     : <a {...props} href={href} target="_blank" rel="noreferrer">{content}</a>,
-  code: ({ className, children: content, ...props }) => {
+  code: ({ className, children: content, node: _node, ...props }) => {
     const value = String(content)
     return className || value.includes('\n')
       ? <CodeBlock className={className}>{content}</CodeBlock>
@@ -1147,8 +1147,42 @@ export function hasMathContent(text: string): boolean {
   return false
 }
 
+export type MarkdownBlockProps = {
+  content: string
+  hasMath: boolean
+}
+
+export function areMarkdownBlockPropsEqual(
+  prev: MarkdownBlockProps,
+  next: MarkdownBlockProps
+): boolean {
+  return prev.content === next.content && prev.hasMath === next.hasMath
+}
+
+export const MemoizedMarkdownBlock = memo(
+  function MemoizedMarkdownBlock({
+    content,
+    hasMath,
+  }: MarkdownBlockProps) {
+    const remarkPlugins = hasMath ? MATH_REMARK_PLUGINS : STANDARD_REMARK_PLUGINS
+    const rehypePlugins = hasMath ? MATH_REHYPE_PLUGINS : STANDARD_REHYPE_PLUGINS
+    return (
+      <Markdown
+        urlTransform={URL_IDENTITY_TRANSFORM}
+        remarkPlugins={remarkPlugins}
+        rehypePlugins={rehypePlugins}
+        components={MARKDOWN_COMPONENTS}
+      >
+        {content}
+      </Markdown>
+    )
+  },
+  areMarkdownBlockPropsEqual
+)
+
 export const MarkdownContent = memo(function MarkdownContent({
   children,
+  isStreaming: _isStreaming,
 }: {
   children?: unknown
   isStreaming?: boolean
@@ -1165,25 +1199,19 @@ export const MarkdownContent = memo(function MarkdownContent({
           return <MediaAttachmentCard key={idx} rawPath={seg.path} kind={seg.type} />
         }
         const hasMath = hasMathContent(seg.content)
-        const remarkPlugins = hasMath ? MATH_REMARK_PLUGINS : STANDARD_REMARK_PLUGINS
-        const rehypePlugins = hasMath ? MATH_REHYPE_PLUGINS : STANDARD_REHYPE_PLUGINS
-
         const withMentionLinks = seg.content.includes('@')
           ? seg.content.replace(/(^|\s)(@[a-zA-Z0-9][\w-]*)\b/g, '$1[$2](hermes-mention:$2)')
           : seg.content
         const withHtmlImages = normalizeHtmlImages(withMentionLinks)
         const withSingleLineImages = normalizeMultilineImages(withHtmlImages)
         const normalized = hasMath ? normalizeLatex(withSingleLineImages) : withSingleLineImages
+
         return (
-          <Markdown
+          <MemoizedMarkdownBlock
             key={idx}
-            urlTransform={URL_IDENTITY_TRANSFORM}
-            remarkPlugins={remarkPlugins}
-            rehypePlugins={rehypePlugins}
-            components={MARKDOWN_COMPONENTS}
-          >
-            {normalized}
-          </Markdown>
+            content={normalized}
+            hasMath={hasMath}
+          />
         )
       })}
     </div>

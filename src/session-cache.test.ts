@@ -1,5 +1,7 @@
 import { describe, expect, it, beforeEach } from 'vitest'
 import {
+  areMessageListsEqual,
+  areMessageListsShallowEqual,
   deduplicateConsecutiveMessages,
   getCachedSessionMessages,
   isHumanChatSession,
@@ -269,5 +271,154 @@ describe('session-cache message caching and eviction', () => {
     expect(parseLastReadTimestamp('0')).toBeNull()
     expect(parseLastReadTimestamp('-100')).toBeNull()
     expect(parseLastReadTimestamp('1720000000')).toBe(1720000000)
+  })
+
+  it('accurately compares message lists for shallow equality', () => {
+    const list1: LiveMessage[] = [
+      { id: 1, role: 'user', content: 'hello' },
+      { id: 2, role: 'assistant', content: 'hi' },
+    ]
+    const list2: LiveMessage[] = [
+      { id: 1, role: 'user', content: 'hello' },
+      { id: 2, role: 'assistant', content: 'hi' },
+    ]
+    const listDifferentLength: LiveMessage[] = [
+      { id: 1, role: 'user', content: 'hello' },
+    ]
+    const listDifferentContent: LiveMessage[] = [
+      { id: 1, role: 'user', content: 'hello' },
+      { id: 2, role: 'assistant', content: 'hi there' },
+    ]
+    const listDifferentRole: LiveMessage[] = [
+      { id: 1, role: 'user', content: 'hello' },
+      { id: 2, role: 'system', content: 'hi' },
+    ]
+    const listDifferentToolName: LiveMessage[] = [
+      { id: 1, role: 'user', content: 'hello' },
+      { id: 2, role: 'assistant', content: 'hi', tool_name: 'search' },
+    ]
+    const listDifferentUsage: LiveMessage[] = [
+      { id: 1, role: 'user', content: 'hello' },
+      { id: 2, role: 'assistant', content: 'hi', usage: { total: 150, prompt: 100, completion: 50 } },
+    ]
+    const listDifferentTimestamp: LiveMessage[] = [
+      { id: 1, role: 'user', content: 'hello' },
+      { id: 2, role: 'assistant', content: 'hi', timestamp: 1700000000 },
+    ]
+    const listDifferentReasoning: LiveMessage[] = [
+      { id: 1, role: 'user', content: 'hello' },
+      { id: 2, role: 'assistant', content: 'hi', reasoning: 'thinking...' },
+    ]
+    const listDifferentDisplayKind: LiveMessage[] = [
+      { id: 1, role: 'user', content: 'hello' },
+      { id: 2, role: 'assistant', content: 'hi', display_kind: 'model_switch' },
+    ]
+
+    const listDifferentUsageModel: LiveMessage[] = [
+      { id: 1, role: 'user', content: 'hello' },
+      { id: 2, role: 'assistant', content: 'hi', usage: { model: 'claude-3-5-sonnet' } },
+    ]
+    const listDifferentUsagePrompt: LiveMessage[] = [
+      { id: 1, role: 'user', content: 'hello' },
+      { id: 2, role: 'assistant', content: 'hi', usage: { prompt: 50 } },
+    ]
+    const listDifferentUsageCompletion: LiveMessage[] = [
+      { id: 1, role: 'user', content: 'hello' },
+      { id: 2, role: 'assistant', content: 'hi', usage: { completion: 80 } },
+    ]
+    const listDifferentUsageInput: LiveMessage[] = [
+      { id: 1, role: 'user', content: 'hello' },
+      { id: 2, role: 'assistant', content: 'hi', usage: { input: 120 } },
+    ]
+    const listDifferentUsageOutput: LiveMessage[] = [
+      { id: 1, role: 'user', content: 'hello' },
+      { id: 2, role: 'assistant', content: 'hi', usage: { output: 35 } },
+    ]
+    const listDifferentUsageReasoning: LiveMessage[] = [
+      { id: 1, role: 'user', content: 'hello' },
+      { id: 2, role: 'assistant', content: 'hi', usage: { reasoning: 15 } },
+    ]
+    const listDifferentUsageCalls: LiveMessage[] = [
+      { id: 1, role: 'user', content: 'hello' },
+      { id: 2, role: 'assistant', content: 'hi', usage: { calls: 2 } },
+    ]
+    const listDifferentUsageAvgTps: LiveMessage[] = [
+      { id: 1, role: 'user', content: 'hello' },
+      { id: 2, role: 'assistant', content: 'hi', usage: { avg_tps: 45.2 } },
+    ]
+    const listDifferentUsageAvgLatency: LiveMessage[] = [
+      { id: 1, role: 'user', content: 'hello' },
+      { id: 2, role: 'assistant', content: 'hi', usage: { avg_latency_s: 1.4 } },
+    ]
+    const listDifferentUsageNullVsObj: LiveMessage[] = [
+      { id: 1, role: 'user', content: 'hello' },
+      { id: 2, role: 'assistant', content: 'hi', usage: undefined },
+    ]
+
+    expect(areMessageListsEqual(list1, list1)).toBe(true)
+    expect(areMessageListsEqual(list1, list2)).toBe(true)
+    expect(areMessageListsShallowEqual(list1, list2)).toBe(true)
+    expect(areMessageListsEqual([], [])).toBe(true)
+    expect(areMessageListsEqual(null, null)).toBe(true)
+    expect(areMessageListsEqual(list1, null)).toBe(false)
+    expect(areMessageListsEqual(null, list2)).toBe(false)
+    expect(areMessageListsEqual(list1, listDifferentLength)).toBe(false)
+    expect(areMessageListsEqual(list1, listDifferentContent)).toBe(false)
+    expect(areMessageListsEqual(list1, listDifferentRole)).toBe(false)
+    expect(areMessageListsEqual(list1, listDifferentToolName)).toBe(false)
+    expect(areMessageListsEqual(list1, listDifferentUsage)).toBe(false)
+    expect(areMessageListsEqual(list1, listDifferentUsageModel)).toBe(false)
+    expect(areMessageListsEqual(list1, listDifferentUsagePrompt)).toBe(false)
+    expect(areMessageListsEqual(list1, listDifferentUsageCompletion)).toBe(false)
+    expect(areMessageListsEqual(list1, listDifferentUsageInput)).toBe(false)
+    expect(areMessageListsEqual(list1, listDifferentUsageOutput)).toBe(false)
+    expect(areMessageListsEqual(list1, listDifferentUsageReasoning)).toBe(false)
+    expect(areMessageListsEqual(list1, listDifferentUsageCalls)).toBe(false)
+    expect(areMessageListsEqual(list1, listDifferentUsageAvgTps)).toBe(false)
+    const fullUsage1: LiveMessage['usage'] = {
+      total: 200,
+      prompt: 120,
+      completion: 80,
+      input: 120,
+      output: 80,
+      reasoning: 25,
+      calls: 3,
+      model: 'hermes-3-llama-3.1-8b',
+      avg_tps: 42.5,
+      avg_latency_s: 1.2,
+    }
+    const fullUsage2: LiveMessage['usage'] = {
+      total: 200,
+      prompt: 120,
+      completion: 80,
+      input: 120,
+      output: 80,
+      reasoning: 25,
+      calls: 3,
+      model: 'hermes-3-llama-3.1-8b',
+      avg_tps: 42.5,
+      avg_latency_s: 1.2,
+    }
+    const listFullUsage1: LiveMessage[] = [{ id: 1, role: 'assistant', content: 'test', usage: fullUsage1 }]
+    const listFullUsage2: LiveMessage[] = [{ id: 1, role: 'assistant', content: 'test', usage: fullUsage2 }]
+    expect(areMessageListsEqual(listFullUsage1, listFullUsage2)).toBe(true)
+
+    // Verify mutating each field of a fully-populated object returns false
+    expect(areMessageListsEqual(listFullUsage1, [{ id: 1, role: 'assistant', content: 'test', usage: { ...fullUsage1, total: 201 } }])).toBe(false)
+    expect(areMessageListsEqual(listFullUsage1, [{ id: 1, role: 'assistant', content: 'test', usage: { ...fullUsage1, prompt: 121 } }])).toBe(false)
+    expect(areMessageListsEqual(listFullUsage1, [{ id: 1, role: 'assistant', content: 'test', usage: { ...fullUsage1, completion: 81 } }])).toBe(false)
+    expect(areMessageListsEqual(listFullUsage1, [{ id: 1, role: 'assistant', content: 'test', usage: { ...fullUsage1, input: 121 } }])).toBe(false)
+    expect(areMessageListsEqual(listFullUsage1, [{ id: 1, role: 'assistant', content: 'test', usage: { ...fullUsage1, output: 81 } }])).toBe(false)
+    expect(areMessageListsEqual(listFullUsage1, [{ id: 1, role: 'assistant', content: 'test', usage: { ...fullUsage1, reasoning: 26 } }])).toBe(false)
+    expect(areMessageListsEqual(listFullUsage1, [{ id: 1, role: 'assistant', content: 'test', usage: { ...fullUsage1, calls: 4 } }])).toBe(false)
+    expect(areMessageListsEqual(listFullUsage1, [{ id: 1, role: 'assistant', content: 'test', usage: { ...fullUsage1, model: 'other-model' } }])).toBe(false)
+    expect(areMessageListsEqual(listFullUsage1, [{ id: 1, role: 'assistant', content: 'test', usage: { ...fullUsage1, avg_tps: 99.9 } }])).toBe(false)
+    expect(areMessageListsEqual(listFullUsage1, [{ id: 1, role: 'assistant', content: 'test', usage: { ...fullUsage1, avg_latency_s: 2.5 } }])).toBe(false)
+
+    expect(areMessageListsEqual(list1, listDifferentUsageAvgLatency)).toBe(false)
+    expect(areMessageListsEqual(listDifferentUsage, listDifferentUsageNullVsObj)).toBe(false)
+    expect(areMessageListsEqual(list1, listDifferentTimestamp)).toBe(false)
+    expect(areMessageListsEqual(list1, listDifferentReasoning)).toBe(false)
+    expect(areMessageListsEqual(list1, listDifferentDisplayKind)).toBe(false)
   })
 })

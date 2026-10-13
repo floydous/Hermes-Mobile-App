@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import {
   BoundedImageDataCache,
+  areMarkdownBlockPropsEqual,
   imageDataUrlCache,
   cacheImageDataUrl,
   getCachedImageDataUrl,
@@ -289,6 +290,17 @@ describe('Runtime Performance & Resource Optimization', () => {
       expect(shouldRetainLocalMessages(backendLoaded, localCached, false)).toBe(true)
       // When backend has messages, should return false (allow authoritative sync)
       expect(shouldRetainLocalMessages([{ id: 1, role: 'user', content: 'Hi' }], localCached, false)).toBe(false)
+    })
+
+    it('areMarkdownBlockPropsEqual returns true for identical props and false on mutations', () => {
+      const prevProps = { content: '## Architecture', hasMath: false }
+      const nextPropsSame = { content: '## Architecture', hasMath: false }
+      const nextPropsDifferentContent = { content: '## Updated Architecture', hasMath: false }
+      const nextPropsDifferentMath = { content: '## Architecture', hasMath: true }
+
+      expect(areMarkdownBlockPropsEqual(prevProps, nextPropsSame)).toBe(true)
+      expect(areMarkdownBlockPropsEqual(prevProps, nextPropsDifferentContent)).toBe(false)
+      expect(areMarkdownBlockPropsEqual(prevProps, nextPropsDifferentMath)).toBe(false)
     })
   })
 })

@@ -32,6 +32,7 @@ import {
 } from './chat-turn'
 import { errorMessage, RequestEpoch, selectRestoredEndpoint } from './connection-state'
 import {
+  areMessageListsShallowEqual,
   calculateUnreadState,
   deduplicateConsecutiveMessages,
   getCachedSessionMessages,
@@ -1049,10 +1050,14 @@ export default function App() {
           return
         }
 
-        const uniqueAliasIds = Array.from(new Set(candidateIds))
-        for (const cid of uniqueAliasIds) {
-          messageCacheRef.current.set(cid, resolvedLoaded)
-          setCachedSessionMessages(cid, resolvedLoaded)
+        const isTranscriptIdentical = areMessageListsShallowEqual(existingMessages, resolvedLoaded)
+
+        if (!isTranscriptIdentical) {
+          const uniqueAliasIds = Array.from(new Set(candidateIds))
+          for (const cid of uniqueAliasIds) {
+            messageCacheRef.current.set(cid, resolvedLoaded)
+            setCachedSessionMessages(cid, resolvedLoaded)
+          }
         }
 
         const currentActive = Object.values(activeTurnsRef.current).find(t =>
@@ -1103,7 +1108,7 @@ export default function App() {
           const hasUserMsg = resolvedLoaded.some(m => m.id === currentActive.userMessage?.id || (m.role === 'user' && m.content === currentActive.userMessage?.content))
           const merged = hasUserMsg ? resolvedLoaded : [...resolvedLoaded, currentActive.userMessage]
           setMessages(deduplicateConsecutiveMessages(merged))
-        } else {
+        } else if (!isTranscriptIdentical) {
           setMessages(deduplicateConsecutiveMessages(resolvedLoaded))
         }
         finishPerformanceTrace(perfTraceId, 'settle', { totalMessages: resolvedLoaded.length })

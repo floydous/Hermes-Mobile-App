@@ -55,11 +55,88 @@ export function computeProgressiveRenderSlice<T>(
   return { renderedMessages, hasEarlierInBatch, remainingEarlier }
 }
 
+export function shouldAutoRevealEarlierMessages({
+  initialized,
+  initialScrolledToBottom,
+  isFollowing,
+  scrollTop,
+  loadingEarlier,
+  pullRefreshing,
+  threshold = 140,
+}: {
+  initialized: boolean
+  initialScrolledToBottom: boolean
+  isFollowing: boolean
+  scrollTop: number
+  loadingEarlier: boolean
+  pullRefreshing: boolean
+  threshold?: number
+}): boolean {
+  if (!initialized) return false
+  if (!initialScrolledToBottom) return false
+  if (isFollowing) return false
+  if (loadingEarlier) return false
+  if (pullRefreshing) return false
+  return scrollTop < threshold
+}
+
+export class FetchEarlierCoordinator {
+  private activeSessionId: string
+  private fetchRequestId = 0
+  private isLocked = false
+
+  constructor(initialSessionId: string) {
+    this.activeSessionId = initialSessionId
+  }
+
+  onSessionChange(newSessionId: string) {
+    if (this.activeSessionId === newSessionId) return
+    this.activeSessionId = newSessionId
+    this.fetchRequestId++
+    this.isLocked = false
+  }
+
+  async executeFetch(
+    loadFn: () => Promise<boolean>,
+    onSuccess: (more: boolean) => void,
+    onFailure: () => void
+  ): Promise<boolean> {
+    if (this.isLocked) return false
+    this.isLocked = true
+    const currentReqId = ++this.fetchRequestId
+    const currentSession = this.activeSessionId
+
+    try {
+      const more = await loadFn()
+      if (this.fetchRequestId === currentReqId && this.activeSessionId === currentSession) {
+        onSuccess(more)
+      }
+    } catch {
+      if (this.fetchRequestId === currentReqId && this.activeSessionId === currentSession) {
+        onFailure()
+      }
+    } finally {
+      if (this.fetchRequestId === currentReqId) {
+        this.isLocked = false
+      }
+    }
+    return true
+  }
+
+  isFetchLocked(): boolean {
+    return this.isLocked
+  }
+}
+
 export function ChatView({ session, conversationLoading, messages, settledAssistant, profiles, streaming, sending, toolActivities, error, back, refresh, clearChat, openProfile, onSessionModelChange, pendingClarify, onAnswerClarify, onSkipClarify, submit, submitVoice, stop, loadEarlierMessages }: Props) {
+  const mountedRef = useRef(true)
+  const coordinatorRef = useRef<FetchEarlierCoordinator>(new FetchEarlierCoordinator(session.id))
+
   const shellRef = useRef<HTMLElement>(null)
   const threadRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const initializedRef = useRef(false)
+  const initialScrolledToBottomRef = useRef(false)
   const followingRef = useRef(true)
   const stickQueuedRef = useRef(false)
   const prependingEarlierRef = useRef(false)
@@ -68,6 +145,11 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
   const [unreadBelow, setUnreadBelow] = useState(0)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const [hasMoreEarlier, setHasMoreEarlier] = useState(true)
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
   const [earlierOffset, setEarlierOffset] = useState(() => Math.max(0, messages.length - 25))
   const [revealedTimestampId, setRevealedTimestampId] = useState<number | null>(null)
   const [controlError, setControlError] = useState('')
@@ -225,7 +307,9 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
   const hasInitializedHistoryRef = useRef(false)
 
   useLayoutEffect(() => {
+    coordinatorRef.current.onSessionChange(session.id)
     initializedRef.current = false
+    initialScrolledToBottomRef.current = false
     followingRef.current = true
     setFollowing(true)
     setUnreadBelow(0)
@@ -266,7 +350,10 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
     initializedRef.current = true
     const frame = requestAnimationFrame(() => {
       scrollToLatest('auto')
-      requestAnimationFrame(() => scrollToLatest('auto'))
+      requestAnimationFrame(() => {
+        scrollToLatest('auto')
+        initialScrolledToBottomRef.current = true
+      })
     })
     return () => cancelAnimationFrame(frame)
   }, [messages.length])
@@ -310,7 +397,7 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
   }, [earlierOffset])
 
   const fetchEarlier = useCallback(async () => {
-    if (loadingEarlier || !hasMoreEarlier || !loadEarlierMessages) return
+    if (coordinatorRef.current.isFetchLocked() || loadingEarlier || !hasMoreEarlier || !loadEarlierMessages) return
     const thread = threadRef.current
     if (!thread) return
     remoteLog('DEBUG', 'ChatHistory', `fetchEarlier: requesting older page from server (currently ${messages.length})`)
@@ -320,13 +407,17 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
       scrollHeight: thread.scrollHeight,
       scrollTop: thread.scrollTop,
     }
-    try {
-      const more = await loadEarlierMessages()
-      setHasMoreEarlier(more)
-    } catch {
-      setHasMoreEarlier(false)
-    } finally {
-      setLoadingEarlier(false)
+    await coordinatorRef.current.executeFetch(
+      loadEarlierMessages,
+      more => {
+        if (mountedRef.current) setHasMoreEarlier(more)
+      },
+      () => {
+        if (mountedRef.current) setHasMoreEarlier(false)
+      }
+    )
+    if (mountedRef.current) {
+      setLoadingEarlier(coordinatorRef.current.isFetchLocked())
     }
   }, [loadingEarlier, hasMoreEarlier, loadEarlierMessages])
 
@@ -334,20 +425,31 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
     const thread = threadRef.current
     if (!thread) return
 
-    // Auto-fetch earlier messages when scrolled near top only after initial layout has settled
-    if (initializedRef.current && thread.scrollTop < 140 && !loadingEarlier && !pullRefreshing) {
+    const nearEnd = shouldStickToBottom(thread.scrollHeight, thread.scrollTop, thread.clientHeight, SCROLL_FOLLOW_THRESHOLD)
+    if (nearEnd !== followingRef.current) {
+      followingRef.current = nearEnd
+      setFollowing(nearEnd)
+      if (nearEnd) setUnreadBelow(prev => (prev === 0 ? prev : 0))
+    }
+
+    // Auto-fetch earlier messages only when user explicitly scrolls UP near the top
+    // (requires initial scroll-to-bottom to have settled, and user must not be following at the bottom)
+    const canAutoReveal = shouldAutoRevealEarlierMessages({
+      initialized: initializedRef.current,
+      initialScrolledToBottom: initialScrolledToBottomRef.current,
+      isFollowing: nearEnd,
+      scrollTop: thread.scrollTop,
+      loadingEarlier: coordinatorRef.current.isFetchLocked() || loadingEarlier,
+      pullRefreshing,
+    })
+
+    if (canAutoReveal) {
       if (hasEarlierInBatch) {
         revealEarlierInBatch()
       } else if (hasMoreEarlier && messages.length >= 10 && loadEarlierMessages) {
         void fetchEarlier()
       }
     }
-
-    const nearEnd = shouldStickToBottom(thread.scrollHeight, thread.scrollTop, thread.clientHeight, SCROLL_FOLLOW_THRESHOLD)
-    if (nearEnd === followingRef.current) return
-    followingRef.current = nearEnd
-    setFollowing(nearEnd)
-    if (nearEnd) setUnreadBelow(prev => (prev === 0 ? prev : 0))
   }
 
   const pullRefresh = async () => {

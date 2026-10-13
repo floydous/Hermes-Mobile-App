@@ -18,6 +18,71 @@ export function parseLastReadTimestamp(rawVal: string | null): number | null {
   return Number.isFinite(num) && num > 0 ? num : null
 }
 
+function isUsageEqual(a?: LiveMessage['usage'], b?: LiveMessage['usage']): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  return (
+    a.total === b.total &&
+    a.prompt === b.prompt &&
+    a.completion === b.completion &&
+    a.input === b.input &&
+    a.output === b.output &&
+    a.reasoning === b.reasoning &&
+    a.calls === b.calls &&
+    a.model === b.model &&
+    a.avg_tps === b.avg_tps &&
+    a.avg_latency_s === b.avg_latency_s
+  )
+}
+
+function isSingleMessageEqual(a: LiveMessage, b: LiveMessage): boolean {
+  if (a === b) return true
+  if (a.id !== b.id || a.role !== b.role || a.content !== b.content) return false
+  if (a.display_content !== b.display_content || a.display_kind !== b.display_kind) return false
+  if (a.tool_name !== b.tool_name || a.tool_status !== b.tool_status) return false
+  if (a.timestamp !== b.timestamp || a.row_id !== b.row_id || a.local !== b.local) return false
+  if (a.duration_s !== b.duration_s || a.reasoning !== b.reasoning || a.token_count !== b.token_count) return false
+  if (!isUsageEqual(a.usage, b.usage)) return false
+  return true
+}
+
+/**
+ * Deep-by-value comparison of two message lists.
+ * Returns true if both arrays have the same length and identical message IDs, roles, contents,
+ * tool status, metadata, and full LiveUsage structures,
+ * allowing avoidance of redundant disk serialization and React re-renders.
+ */
+export function areMessageListsEqual(
+  a: LiveMessage[] | undefined | null,
+  b: LiveMessage[] | undefined | null
+): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  if (a.length !== b.length) return false
+  if (a.length === 0) return true
+
+  // Fast check: inspect last message first (most likely to change in chat)
+  if (!isSingleMessageEqual(a[a.length - 1], b[b.length - 1])) {
+    return false
+  }
+
+  // Fast check: inspect first message
+  if (!isSingleMessageEqual(a[0], b[0])) {
+    return false
+  }
+
+  // Compare all remaining messages
+  for (let i = 0; i < a.length; i++) {
+    if (!isSingleMessageEqual(a[i], b[i])) {
+      return false
+    }
+  }
+
+  return true
+}
+
+export const areMessageListsShallowEqual = areMessageListsEqual
+
 const STORAGE_PREFIX = 'hermes-msgs-v1:'
 const MAX_CACHED_SESSIONS = 15
 
