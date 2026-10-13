@@ -22,6 +22,26 @@ export function computeNextSwipeTab(
   }
 }
 
+export type GestureIntent = 'vertical_scroll' | 'horizontal_swipe' | 'tap_preserve'
+
+export function classifyInteractiveRowGesture(
+  deltaX: number,
+  deltaY: number,
+  minHorizontalDrag = 40,
+  minVerticalScroll = 12,
+  dominanceRatio = 1.25
+): GestureIntent {
+  const absX = Math.abs(deltaX)
+  const absY = Math.abs(deltaY)
+  if (absY >= minVerticalScroll && absY > absX * dominanceRatio) {
+    return 'vertical_scroll'
+  }
+  if (absX >= minHorizontalDrag && absX > absY * dominanceRatio) {
+    return 'horizontal_swipe'
+  }
+  return 'tap_preserve'
+}
+
 export function isHorizontalSwipeIntent(
   deltaX: number,
   deltaY: number,

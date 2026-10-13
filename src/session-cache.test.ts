@@ -3,6 +3,8 @@ import {
   deduplicateConsecutiveMessages,
   getCachedSessionMessages,
   isHumanChatSession,
+  parseCachedSessionIndex,
+  parseLastReadTimestamp,
   removeCachedSessionMessages,
   resolveLatestSessionPreview,
   setCachedSessionMessages,
@@ -246,5 +248,26 @@ describe('session-cache message caching and eviction', () => {
     expect(getCachedSessionMessages('session-abc')).toEqual(msgs)
     expect(getCachedSessionMessages('runtime-resolved-1')).toEqual(msgs)
     expect(getCachedSessionMessages('draft:researcher')).toEqual(msgs)
+  })
+
+  it('safely parses cached session index even if malformed or non-array', () => {
+    expect(parseCachedSessionIndex(null)).toEqual([])
+    expect(parseCachedSessionIndex('')).toEqual([])
+    expect(parseCachedSessionIndex('{ "not": "an array" }')).toEqual([])
+    expect(parseCachedSessionIndex('invalid json {')).toEqual([])
+    expect(parseCachedSessionIndex('["s-1", 123, null, "", "s-2"]')).toEqual(['s-1', 's-2'])
+  })
+
+  it('safely parses last read timestamps rejecting non-finite or negative values', () => {
+    expect(parseLastReadTimestamp(null)).toBeNull()
+    expect(parseLastReadTimestamp('')).toBeNull()
+    expect(parseLastReadTimestamp('   ')).toBeNull()
+    expect(parseLastReadTimestamp('invalid')).toBeNull()
+    expect(parseLastReadTimestamp('NaN')).toBeNull()
+    expect(parseLastReadTimestamp('Infinity')).toBeNull()
+    expect(parseLastReadTimestamp('-Infinity')).toBeNull()
+    expect(parseLastReadTimestamp('0')).toBeNull()
+    expect(parseLastReadTimestamp('-100')).toBeNull()
+    expect(parseLastReadTimestamp('1720000000')).toBe(1720000000)
   })
 })

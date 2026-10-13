@@ -36,6 +36,8 @@ import {
   deduplicateConsecutiveMessages,
   getCachedSessionMessages,
   isHumanChatSession,
+  parseCachedSessionIndex,
+  parseLastReadTimestamp,
   removeCachedSessionMessages,
   resolveLatestSessionPreview,
   setCachedSessionMessages,
@@ -84,7 +86,7 @@ import {
   resolveMatchingClarify,
 } from './clarify-isolation'
 
-import { computeNextSwipeTab, isHorizontalSwipeIntent, type Tab } from './tab-swipe'
+import { classifyInteractiveRowGesture, computeNextSwipeTab, isHorizontalSwipeIntent, type Tab } from './tab-swipe'
 type DraftBot = { role: string; name: string; description: string; soul: string; model: string; provider: string; shape: string }
 type Theme = 'dark' | 'light' | 'grey' | 'aurora'
 type SettledAssistantResponse = { sessionId: string; profile: string; content: string; usage?: LiveUsage }
@@ -726,6 +728,28 @@ export default function App() {
     let active = true
     let timer: number | undefined
     const bootstrap = async () => {
+      // Post-mount cache warmup: pre-populate in-memory caches from localStorage safely
+      try {
+        const index = parseCachedSessionIndex(localStorage.getItem('hermes-msgs-v1:__index__'))
+        for (const sid of index.slice(0, 15)) {
+          const msgs = getCachedSessionMessages(sid)
+          if (msgs) messageCacheRef.current.set(sid, msgs)
+        }
+      } catch {}
+
+      try {
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i)
+          if (key && key.startsWith('hermes-last-read:')) {
+            const sid = key.slice('hermes-last-read:'.length)
+            const val = parseLastReadTimestamp(localStorage.getItem(key))
+            if (val != null) {
+              lastReadCacheRef.current.set(sid, val)
+            }
+          }
+        }
+      } catch {}
+
       let nativeEndpoint: string | null = null
       try { nativeEndpoint = await savedHermesEndpoint() }
       catch (reason) { if (active) setError(errorMessage(reason, 'Could not restore the saved Hermes host.')) }
@@ -760,6 +784,21 @@ export default function App() {
     return () => document.removeEventListener('visibilitychange', resumeSavedConnection)
   }, [])
 
+  const lastReadCacheRef = useRef<Map<string, number>>(new Map())
+  const getLastReadTime = useCallback((sid: string): number => {
+    if (!sid) return 0
+    const inMem = lastReadCacheRef.current.get(sid)
+    if (inMem !== undefined) return inMem
+    const val = Number(localStorage.getItem(`hermes-last-read:${sid}`) || 0)
+    lastReadCacheRef.current.set(sid, val)
+    return val
+  }, [])
+  const setLastReadTime = useCallback((sid: string, val: number) => {
+    if (!sid) return
+    lastReadCacheRef.current.set(sid, val)
+    try { localStorage.setItem(`hermes-last-read:${sid}`, String(val)) } catch {}
+  }, [])
+
   const canonicalSessionIds = useMemo(() => {
     const set = new Set<string>()
     for (const p of profiles) {
@@ -783,9 +822,9 @@ export default function App() {
 
   const rows = useMemo(() => buildBotRows(profiles, sessions).map(({ profile, session }) => {
     const sid = session ? resolveCanonicalSessionId(session) : ''
-    const cached = sid ? (messageCacheRef.current.get(sid) || getCachedSessionMessages(sid)) : null
+    const cached = sid ? messageCacheRef.current.get(sid) : null
     const latestPreview = resolveLatestSessionPreview(sid, session?.preview, cached || undefined, session?.last_active)
-    const lastRead = Number(localStorage.getItem(`hermes-last-read:${sid}`) || 0)
+    const lastRead = getLastReadTime(sid)
     const activeTurn = isBotRowWorking(profile.name, session || profile.canonical_session, activeTurns, adhocSessionIds)
     const isWaitingInput = Boolean(activeTurn && (activeTurn.status === 'waiting' || activeTurn.needsInput))
     const { isUnread, unreadCount } = calculateUnreadState(
@@ -825,9 +864,9 @@ export default function App() {
     }
 
     return deduped.filter(session => isHumanChatSession(session, canonicalSessionIds) && `${session.title} ${session.profile} ${session.preview}`.toLowerCase().includes(query.toLowerCase())).map(session => {
-      const cached = messageCacheRef.current.get(session.id) || getCachedSessionMessages(session.id)
+      const cached = messageCacheRef.current.get(session.id)
       const latestPreview = resolveLatestSessionPreview(session.id, session.preview, cached || undefined, session.last_active)
-      const lastRead = Number(localStorage.getItem(`hermes-last-read:${session.id}`) || 0)
+      const lastRead = getLastReadTime(session.id)
       const activeTurn = isSessionRowWorking(session.id, session.profile, activeTurns)
       const isWaitingInput = Boolean(activeTurn && (activeTurn.status === 'waiting' || activeTurn.needsInput))
       const { isUnread, unreadCount } = calculateUnreadState(
@@ -910,10 +949,10 @@ export default function App() {
     // Immediately mark session as read on Frame 0
     try {
       const nowMs = Date.now()
-      localStorage.setItem(`hermes-last-read:${safeSession.id}`, String(nowMs))
+      setLastReadTime(safeSession.id, nowMs)
       const matchedProfile = profilesRef.current.find(p => p.name === safeSession.profile)
       if (matchedProfile?.canonical_session?.id) {
-        localStorage.setItem(`hermes-last-read:${matchedProfile.canonical_session.id}`, String(nowMs))
+        setLastReadTime(matchedProfile.canonical_session.id, nowMs)
       }
     } catch {}
 
@@ -1310,11 +1349,11 @@ export default function App() {
     const nowSec = Math.floor(Date.now() / 1000)
     const nowMs = Date.now()
     try {
-      localStorage.setItem(`hermes-last-read:${turnSessionId}`, String(nowMs))
-      localStorage.setItem(`hermes-last-read:${turnSession.id}`, String(nowMs))
+      setLastReadTime(turnSessionId, nowMs)
+      setLastReadTime(turnSession.id, nowMs)
       const matchedProfile = profiles.find(p => p.name === turnProfile)
       if (matchedProfile?.canonical_session?.id) {
-        localStorage.setItem(`hermes-last-read:${matchedProfile.canonical_session.id}`, String(nowMs))
+        setLastReadTime(matchedProfile.canonical_session.id, nowMs)
       }
     } catch {}
     const localUserMessage: LiveMessage = { id: -Date.now(), role: 'user' as const, content: attachmentSummary(text, attachmentRefs), timestamp: nowSec, local: true }
@@ -2038,13 +2077,23 @@ export default function App() {
     const deltaX = currentX - swipeStartXRef.current
     const deltaY = currentY - swipeStartYRef.current
 
-    const slop = swipeStartedOnInteractiveRef.current ? 36 : 20
-
-    if (!swipeIntentConfirmedRef.current) {
-      if (isHorizontalSwipeIntent(deltaX, deltaY, slop)) {
+    if (swipeStartedOnInteractiveRef.current) {
+      const intent = classifyInteractiveRowGesture(deltaX, deltaY)
+      if (intent === 'vertical_scroll') {
+        swipeTrackingRef.current = false
+        return
+      }
+      if (intent === 'horizontal_swipe') {
+        swipeIntentConfirmedRef.current = true
+        remoteLog('DEBUG', 'Gesture', `Interactive row horizontal swipe confirmed: deltaX=${Math.round(deltaX)} deltaY=${Math.round(deltaY)}`)
+      } else {
+        return
+      }
+    } else if (!swipeIntentConfirmedRef.current) {
+      if (isHorizontalSwipeIntent(deltaX, deltaY, 20)) {
         swipeIntentConfirmedRef.current = true
         remoteLog('DEBUG', 'Gesture', `Swipe intent confirmed: deltaX=${Math.round(deltaX)} deltaY=${Math.round(deltaY)}`)
-      } else if (Math.hypot(deltaX, deltaY) >= slop) {
+      } else if (Math.hypot(deltaX, deltaY) >= 20) {
         // Vertical or diagonal movement: immediately yield to vertical scrolling
         swipeTrackingRef.current = false
         return

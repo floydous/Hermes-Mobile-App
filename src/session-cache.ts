@@ -1,6 +1,23 @@
 import type { LiveMessage } from './hermes'
 import { isPerformanceDiagnosticsEnabled, recordPerformanceEvent } from './remote-logger'
 
+export function parseCachedSessionIndex(rawIndex: string | null): string[] {
+  if (!rawIndex) return []
+  try {
+    const parsed = JSON.parse(rawIndex)
+    if (Array.isArray(parsed)) {
+      return parsed.filter((id): id is string => typeof id === 'string' && id.length > 0)
+    }
+  } catch {}
+  return []
+}
+
+export function parseLastReadTimestamp(rawVal: string | null): number | null {
+  if (!rawVal) return null
+  const num = Number(rawVal)
+  return Number.isFinite(num) && num > 0 ? num : null
+}
+
 const STORAGE_PREFIX = 'hermes-msgs-v1:'
 const MAX_CACHED_SESSIONS = 15
 
