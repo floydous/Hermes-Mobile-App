@@ -1111,6 +1111,19 @@ const STANDARD_REHYPE_PLUGINS = [rehypeHighlight]
 const MATH_REMARK_PLUGINS = [remarkGfm, remarkMath]
 const MATH_REHYPE_PLUGINS = [rehypeHighlight, rehypeKatex]
 
+const EMPTY_REHYPE_PLUGINS: any[] = []
+const MATH_ONLY_REHYPE_PLUGINS = [rehypeKatex]
+
+export function hasCodeContent(text: string): boolean {
+  if (!text) return false
+  if (text.includes('`')) return true
+  // Fenced code blocks with 3+ tildes (including when nested inside blockquotes > ~~~)
+  if (/(?:^|\n)[ \t]*(?:>[ \t]*)*~{3,}/.test(text)) return true
+  // Indented code blocks (4+ spaces or tab, optionally nested inside blockquotes >)
+  if (/(?:^|\n)[ \t]*(?:>[ \t]*)*(?: {4}| *\t)[^\n]*\S/.test(text)) return true
+  return false
+}
+
 const URL_IDENTITY_TRANSFORM = (url: string) => url
 
 const MARKDOWN_COMPONENTS: React.ComponentProps<typeof Markdown>['components'] = {
@@ -1150,22 +1163,26 @@ export function hasMathContent(text: string): boolean {
 export type MarkdownBlockProps = {
   content: string
   hasMath: boolean
+  hasCode: boolean
 }
 
 export function areMarkdownBlockPropsEqual(
   prev: MarkdownBlockProps,
   next: MarkdownBlockProps
 ): boolean {
-  return prev.content === next.content && prev.hasMath === next.hasMath
+  return prev.content === next.content && prev.hasMath === next.hasMath && prev.hasCode === next.hasCode
 }
 
 export const MemoizedMarkdownBlock = memo(
   function MemoizedMarkdownBlock({
     content,
     hasMath,
+    hasCode,
   }: MarkdownBlockProps) {
     const remarkPlugins = hasMath ? MATH_REMARK_PLUGINS : STANDARD_REMARK_PLUGINS
-    const rehypePlugins = hasMath ? MATH_REHYPE_PLUGINS : STANDARD_REHYPE_PLUGINS
+    const rehypePlugins = hasMath
+      ? (hasCode ? MATH_REHYPE_PLUGINS : MATH_ONLY_REHYPE_PLUGINS)
+      : (hasCode ? STANDARD_REHYPE_PLUGINS : EMPTY_REHYPE_PLUGINS)
     return (
       <Markdown
         urlTransform={URL_IDENTITY_TRANSFORM}
@@ -1199,6 +1216,7 @@ export const MarkdownContent = memo(function MarkdownContent({
           return <MediaAttachmentCard key={idx} rawPath={seg.path} kind={seg.type} />
         }
         const hasMath = hasMathContent(seg.content)
+        const hasCode = hasCodeContent(seg.content)
         const withMentionLinks = seg.content.includes('@')
           ? seg.content.replace(/(^|\s)(@[a-zA-Z0-9][\w-]*)\b/g, '$1[$2](hermes-mention:$2)')
           : seg.content
@@ -1211,6 +1229,7 @@ export const MarkdownContent = memo(function MarkdownContent({
             key={idx}
             content={normalized}
             hasMath={hasMath}
+            hasCode={hasCode}
           />
         )
       })}

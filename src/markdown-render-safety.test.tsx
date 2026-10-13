@@ -23,6 +23,24 @@ describe('Markdown Content Rendering Safety & Syntax Highlighting', () => {
     expect(html).toContain('hljs')
   })
 
+  it('renders and highlights code blocks nested inside blockquotes', () => {
+    const quotedTildes = '> ~~~python\n> def hello():\n>     return "world"\n> ~~~'
+    const htmlQuoted = renderToString(<MarkdownContent>{quotedTildes}</MarkdownContent>)
+
+    expect(htmlQuoted).toContain('code-block')
+    expect(htmlQuoted).toContain('language-python')
+    expect(htmlQuoted).toContain('hljs')
+
+    const indentedCode = 'Section header:\n\n    const answer = 42;'
+    const htmlIndented = renderToString(<MarkdownContent>{indentedCode}</MarkdownContent>)
+    expect(htmlIndented).toContain('code-block')
+
+    const quotedIndented = '>     const answer = 42;'
+    const htmlQuotedIndented = renderToString(<MarkdownContent>{quotedIndented}</MarkdownContent>)
+    expect(htmlQuotedIndented).toContain('code-block')
+    expect(htmlQuotedIndented).toContain('const answer = 42;')
+  })
+
   it('renders inline code without math or syntax plugin overhead', () => {
     const markdown = 'Here is some `inline code` and normal text.'
     const html = renderToString(<MarkdownContent>{markdown}</MarkdownContent>)

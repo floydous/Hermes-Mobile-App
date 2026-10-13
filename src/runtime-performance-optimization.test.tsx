@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import {
   BoundedImageDataCache,
   areMarkdownBlockPropsEqual,
+  hasCodeContent,
   imageDataUrlCache,
   cacheImageDataUrl,
   getCachedImageDataUrl,
@@ -293,14 +294,36 @@ describe('Runtime Performance & Resource Optimization', () => {
     })
 
     it('areMarkdownBlockPropsEqual returns true for identical props and false on mutations', () => {
-      const prevProps = { content: '## Architecture', hasMath: false }
-      const nextPropsSame = { content: '## Architecture', hasMath: false }
-      const nextPropsDifferentContent = { content: '## Updated Architecture', hasMath: false }
-      const nextPropsDifferentMath = { content: '## Architecture', hasMath: true }
+      const prevProps = { content: '## Architecture', hasMath: false, hasCode: false }
+      const nextPropsSame = { content: '## Architecture', hasMath: false, hasCode: false }
+      const nextPropsDifferentContent = { content: '## Updated Architecture', hasMath: false, hasCode: false }
+      const nextPropsDifferentMath = { content: '## Architecture', hasMath: true, hasCode: false }
+      const nextPropsDifferentCode = { content: '## Architecture', hasMath: false, hasCode: true }
 
       expect(areMarkdownBlockPropsEqual(prevProps, nextPropsSame)).toBe(true)
       expect(areMarkdownBlockPropsEqual(prevProps, nextPropsDifferentContent)).toBe(false)
       expect(areMarkdownBlockPropsEqual(prevProps, nextPropsDifferentMath)).toBe(false)
+      expect(areMarkdownBlockPropsEqual(prevProps, nextPropsDifferentCode)).toBe(false)
+    })
+
+    it('hasCodeContent reliably detects code blocks and excludes plain text', () => {
+      expect(hasCodeContent('Plain text with no code')).toBe(false)
+      expect(hasCodeContent('Text with `inline code`')).toBe(true)
+      expect(hasCodeContent('```js\nconsole.log(1)\n```')).toBe(true)
+      expect(hasCodeContent('~~~python\nprint(1)\n~~~')).toBe(true)
+      expect(hasCodeContent('   ~~~python\nprint(1)\n~~~')).toBe(true)
+      // Prose approximations with tildes must NOT be classified as code
+      expect(hasCodeContent('Takes ~10 minutes and costs ~50 dollars')).toBe(false)
+      // Indented code blocks: 4 spaces, 5 spaces, and tabs (with leading spaces or inner whitespace)
+      expect(hasCodeContent('Section title:\n    indented code block')).toBe(true)
+      expect(hasCodeContent('Section title:\n     five spaces indented')).toBe(true)
+      expect(hasCodeContent('Section title:\n\ttab indented code')).toBe(true)
+      expect(hasCodeContent('\t  indented code')).toBe(true)
+      expect(hasCodeContent(' \tindented code')).toBe(true)
+      expect(hasCodeContent('    \tindented code')).toBe(true)
+      // Nested inside blockquotes
+      expect(hasCodeContent('> ~~~python\n> print(1)\n> ~~~')).toBe(true)
+      expect(hasCodeContent('>     def hello():\n>         return 1')).toBe(true)
     })
   })
 })
