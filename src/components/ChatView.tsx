@@ -45,12 +45,13 @@ const titleize = (value?: string | null) => (value || '').split(/[-_]+/).filter(
 
 export function computeProgressiveRenderSlice<T>(
   items: T[],
-  renderedLimit: number
+  earlierOffset: number
 ): { renderedMessages: T[]; hasEarlierInBatch: boolean; remainingEarlier: number } {
   const safeItems = Array.isArray(items) ? items : []
-  const hasEarlierInBatch = safeItems.length > renderedLimit
-  const renderedMessages = hasEarlierInBatch ? safeItems.slice(-renderedLimit) : safeItems
-  const remainingEarlier = Math.max(0, safeItems.length - renderedLimit)
+  const clampedOffset = Math.max(0, Math.min(safeItems.length, earlierOffset))
+  const renderedMessages = safeItems.slice(clampedOffset)
+  const hasEarlierInBatch = clampedOffset > 0
+  const remainingEarlier = clampedOffset
   return { renderedMessages, hasEarlierInBatch, remainingEarlier }
 }
 
@@ -67,7 +68,7 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
   const [unreadBelow, setUnreadBelow] = useState(0)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const [hasMoreEarlier, setHasMoreEarlier] = useState(true)
-  const [renderedLimit, setRenderedLimit] = useState(25)
+  const [earlierOffset, setEarlierOffset] = useState(() => Math.max(0, messages.length - 25))
   const [revealedTimestampId, setRevealedTimestampId] = useState<number | null>(null)
   const [controlError, setControlError] = useState('')
   const [draggingFiles, setDraggingFiles] = useState(false)
@@ -221,7 +222,7 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
     setDraggingFiles(false)
   }, [session.id])
 
-  const previousTotalRef = useRef(messages.length)
+  const hasInitializedHistoryRef = useRef(false)
 
   useLayoutEffect(() => {
     initializedRef.current = false
@@ -231,19 +232,24 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
     setRevealedTimestampId(null)
     setHasMoreEarlier(true)
     setLoadingEarlier(false)
-    setRenderedLimit(25)
-    previousTotalRef.current = messages.length
+    hasInitializedHistoryRef.current = messages.length > 0 && !conversationLoading
+    setEarlierOffset(Math.max(0, messages.length - 25))
     scrollAnchorRef.current = null
     prependingEarlierRef.current = false
   }, [session.id])
 
   useEffect(() => {
-    const delta = messages.length - previousTotalRef.current
-    previousTotalRef.current = messages.length
-    if (delta > 0 && initializedRef.current) {
-      setRenderedLimit(prev => prev + delta)
+    // While initial conversation loading is in progress or history has not yet completed initial population:
+    if (!hasInitializedHistoryRef.current) {
+      if (messages.length > 25) {
+        setEarlierOffset(messages.length - 25)
+      }
+      if (!conversationLoading && messages.length > 0) {
+        hasInitializedHistoryRef.current = true
+      }
+      return
     }
-  }, [messages.length])
+  }, [messages.length, conversationLoading])
 
   useLayoutEffect(() => {
     const thread = threadRef.current
@@ -253,7 +259,7 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
       scrollAnchorRef.current = null
       prependingEarlierRef.current = false
     }
-  }, [messages, renderedLimit])
+  }, [messages, earlierOffset])
 
   useLayoutEffect(() => {
     if (!messages.length || initializedRef.current) return
@@ -282,13 +288,13 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
     return () => observer.disconnect()
   }, [])
 
-  const { renderedMessages, hasEarlierInBatch } = useMemo(
-    () => computeProgressiveRenderSlice(messages, renderedLimit),
-    [messages, renderedLimit]
+  const { renderedMessages, hasEarlierInBatch, remainingEarlier } = useMemo(
+    () => computeProgressiveRenderSlice(messages, earlierOffset),
+    [messages, earlierOffset]
   )
 
   const revealEarlierInBatch = useCallback(() => {
-    if (renderedLimit >= messages.length) return false
+    if (earlierOffset <= 0) return false
     const thread = threadRef.current
     if (thread) {
       scrollAnchorRef.current = {
@@ -297,11 +303,11 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
       }
       prependingEarlierRef.current = true
     }
-    const nextLimit = Math.min(messages.length, renderedLimit + 25)
-    remoteLog('DEBUG', 'ChatHistory', `Revealed earlier messages: showing ${nextLimit} of ${messages.length}`)
-    setRenderedLimit(nextLimit)
+    const nextOffset = Math.max(0, earlierOffset - 25)
+    remoteLog('DEBUG', 'ChatHistory', `Revealed earlier messages: offset moved from ${earlierOffset} to ${nextOffset}`)
+    setEarlierOffset(nextOffset)
     return true
-  }, [renderedLimit, messages.length])
+  }, [earlierOffset])
 
   const fetchEarlier = useCallback(async () => {
     if (loadingEarlier || !hasMoreEarlier || !loadEarlierMessages) return
@@ -476,7 +482,7 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
                 aria-label="Load earlier messages"
               >
                 <History size={13} />
-                <span>{`Load earlier messages (${messages.length - renderedLimit} more)`}</span>
+                <span>{`Load earlier messages (${remainingEarlier} more)`}</span>
               </button>
             ) : hasMoreEarlier ? (
               <button
@@ -497,7 +503,7 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
           </div>
         )}
         {renderedMessages.map((message, sliceIndex) => {
-          const index = messages.length - renderedMessages.length + sliceIndex
+          const index = earlierOffset + sliceIndex
           const isLast = index === messages.length - 1
           const previousMessage = index > 0 ? messages[index - 1] : undefined
           const hasAssistantReplyAfter = index < lastAssistantIndex

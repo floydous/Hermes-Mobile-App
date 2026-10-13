@@ -1091,8 +1091,12 @@ function CodeBlock({ className, children }: { className?: string; children: Reac
   return <div className="code-block"><div className="code-head"><span>{language}</span><button onClick={() => void copy()} aria-label="Copy code">{copied ? <><Check size={13}/> Copied</> : <><Copy size={13}/> Copy</>}</button></div><pre><code className={className}>{children}</code></pre></div>
 }
 
-const MARKDOWN_REMARK_PLUGINS = [remarkGfm, remarkMath]
-const MARKDOWN_REHYPE_PLUGINS = [rehypeHighlight, rehypeKatex]
+const STANDARD_REMARK_PLUGINS = [remarkGfm]
+const STANDARD_REHYPE_PLUGINS = [rehypeHighlight]
+
+const MATH_REMARK_PLUGINS = [remarkGfm, remarkMath]
+const MATH_REHYPE_PLUGINS = [rehypeHighlight, rehypeKatex]
+
 const URL_IDENTITY_TRANSFORM = (url: string) => url
 
 const MARKDOWN_COMPONENTS: React.ComponentProps<typeof Markdown>['components'] = {
@@ -1114,6 +1118,21 @@ const MARKDOWN_COMPONENTS: React.ComponentProps<typeof Markdown>['components'] =
   img: ({ src, alt }) => <ChatImage src={src || ''} alt={alt || ''} kind="markdown" />,
 }
 
+export function hasMathContent(text: string): boolean {
+  if (!text) return false
+  if (text.includes('$$') || text.includes('\\(') || text.includes('\\[') || text.includes('\\begin{')) {
+    return true
+  }
+  if (/\$(?:[^\$\n]+?\\[a-zA-Z]+[^\$\n]*?)\$/.test(text)) {
+    return true
+  }
+  if (/\$(?!\d|\s)[^\$\n]+?(?<!\s)\$/.test(text)) {
+    const match = text.match(/\$(?!\d|\s)([^\$\n]+?)(?<!\s)\$/)
+    if (match && !match[1].includes('$')) return true
+  }
+  return false
+}
+
 export const MarkdownContent = memo(function MarkdownContent({
   children,
 }: {
@@ -1131,16 +1150,20 @@ export const MarkdownContent = memo(function MarkdownContent({
         if (seg.type === 'media' || seg.type === 'attachment') {
           return <MediaAttachmentCard key={idx} rawPath={seg.path} kind={seg.type} />
         }
+        const hasMath = hasMathContent(seg.content)
+        const remarkPlugins = hasMath ? MATH_REMARK_PLUGINS : STANDARD_REMARK_PLUGINS
+        const rehypePlugins = hasMath ? MATH_REHYPE_PLUGINS : STANDARD_REHYPE_PLUGINS
+
         const withMentionLinks = seg.content.replace(/(^|\s)(@[a-zA-Z0-9][\w-]*)\b/g, '$1[$2](hermes-mention:$2)')
         const withHtmlImages = normalizeHtmlImages(withMentionLinks)
         const withSingleLineImages = normalizeMultilineImages(withHtmlImages)
-        const normalized = normalizeLatex(withSingleLineImages)
+        const normalized = hasMath ? normalizeLatex(withSingleLineImages) : withSingleLineImages
         return (
           <Markdown
             key={idx}
             urlTransform={URL_IDENTITY_TRANSFORM}
-            remarkPlugins={MARKDOWN_REMARK_PLUGINS}
-            rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
+            remarkPlugins={remarkPlugins}
+            rehypePlugins={rehypePlugins}
             components={MARKDOWN_COMPONENTS}
           >
             {normalized}
