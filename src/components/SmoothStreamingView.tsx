@@ -1,5 +1,44 @@
 import { useEffect, useRef } from 'react'
 
+export function tokenizeStreamChunk(text: string): string[] {
+  const rawTokens = text.match(/\S+|\s+/g) || []
+  const result: string[] = []
+  for (const tok of rawTokens) {
+    if (tok.length > 16 && !/^\s+$/.test(tok)) {
+      for (let i = 0; i < tok.length; i += 8) {
+        result.push(tok.slice(i, i + 8))
+      }
+    } else {
+      result.push(tok)
+    }
+  }
+  return result
+}
+
+export function consolidateSettledNodes(container: HTMLDivElement | any, targetCount = 30) {
+  if (!container || !container.childNodes || container.childNodes.length <= 60) return
+  let settledText = ''
+  const limit = Math.min(targetCount, container.childNodes.length - 20)
+
+  for (let i = 0; i < limit; i++) {
+    const node = container.childNodes[0]
+    if (!node) break
+    settledText += node.textContent || ''
+    container.removeChild(node)
+  }
+
+  if (settledText) {
+    const first = container.firstChild
+    if (first && first.nodeType === 3 /* Node.TEXT_NODE */) {
+      first.textContent = settledText + (first.textContent || '')
+    } else {
+      const doc = typeof document !== 'undefined' ? document : null
+      const textNode = doc ? doc.createTextNode(settledText) : { nodeType: 3, textContent: settledText }
+      container.insertBefore(textNode, first)
+    }
+  }
+}
+
 export function SmoothStreamingView({ text }: { text: string }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const lastIndexRef = useRef(0)
@@ -14,16 +53,13 @@ export function SmoothStreamingView({ text }: { text: string }) {
     }
     isTickingRef.current = false
     const container = containerRef.current
-    if (!container || queueRef.current.length === 0) return
+    if (!container) return
 
     const remaining = queueRef.current.splice(0)
-    remaining.forEach(char => {
-      const span = document.createElement('span')
-      span.textContent = char
-      span.style.display = 'inline'
-      span.style.opacity = '1'
-      container.appendChild(span)
-    })
+    if (remaining.length > 0) {
+      const remainingText = remaining.join('')
+      container.appendChild(document.createTextNode(remainingText))
+    }
   }
 
   const tick = () => {
@@ -36,14 +72,14 @@ export function SmoothStreamingView({ text }: { text: string }) {
 
     isTickingRef.current = true
 
-    // Dynamically scale batch size if a large packet burst arrives so the stream stays fluid
+    // Batch tokens dynamically if a large packet burst arrives so the stream stays fluid
     const remainingCount = queueRef.current.length
-    const batchSize = remainingCount > 100 ? 5 : remainingCount > 40 ? 3 : remainingCount > 15 ? 2 : 1
-    const chars = queueRef.current.splice(0, batchSize)
+    const batchSize = remainingCount > 80 ? 6 : remainingCount > 30 ? 3 : remainingCount > 10 ? 2 : 1
+    const tokens = queueRef.current.splice(0, batchSize)
 
-    chars.forEach(char => {
+    tokens.forEach(tok => {
       const span = document.createElement('span')
-      span.textContent = char
+      span.textContent = tok
       span.style.display = 'inline'
       span.style.opacity = '0'
       span.style.willChange = 'opacity'
@@ -55,6 +91,9 @@ export function SmoothStreamingView({ text }: { text: string }) {
         span.style.opacity = '1'
       })
     })
+
+    // Consolidate older spans whose opacity has settled to keep the DOM element count bounded (<60 nodes)
+    consolidateSettledNodes(container)
 
     tickerTimerRef.current = window.setTimeout(tick, 10)
   }
@@ -76,23 +115,17 @@ export function SmoothStreamingView({ text }: { text: string }) {
     if (!newChars) return
 
     lastIndexRef.current = text.length
-    const charArray = Array.from(newChars)
     const prefersReducedMotion = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches
 
     if (prefersReducedMotion) {
-      charArray.forEach(char => {
-        const span = document.createElement('span')
-        span.textContent = char
-        span.style.display = 'inline'
-        span.style.opacity = '1'
-        container.appendChild(span)
-      })
+      container.appendChild(document.createTextNode(newChars))
       return
     }
 
-    // Queue new characters in FIFO order — DOM nodes are only appended as each character appears,
+    // Queue new tokens in FIFO order — DOM nodes are only appended as each token appears,
     // guaranteeing the bubble height only expands in real-time as text physically renders
-    queueRef.current.push(...charArray)
+    const tokens = tokenizeStreamChunk(newChars)
+    queueRef.current.push(...tokens)
 
     if (!isTickingRef.current) {
       tick()

@@ -42,7 +42,69 @@ import {
 
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif'])
 
-const imageDataUrlCache = new Map<string, string>()
+const MAX_IMAGE_CACHE_ENTRIES = 50
+const MAX_IMAGE_CACHE_BYTES = 25 * 1024 * 1024 // 25 MB
+
+export class BoundedImageDataCache {
+  private cache = new Map<string, string>()
+  private totalBytes = 0
+  private maxEntries: number
+  private maxBytes: number
+
+  constructor(maxEntries = 50, maxBytes = 25 * 1024 * 1024) {
+    this.maxEntries = maxEntries
+    this.maxBytes = maxBytes
+  }
+
+  get(key: string): string | undefined {
+    const val = this.cache.get(key)
+    if (val !== undefined) {
+      this.cache.delete(key)
+      this.cache.set(key, val)
+    }
+    return val
+  }
+
+  set(key: string, dataUrl: string): void {
+    if (this.cache.has(key)) {
+      const old = this.cache.get(key)!
+      this.totalBytes -= old.length
+      this.cache.delete(key)
+    }
+
+    const itemBytes = dataUrl.length
+    if (itemBytes > this.maxBytes) return
+
+    while (
+      (this.cache.size >= this.maxEntries || this.totalBytes + itemBytes > this.maxBytes) &&
+      this.cache.size > 0
+    ) {
+      const oldestKey = this.cache.keys().next().value
+      if (!oldestKey) break
+      const oldestVal = this.cache.get(oldestKey)
+      if (oldestVal) this.totalBytes -= oldestVal.length
+      this.cache.delete(oldestKey)
+    }
+
+    this.cache.set(key, dataUrl)
+    this.totalBytes += itemBytes
+  }
+
+  clear(): void {
+    this.cache.clear()
+    this.totalBytes = 0
+  }
+
+  size(): number {
+    return this.cache.size
+  }
+
+  bytes(): number {
+    return this.totalBytes
+  }
+}
+
+export const imageDataUrlCache = new BoundedImageDataCache()
 
 export function cacheImageDataUrl(nameOrPath: string, dataUrl: string) {
   if (!nameOrPath || !dataUrl) return
@@ -1029,6 +1091,29 @@ function CodeBlock({ className, children }: { className?: string; children: Reac
   return <div className="code-block"><div className="code-head"><span>{language}</span><button onClick={() => void copy()} aria-label="Copy code">{copied ? <><Check size={13}/> Copied</> : <><Copy size={13}/> Copy</>}</button></div><pre><code className={className}>{children}</code></pre></div>
 }
 
+const MARKDOWN_REMARK_PLUGINS = [remarkGfm, remarkMath]
+const MARKDOWN_REHYPE_PLUGINS = [rehypeHighlight, rehypeKatex]
+const URL_IDENTITY_TRANSFORM = (url: string) => url
+
+const MARKDOWN_COMPONENTS: React.ComponentProps<typeof Markdown>['components'] = {
+  a: ({ children: content, href, ...props }) => href?.startsWith('hermes-mention:')
+    ? <span className="mention-link" {...props}>{content}</span>
+    : <a {...props} href={href} target="_blank" rel="noreferrer">{content}</a>,
+  code: ({ className, children: content, ...props }) => {
+    const value = String(content)
+    return className || value.includes('\n')
+      ? <CodeBlock className={className}>{content}</CodeBlock>
+      : <code className="inline-code" {...props}>{content}</code>
+  },
+  pre: ({ children: content }) => <>{content}</>,
+  table: ({ children: content }) => (
+    <div className="table-scroll" tabIndex={0} role="region" aria-label="Table">
+      <table>{content}</table>
+    </div>
+  ),
+  img: ({ src, alt }) => <ChatImage src={src || ''} alt={alt || ''} kind="markdown" />,
+}
+
 export const MarkdownContent = memo(function MarkdownContent({
   children,
 }: {
@@ -1053,27 +1138,10 @@ export const MarkdownContent = memo(function MarkdownContent({
         return (
           <Markdown
             key={idx}
-            urlTransform={url => url}
-            remarkPlugins={[remarkGfm, remarkMath]}
-            rehypePlugins={[rehypeHighlight, rehypeKatex]}
-            components={{
-              a: ({ children: content, href, ...props }) => href?.startsWith('hermes-mention:')
-                ? <span className="mention-link" {...props}>{content}</span>
-                : <a {...props} href={href} target="_blank" rel="noreferrer">{content}</a>,
-              code: ({ className, children: content, ...props }) => {
-                const value = String(content)
-                return className || value.includes('\n')
-                  ? <CodeBlock className={className}>{content}</CodeBlock>
-                  : <code className="inline-code" {...props}>{content}</code>
-              },
-              pre: ({ children: content }) => <>{content}</>,
-              table: ({ children: content }) => (
-                <div className="table-scroll" tabIndex={0} role="region" aria-label="Table">
-                  <table>{content}</table>
-                </div>
-              ),
-              img: ({ src, alt }) => <ChatImage src={src || ''} alt={alt || ''} kind="markdown" />,
-            }}
+            urlTransform={URL_IDENTITY_TRANSFORM}
+            remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+            rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
+            components={MARKDOWN_COMPONENTS}
           >
             {normalized}
           </Markdown>
@@ -1094,7 +1162,7 @@ type MessageCardProps = {
   isActiveTurn?: boolean
   activeToolStatus?: string
   revealTimestamp: boolean
-  onRevealTimestamp: () => void
+  onRevealTimestamp: (id?: number) => void
 }
 
 export function AgentDispatchBubble({
@@ -1276,7 +1344,7 @@ export const MessageCard = memo(function MessageCard({ message, previousMessage,
     window.setTimeout(() => setCopied(false), 1400)
   }
   const finishSwipe = (x: number) => {
-    if (swipeStartX != null && swipeStartX - x > 42) onRevealTimestamp()
+    if (swipeStartX != null && swipeStartX - x > 42) onRevealTimestamp(message.id)
     setSwipeStartX(null)
   }
 

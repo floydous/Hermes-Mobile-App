@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDown, Eraser, History, LoaderCircle, Paperclip, RotateCw, X } from 'lucide-react'
 import type { DragEvent } from 'react'
 
@@ -325,7 +325,22 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
     setDraggingFiles(false)
     dropFilesRef.current?.(Array.from(event.dataTransfer.files))
   }
-  const editMessage = (text: string, id?: number) => { setEditRequest({ text, messageId: id, nonce: Date.now() }) }
+  const editMessage = useCallback((text: string, id?: number) => {
+    setEditRequest({ text, messageId: id, nonce: Date.now() })
+  }, [])
+
+  const handleToggleRevealTimestamp = useCallback((id?: number) => {
+    if (id != null) {
+      setRevealedTimestampId(current => current === id ? null : id)
+    }
+  }, [])
+
+  const lastAssistantIndex = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'assistant') return i
+    }
+    return -1
+  }, [messages])
 
   return <main ref={shellRef} className="app chat-shell" onDragOver={onDragOver} onDrop={onDrop} onDragLeave={() => setDraggingFiles(false)}>
     {draggingFiles && <div className="file-drop-overlay" aria-live="polite"><div><Paperclip size={24}/><b>Drop files to upload to Hermes</b><span>Documents stay on the host for Hermes to read</span></div></div>}
@@ -423,8 +438,7 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
         {messages.map((message, index) => {
           const isLast = index === messages.length - 1
           const previousMessage = index > 0 ? messages[index - 1] : undefined
-          const hasAssistantReplyAfter = messages.slice(index + 1).some(m => m.role === 'assistant')
-          const isCompleted = !sending && !isLast && hasAssistantReplyAfter
+          const hasAssistantReplyAfter = index < lastAssistantIndex
           return (
             <MessageCard
               key={message.id}
@@ -438,7 +452,7 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
               isActiveTurn={isLast && sending}
               activeToolStatus={isLast && sending ? liveStatus : undefined}
               revealTimestamp={message.role === 'assistant' && revealedTimestampId === message.id}
-              onRevealTimestamp={() => setRevealedTimestampId(current => current === message.id ? null : message.id)}
+              onRevealTimestamp={handleToggleRevealTimestamp}
             />
           )
         })}
