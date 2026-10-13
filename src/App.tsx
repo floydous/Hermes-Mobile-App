@@ -844,22 +844,6 @@ export default function App() {
   }, [sessions, canonicalSessionIds, activeTurns, selected?.id, query])
   const profileMap = useMemo(() => new Map(profiles.map(p => [p.name, p])), [profiles])
   const [openingSessionId, setOpeningSessionId] = useState<string | null>(null)
-  const [sessionDisplayCount, setSessionDisplayCount] = useState(35)
-
-  useEffect(() => {
-    if (tab === 'sessions' && sessionDisplayCount < visibleSessions.length) {
-      const timer = window.setTimeout(() => {
-        setSessionDisplayCount(visibleSessions.length)
-      }, 50)
-      return () => window.clearTimeout(timer)
-    }
-  }, [tab, sessionDisplayCount, visibleSessions.length])
-
-  useEffect(() => {
-    if (tab !== 'sessions') {
-      setSessionDisplayCount(35)
-    }
-  }, [tab])
 
   const openSession = useCallback((session: LiveSession, latestUsage?: LiveUsage): Promise<void> => {
     const safeSession: LiveSession = {
@@ -2027,20 +2011,11 @@ export default function App() {
   const swipeStartYRef = useRef<number | null>(null)
   const swipeTrackingRef = useRef(false)
   const swipeIntentConfirmedRef = useRef(false)
-  const justSwipedRef = useRef(false)
-  const swipeReleaseTimerRef = useRef<number | null>(null)
 
   const handleRosterTouchStart = (event: React.TouchEvent<HTMLElement>) => {
     if (event.touches.length !== 1) return
     const target = event.target as HTMLElement | null
     if (target?.closest('input, textarea, select, [type="range"], .task-detail, .task-create-sheet, .task-modal-backdrop, .roster-nav, .roster-pinned, .nav-island')) return
-    
-    // A new touch interaction begins: immediately clear any trailing swipe blockage
-    justSwipedRef.current = false
-    if (swipeReleaseTimerRef.current != null) {
-      window.clearTimeout(swipeReleaseTimerRef.current)
-      swipeReleaseTimerRef.current = null
-    }
 
     swipeStartXRef.current = event.touches[0].clientX
     swipeStartYRef.current = event.touches[0].clientY
@@ -2095,12 +2070,6 @@ export default function App() {
       const nextTab = computeNextSwipeTab(tab, deltaX, deltaY, 44)
       remoteLog('DEBUG', 'Gesture', `TouchEnd evaluated: deltaX=${Math.round(deltaX)} confirmed=${wasConfirmed} nextTab=${nextTab || 'none'}`)
       if (nextTab) {
-        justSwipedRef.current = true
-        if (swipeReleaseTimerRef.current != null) window.clearTimeout(swipeReleaseTimerRef.current)
-        swipeReleaseTimerRef.current = window.setTimeout(() => {
-          justSwipedRef.current = false
-        }, 120)
-
         if (document.activeElement instanceof HTMLElement) {
           document.activeElement.blur()
         }
@@ -2112,29 +2081,8 @@ export default function App() {
   const handleRosterTouchCancel = () => {
     swipeTrackingRef.current = false
     swipeIntentConfirmedRef.current = false
-    justSwipedRef.current = false
     swipeStartXRef.current = null
     swipeStartYRef.current = null
-  }
-
-  const handleRosterClickCapture = (event: React.MouseEvent) => {
-    const target = event.target as HTMLElement | null
-    if (target?.closest('.roster-nav, .roster-pinned, .nav-island')) {
-      justSwipedRef.current = false
-      return
-    }
-    if (justSwipedRef.current) {
-      remoteLog('WARN', 'Gesture', `Click suppressed by justSwiped: target=${target?.tagName}.${target?.className}`)
-      justSwipedRef.current = false
-      if (swipeReleaseTimerRef.current != null) {
-        window.clearTimeout(swipeReleaseTimerRef.current)
-        swipeReleaseTimerRef.current = null
-      }
-      event.stopPropagation()
-      event.preventDefault()
-    } else {
-      remoteLog('DEBUG', 'Gesture', `Click permitted: target=${target?.tagName}.${target?.className}`)
-    }
   }
 
   if (createOpen) return <CreateWizard step={createStep} setStep={setCreateStep} draft={botDraft} setDraft={setBotDraft} creating={creating} error={error} close={() => { setCreateOpen(false); setCreateStep(0); setError('') }} finish={() => void finishCreate()}/>
@@ -2148,7 +2096,6 @@ export default function App() {
     onTouchMove={handleRosterTouchMove}
     onTouchEnd={handleRosterTouchEnd}
     onTouchCancel={handleRosterTouchCancel}
-    onClickCapture={handleRosterClickCapture}
   >
     <div className="roster-pinned">
       <header className="roster-head">
@@ -2315,121 +2262,123 @@ export default function App() {
           </div>
         )}
         {error && <Notice message={error} retry={() => void refresh()}/>}
-        {((loading && !profiles.length) || (tab === 'sessions' && loading && !sessions.length)) ? <Skeleton/> : tab === 'bots' ? (
-          <section className="bot-list" key="bots-list">
-            {rows.map(({ profile, session }, index) => {
-              const activeTurn = isBotRowWorking(profile.name, session || profile.canonical_session, activeTurns, adhocSessionIds)
-              const isWorking = Boolean(activeTurn)
-              const isWaitingInput = Boolean(activeTurn && (activeTurn.status === 'waiting' || activeTurn.needsInput))
-              return (
-                <button
-                  className={`bot-row enter ${isWorking ? 'working' : ''} ${isWaitingInput ? 'waiting' : ''}`}
-                  style={{ animationDelay: `${Math.min(index, 8) * 28}ms` }}
-                  key={profile.name}
-                  onPointerDown={handleRowPointerDown}
-                  onClick={() => void openBot(profile, session)}
-                >
-                  <div className="bot-avatar-wrap">
-                    <BotAvatar profile={profile} fallbackName={profile.name}/>
-                    {isWorking && (
-                      <span className={`bot-status-pip ${isWaitingInput ? 'waiting' : ''}`} aria-hidden="true"/>
-                    )}
-                    {session?.unread && !isWorking && <span className="bot-unread-pip" aria-hidden="true"/>}
-                  </div>
-                  <span className="bot-copy">
-                    <b>{profile.display_name || titleize(profile.name)}</b>
-                    {activeTurn ? (
-                      isWaitingInput ? (
-                        <small className="bot-clarify-question">
-                          {activeTurn.pendingClarify?.questions?.[0]?.question || 'Clarification needed'}
-                        </small>
+        {((loading && !profiles.length) || (tab === 'sessions' && loading && !sessions.length)) ? <Skeleton/> : (
+          <>
+            <section className="bot-list" style={{ display: tab === 'bots' ? undefined : 'none' }}>
+              {rows.map(({ profile, session }) => {
+                const activeTurn = isBotRowWorking(profile.name, session || profile.canonical_session, activeTurns, adhocSessionIds)
+                const isWorking = Boolean(activeTurn)
+                const isWaitingInput = Boolean(activeTurn && (activeTurn.status === 'waiting' || activeTurn.needsInput))
+                return (
+                  <button
+                    className={`bot-row ${isWorking ? 'working' : ''} ${isWaitingInput ? 'waiting' : ''}`}
+                    key={profile.name}
+                    onPointerDown={handleRowPointerDown}
+                    onClick={() => void openBot(profile, session)}
+                  >
+                    <div className="bot-avatar-wrap">
+                      <BotAvatar profile={profile} fallbackName={profile.name}/>
+                      {isWorking && (
+                        <span className={`bot-status-pip ${isWaitingInput ? 'waiting' : ''}`} aria-hidden="true"/>
+                      )}
+                      {session?.unread && !isWorking && <span className="bot-unread-pip" aria-hidden="true"/>}
+                    </div>
+                    <span className="bot-copy">
+                      <b>{profile.display_name || titleize(profile.name)}</b>
+                      {activeTurn ? (
+                        isWaitingInput ? (
+                          <small className="bot-clarify-question">
+                            {activeTurn.pendingClarify?.questions?.[0]?.question || 'Clarification needed'}
+                          </small>
+                        ) : (
+                          <small className="bot-in-progress">
+                            <span className="live-wave" aria-hidden="true"><i/><i/><i/></span>
+                            <span className="live-status-text">{activeTurn.statusText}</span>
+                          </small>
+                        )
                       ) : (
-                        <small className="bot-in-progress">
-                          <span className="live-wave" aria-hidden="true"><i/><i/><i/></span>
-                          <span className="live-status-text">{activeTurn.statusText}</span>
-                        </small>
-                      )
-                    ) : (
-                      <small>{cleanPreviewSnippet(session?.preview) || profile.description || 'No messages yet'} </small>
-                    )}
-                  </span>
-                  <span className="meta">
-                    {ago(session?.last_active)}
-                    {session?.unread && (
-                      <span className="unread-badge">
-                        {session.unread_count && session.unread_count > 99 ? '99+' : session.unread_count || 1}
+                        <small>{cleanPreviewSnippet(session?.preview) || profile.description || 'No messages yet'} </small>
+                      )}
+                    </span>
+                    <span className="meta">
+                      {ago(session?.last_active)}
+                      {session?.unread && (
+                        <span className="unread-badge">
+                          {session.unread_count && session.unread_count > 99 ? '99+' : session.unread_count || 1}
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                )
+              })}
+            </section>
+
+            <section className="bot-list" style={{ display: tab === 'sessions' ? undefined : 'none' }}>
+              {!visibleSessions.length ? (
+                <div className="sessions-empty">
+                  <MessageSquare size={24}/>
+                  <b>No conversations yet</b>
+                  <p>Start a new chat with any of your Bots.</p>
+                  <button className="task-outline-pill" onClick={() => void handleNewSession()}>
+                    <Plus size={14}/> Start a chat
+                  </button>
+                </div>
+              ) : (
+                visibleSessions.slice(0, 45).map(session => {
+                  const activeTurn = isSessionRowWorking(session.id, session.profile, activeTurns)
+                  const isWorking = Boolean(activeTurn)
+                  const isWaitingInput = Boolean(activeTurn && (activeTurn.status === 'waiting' || activeTurn.needsInput))
+                  const isOpening = openingSessionId === session.id
+                  const profile = profileMap.get(session.profile)
+                  return (
+                    <button
+                      className={`bot-row ${isWorking ? 'working' : ''} ${isOpening ? 'opening' : ''} ${isWaitingInput ? 'waiting' : ''}`}
+                      key={`${session.profile}:${session.id}`}
+                      onPointerDown={handleRowPointerDown}
+                      onClick={() => void openSession(session)}
+                    >
+                      <div className="bot-avatar-wrap">
+                        <BotAvatar profile={profile} fallbackName={session.profile} variant="session"/>
+                        {isWorking && (
+                          <span className={`bot-status-pip ${isWaitingInput ? 'waiting' : ''}`} aria-hidden="true"/>
+                        )}
+                        {session.unread && !isWorking && <span className="bot-unread-pip" aria-hidden="true"/>}
+                      </div>
+                      <span className="bot-copy">
+                        <b>{session.title || 'Untitled session'}</b>
+                        {activeTurn ? (
+                          isWaitingInput ? (
+                            <small className="bot-clarify-question">
+                              {activeTurn.pendingClarify?.questions?.[0]?.question || 'Clarification needed'}
+                            </small>
+                          ) : (
+                            <small className="bot-in-progress">
+                              <span className="live-wave" aria-hidden="true"><i/><i/><i/></span>
+                              <span className="live-status-text">{activeTurn.statusText}</span>
+                            </small>
+                          )
+                        ) : (
+                          <small>{titleize(session.profile || 'default')} · {cleanPreviewSnippet(session.preview)}</small>
+                        )}
                       </span>
-                    )}
-                  </span>
-                </button>
-              )
-            })}
-          </section>
-        ) : !visibleSessions.length ? (
-          <section className="sessions-empty" key="sessions-empty">
-            <MessageSquare size={24}/>
-            <b>No conversations yet</b>
-            <p>Start a new chat with any of your Bots.</p>
-            <button className="task-outline-pill" onClick={() => void handleNewSession()}>
-              <Plus size={14}/> Start a chat
-            </button>
-          </section>
-        ) : (
-          <section className="bot-list" key="sessions-list">
-            {visibleSessions.slice(0, sessionDisplayCount).map((session, index) => {
-              const activeTurn = isSessionRowWorking(session.id, session.profile, activeTurns)
-              const isWorking = Boolean(activeTurn)
-              const isWaitingInput = Boolean(activeTurn && (activeTurn.status === 'waiting' || activeTurn.needsInput))
-              const isOpening = openingSessionId === session.id
-              const profile = profileMap.get(session.profile)
-              return (
-                <button
-                  className={`bot-row enter ${isWorking ? 'working' : ''} ${isOpening ? 'opening' : ''} ${isWaitingInput ? 'waiting' : ''}`}
-                  style={{ animationDelay: `${Math.min(index, 8) * 28}ms` }}
-                  key={`${session.profile}:${session.id}`}
-                  onPointerDown={handleRowPointerDown}
-                  onClick={() => void openSession(session)}
-                >
-                  <div className="bot-avatar-wrap">
-                    <BotAvatar profile={profile} fallbackName={session.profile} variant="session"/>
-                    {isWorking && (
-                      <span className={`bot-status-pip ${isWaitingInput ? 'waiting' : ''}`} aria-hidden="true"/>
-                    )}
-                    {session.unread && !isWorking && <span className="bot-unread-pip" aria-hidden="true"/>}
-                  </div>
-                  <span className="bot-copy">
-                    <b>{session.title || 'Untitled session'}</b>
-                    {activeTurn ? (
-                      isWaitingInput ? (
-                        <small className="bot-clarify-question">
-                          {activeTurn.pendingClarify?.questions?.[0]?.question || 'Clarification needed'}
-                        </small>
-                      ) : (
-                        <small className="bot-in-progress">
-                          <span className="live-wave" aria-hidden="true"><i/><i/><i/></span>
-                          <span className="live-status-text">{activeTurn.statusText}</span>
-                        </small>
-                      )
-                    ) : (
-                      <small>{titleize(session.profile || 'default')} · {cleanPreviewSnippet(session.preview)}</small>
-                    )}
-                  </span>
-                  <span className="meta">
-                    {isOpening ? (
-                      <span className="row-opening-cue"><RefreshCw size={12} className="pull-refresh-spinner" /></span>
-                    ) : (
-                      ago(session.last_active)
-                    )}
-                    {session.unread && !isOpening && (
-                      <span className="unread-badge">
-                        {session.unread_count && session.unread_count > 99 ? '99+' : session.unread_count || 1}
+                      <span className="meta">
+                        {isOpening ? (
+                          <span className="row-opening-cue"><RefreshCw size={12} className="pull-refresh-spinner" /></span>
+                        ) : (
+                          ago(session.last_active)
+                        )}
+                        {session.unread && !isOpening && (
+                          <span className="unread-badge">
+                            {session.unread_count && session.unread_count > 99 ? '99+' : session.unread_count || 1}
+                          </span>
+                        )}
                       </span>
-                    )}
-                  </span>
-                </button>
-              )
-            })}
-          </section>
+                    </button>
+                  )
+                })
+              )}
+            </section>
+          </>
         )}
       </div>
       <TasksView

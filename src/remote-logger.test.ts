@@ -13,6 +13,7 @@ import {
   setPerformanceAuthToken,
   setPerformanceDiagnosticsEnabled,
   setPerformanceLogHost,
+  setRemoteLoggerEndpoint,
   startPerformanceTrace,
 } from './remote-logger'
 
@@ -228,6 +229,10 @@ describe('Remote Performance Diagnostics & Logger', () => {
     expect(resolveLogServerUrl()).toBe('http://10.0.0.130:8765/')
 
     setPerformanceLogHost(null)
+    expect(resolveLogServerUrl()).toBe('http://100.117.86.67:8765/')
+
+    // Connecting to remote gateway at 10.0.0.130 must not redirect debug logger away from PC
+    setRemoteLoggerEndpoint('http://10.0.0.130:9119')
     expect(resolveLogServerUrl()).toBe('http://100.117.86.67:8765/')
   })
 })

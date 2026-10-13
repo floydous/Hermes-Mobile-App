@@ -286,7 +286,7 @@ function scheduleFlush() {
  * Avoids duplicate transmissions to primary vs host.
  */
 export function resolveLogServerUrl(): string {
-  const host = customLogHost || activeEndpointHost || DEFAULT_PRIMARY_HOST
+  const host = customLogHost || DEFAULT_PRIMARY_HOST
   return `http://${host}:${DEFAULT_LOG_PORT}/`
 }
 
