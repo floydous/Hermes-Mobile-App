@@ -12,5 +12,5 @@ SOUL.md
 CLAUDE.md
 .pi/
 .opencode/
-android-debug.log
+android-debug*.log
 scripts/__pycache__/

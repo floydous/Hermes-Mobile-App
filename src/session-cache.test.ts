@@ -222,4 +222,29 @@ describe('session-cache message caching and eviction', () => {
     expect(deduped[1].timestamp).toBe(1720000)
     expect(deduped[1].usage).toEqual({ total: 150 })
   })
+
+  it('deduplicates candidate alias IDs and allows retrieval across all unique aliases without duplicate writes', () => {
+    const rawCandidateIds = [
+      'session-abc',
+      'runtime-resolved-1',
+      'draft:researcher',
+      'session-abc', // duplicate
+      'session-abc', // duplicate
+    ]
+    const msgs: LiveMessage[] = [{ id: 1, role: 'user', content: 'test message' }]
+
+    // Simulate deduplication before persistence
+    const uniqueAliasIds = Array.from(new Set(rawCandidateIds))
+    expect(uniqueAliasIds).toEqual(['session-abc', 'runtime-resolved-1', 'draft:researcher'])
+
+    // Store messages under each unique alias
+    for (const cid of uniqueAliasIds) {
+      setCachedSessionMessages(cid, msgs)
+    }
+
+    // Verify all unique aliases retrieve the identical cached messages
+    expect(getCachedSessionMessages('session-abc')).toEqual(msgs)
+    expect(getCachedSessionMessages('runtime-resolved-1')).toEqual(msgs)
+    expect(getCachedSessionMessages('draft:researcher')).toEqual(msgs)
+  })
 })

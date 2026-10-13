@@ -115,4 +115,29 @@ describe('ChatView live animation rendering', () => {
     expect(html).not.toContain('live-response')
     expect(html).not.toContain('typing-indicator')
   })
+
+  it('windows long message histories on initial render and offers progressive loading', () => {
+    const longMessageList: LiveMessage[] = Array.from({ length: 100 }, (_, i) => ({
+      id: i + 1,
+      role: i % 2 === 0 ? 'user' : 'assistant',
+      content: `Message ${i + 1}`,
+      timestamp: 1000 + i,
+    }))
+
+    const html = renderToString(
+      <ChatView
+        {...defaultProps}
+        messages={longMessageList}
+      />
+    )
+
+    // Must show the button to reveal earlier messages in the batch
+    expect(html).toContain('Load earlier messages (75 more)')
+    // Must contain the latest message (Message 100)
+    expect(html).toContain('Message 100')
+    // Must contain Message 76 (the start of the 25-message window)
+    expect(html).toContain('Message 76')
+    // Must NOT render Message 1 initially, avoiding synchronous DOM explosion
+    expect(html).not.toContain('Message 1<')
+  })
 })

@@ -42,6 +42,17 @@ type Props = {
 
 const titleize = (value?: string | null) => (value || '').split(/[-_]+/).filter(Boolean).map(part => (part[0] ? part[0].toUpperCase() + part.slice(1) : '')).join(' ') || 'Bot'
 
+export function computeProgressiveRenderSlice<T>(
+  items: T[],
+  renderedLimit: number
+): { renderedMessages: T[]; hasEarlierInBatch: boolean; remainingEarlier: number } {
+  const safeItems = Array.isArray(items) ? items : []
+  const hasEarlierInBatch = safeItems.length > renderedLimit
+  const renderedMessages = hasEarlierInBatch ? safeItems.slice(-renderedLimit) : safeItems
+  const remainingEarlier = Math.max(0, safeItems.length - renderedLimit)
+  return { renderedMessages, hasEarlierInBatch, remainingEarlier }
+}
+
 export function ChatView({ session, conversationLoading, messages, settledAssistant, profiles, streaming, sending, toolActivities, error, back, refresh, clearChat, openProfile, onSessionModelChange, pendingClarify, onAnswerClarify, onSkipClarify, submit, submitVoice, stop, loadEarlierMessages }: Props) {
   const shellRef = useRef<HTMLElement>(null)
   const threadRef = useRef<HTMLDivElement>(null)
@@ -55,6 +66,7 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
   const [unreadBelow, setUnreadBelow] = useState(0)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const [hasMoreEarlier, setHasMoreEarlier] = useState(true)
+  const [renderedLimit, setRenderedLimit] = useState(25)
   const [revealedTimestampId, setRevealedTimestampId] = useState<number | null>(null)
   const [controlError, setControlError] = useState('')
   const [draggingFiles, setDraggingFiles] = useState(false)
@@ -208,6 +220,8 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
     setDraggingFiles(false)
   }, [session.id])
 
+  const previousTotalRef = useRef(messages.length)
+
   useLayoutEffect(() => {
     initializedRef.current = false
     followingRef.current = true
@@ -216,9 +230,19 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
     setRevealedTimestampId(null)
     setHasMoreEarlier(true)
     setLoadingEarlier(false)
+    setRenderedLimit(25)
+    previousTotalRef.current = messages.length
     scrollAnchorRef.current = null
     prependingEarlierRef.current = false
   }, [session.id])
+
+  useEffect(() => {
+    const delta = messages.length - previousTotalRef.current
+    previousTotalRef.current = messages.length
+    if (delta > 0 && initializedRef.current) {
+      setRenderedLimit(prev => prev + delta)
+    }
+  }, [messages.length])
 
   useLayoutEffect(() => {
     const thread = threadRef.current
@@ -228,7 +252,7 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
       scrollAnchorRef.current = null
       prependingEarlierRef.current = false
     }
-  }, [messages])
+  }, [messages, renderedLimit])
 
   useLayoutEffect(() => {
     if (!messages.length || initializedRef.current) return
@@ -257,6 +281,25 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
     return () => observer.disconnect()
   }, [])
 
+  const { renderedMessages, hasEarlierInBatch } = useMemo(
+    () => computeProgressiveRenderSlice(messages, renderedLimit),
+    [messages, renderedLimit]
+  )
+
+  const revealEarlierInBatch = useCallback(() => {
+    if (renderedLimit >= messages.length) return false
+    const thread = threadRef.current
+    if (thread) {
+      scrollAnchorRef.current = {
+        scrollHeight: thread.scrollHeight,
+        scrollTop: thread.scrollTop,
+      }
+      prependingEarlierRef.current = true
+    }
+    setRenderedLimit(prev => Math.min(messages.length, prev + 25))
+    return true
+  }, [renderedLimit, messages.length])
+
   const fetchEarlier = useCallback(async () => {
     if (loadingEarlier || !hasMoreEarlier || !loadEarlierMessages) return
     const thread = threadRef.current
@@ -282,8 +325,12 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
     if (!thread) return
 
     // Auto-fetch earlier messages when scrolled near top
-    if (thread.scrollTop < 120 && !loadingEarlier && hasMoreEarlier && !pullRefreshing && messages.length >= 10 && loadEarlierMessages) {
-      void fetchEarlier()
+    if (thread.scrollTop < 140 && !loadingEarlier && !pullRefreshing) {
+      if (hasEarlierInBatch) {
+        revealEarlierInBatch()
+      } else if (hasMoreEarlier && messages.length >= 10 && loadEarlierMessages) {
+        void fetchEarlier()
+      }
     }
 
     const nearEnd = shouldStickToBottom(thread.scrollHeight, thread.scrollTop, thread.clientHeight, SCROLL_FOLLOW_THRESHOLD)
@@ -410,13 +457,23 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
           </section>
         )}
         {showEmptyState && <section className="chat-empty-state" aria-label={`Start a conversation with ${botName}`}><BotAvatar profile={botProfile} fallbackName={session.profile} variant="welcome"/><h1>{botName.toUpperCase()}</h1><p>Say something to get started.</p></section>}
-        {messages.length >= 10 && loadEarlierMessages && (
-          <div className="load-earlier-container" aria-live="polite">
+        {(hasEarlierInBatch || messages.length >= 10) && (
+          <div className="history-anchor-header load-earlier-container">
             {loadingEarlier ? (
               <div className="load-earlier-capsule is-loading" role="status" aria-label="Loading earlier messages">
                 <LoaderCircle size={13} className="spin" />
                 <span>Loading earlier messages…</span>
               </div>
+            ) : hasEarlierInBatch ? (
+              <button
+                type="button"
+                className="load-earlier-btn"
+                onClick={revealEarlierInBatch}
+                aria-label="Load earlier messages"
+              >
+                <History size={13} />
+                <span>{`Load earlier messages (${messages.length - renderedLimit} more)`}</span>
+              </button>
             ) : hasMoreEarlier ? (
               <button
                 type="button"
@@ -435,7 +492,8 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
             )}
           </div>
         )}
-        {messages.map((message, index) => {
+        {renderedMessages.map((message, sliceIndex) => {
+          const index = messages.length - renderedMessages.length + sliceIndex
           const isLast = index === messages.length - 1
           const previousMessage = index > 0 ? messages[index - 1] : undefined
           const hasAssistantReplyAfter = index < lastAssistantIndex
