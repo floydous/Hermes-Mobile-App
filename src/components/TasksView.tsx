@@ -175,6 +175,21 @@ export async function preloadTaskJobs(baseUrl?: string, profiles: LiveProfile[] 
   return cachedTaskJobs
 }
 
+export function setupTaskPollingController({
+  active,
+  onRefresh,
+  intervalMs = 20_000,
+}: {
+  active: boolean
+  onRefresh: () => void | Promise<unknown>
+  intervalMs?: number
+}): () => void {
+  if (!active) return () => {}
+  void onRefresh()
+  const timer = globalThis.setInterval(() => void onRefresh(), intervalMs)
+  return () => globalThis.clearInterval(timer)
+}
+
 export function TasksView({
   back,
   profiles,
@@ -261,10 +276,11 @@ export function TasksView({
   }, [active, selected, isCreateOpen, back])
 
   useEffect(() => {
-    if (!active) return
-    void refresh(cachedTaskJobs.length > 0, false)
-    const timer = window.setInterval(() => void refresh(true, true), 20_000)
-    return () => window.clearInterval(timer)
+    return setupTaskPollingController({
+      active,
+      onRefresh: () => void refresh(cachedTaskJobs.length > 0, false),
+      intervalMs: 20_000,
+    })
   }, [active, scopeKey])
   const filteredJobs = useMemo(() => {
     if (!query.trim()) return jobs

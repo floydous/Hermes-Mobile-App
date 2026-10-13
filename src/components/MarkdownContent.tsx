@@ -326,6 +326,18 @@ type MessageSegment =
   | { type: 'attachment'; path: string }
 
 function parseMessageSegments(text: string): MessageSegment[] {
+  const lower = text.toLowerCase()
+  // Fast path: if there are no attachment markers or media directives, return whole text as single segment
+  if (
+    !text.includes('MEDIA:') &&
+    !text.includes('Attached:') &&
+    !text.includes('[User attached') &&
+    !text.includes('@file:') &&
+    !lower.includes('[the user sent a')
+  ) {
+    return [{ type: 'text', content: text }]
+  }
+
   const cleaned = stripAttachedContextScaffolding(text)
   const lines = cleaned.split(/\r?\n/)
   const segments: MessageSegment[] = []
@@ -998,7 +1010,7 @@ export function MediaAttachmentCard({ rawPath, kind }: { rawPath: string; kind: 
 }
 
 export function prewarmMessageImageCache(text: string) {
-  if (!text) return
+  if (!text || !text.toLowerCase().includes('data:image')) return
 
   // 1. Find all base64 data URIs in markdown images: ![alt](data:image/...)
   const imgMatches = text.matchAll(/!\[([^\]]*)\]\((data:image\/[^;]+;base64,[^)\s]+(?:\s+[^)]+)?)\)/gi)
@@ -1037,6 +1049,7 @@ export function prewarmMessageImageCache(text: string) {
 }
 
 function normalizeMultilineImages(text: string): string {
+  if (!text.includes('![')) return text
   // Collapse multiline markdown images where the URL is split across lines (especially base64 data URIs)
   return text.replace(/!\[([^\]]*)\]\(([\s\S]*?)\)/g, (match, alt, rawUrl) => {
     const trimmed = rawUrl.trim()
@@ -1048,6 +1061,7 @@ function normalizeMultilineImages(text: string): string {
 }
 
 function normalizeHtmlImages(text: string): string {
+  if (!text.toLowerCase().includes('<img')) return text
   // Convert <img ... src="..." ... /> to standard Markdown ![alt](src) outside code fences
   const parts = text.split(/(```[\s\S]*?```|`[^`\n]*`)/g)
   return parts
@@ -1154,7 +1168,9 @@ export const MarkdownContent = memo(function MarkdownContent({
         const remarkPlugins = hasMath ? MATH_REMARK_PLUGINS : STANDARD_REMARK_PLUGINS
         const rehypePlugins = hasMath ? MATH_REHYPE_PLUGINS : STANDARD_REHYPE_PLUGINS
 
-        const withMentionLinks = seg.content.replace(/(^|\s)(@[a-zA-Z0-9][\w-]*)\b/g, '$1[$2](hermes-mention:$2)')
+        const withMentionLinks = seg.content.includes('@')
+          ? seg.content.replace(/(^|\s)(@[a-zA-Z0-9][\w-]*)\b/g, '$1[$2](hermes-mention:$2)')
+          : seg.content
         const withHtmlImages = normalizeHtmlImages(withMentionLinks)
         const withSingleLineImages = normalizeMultilineImages(withHtmlImages)
         const normalized = hasMath ? normalizeLatex(withSingleLineImages) : withSingleLineImages

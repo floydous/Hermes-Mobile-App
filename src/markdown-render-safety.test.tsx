@@ -52,4 +52,38 @@ describe('Markdown Content Rendering Safety & Syntax Highlighting', () => {
     expect(html).toContain('$100')
     expect(html).toContain('$HOME/bin')
   })
+
+  it('preserves plain text in fast-path without modifying content', () => {
+    const plain = 'This is a normal paragraph with no images, no math, and no attachments.'
+    const html = renderToString(<MarkdownContent>{plain}</MarkdownContent>)
+
+    expect(html).toContain('This is a normal paragraph with no images, no math, and no attachments.')
+    expect(html).not.toContain('media-attachment-card')
+  })
+
+  it('correctly normalizes uppercase and mixed-case <IMG> and <Img> HTML tags to markdown images', () => {
+    const uppercaseImg = 'Check out this screenshot: <IMG src="https://example.com/upper.png" alt="Upper Screenshot" />'
+    const htmlUpper = renderToString(<MarkdownContent>{uppercaseImg}</MarkdownContent>)
+    expect(htmlUpper).toContain('src="https://example.com/upper.png"')
+    expect(htmlUpper).toContain('alt="Upper Screenshot"')
+
+    const mixedImg = 'Another view: <Img src="https://example.com/mixed.png" alt="Mixed Screenshot" />'
+    const htmlMixed = renderToString(<MarkdownContent>{mixedImg}</MarkdownContent>)
+    expect(htmlMixed).toContain('src="https://example.com/mixed.png"')
+    expect(htmlMixed).toContain('alt="Mixed Screenshot"')
+  })
+
+  it('correctly handles uppercase and mixed-case variations in context scaffolding', () => {
+    // Genuinely uppercase scaffolding to verify case-insensitive detection
+    const scaffoldingUpper = '[THE USER SENT A DOCUMENT: "specs.pdf". IT IS SAVED AT: /docs/specs.pdf. ITS CONTENT HAS BEEN INCLUDED BELOW:]'
+    const htmlScaffolding = renderToString(<MarkdownContent>{scaffoldingUpper}</MarkdownContent>)
+    expect(htmlScaffolding).toContain('media-attachment-card')
+    expect(htmlScaffolding).toContain('specs.pdf')
+
+    const mentionText = 'Paging @coder and @tester for code review'
+    const htmlMention = renderToString(<MarkdownContent>{mentionText}</MarkdownContent>)
+    expect(htmlMention).toContain('class="mention-link"')
+    expect(htmlMention).toContain('@coder')
+    expect(htmlMention).toContain('@tester')
+  })
 })

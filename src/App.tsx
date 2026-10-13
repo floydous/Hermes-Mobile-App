@@ -2150,15 +2150,19 @@ export default function App() {
   if (createOpen) return <CreateWizard step={createStep} setStep={setCreateStep} draft={botDraft} setDraft={setBotDraft} creating={creating} error={error} close={() => { setCreateOpen(false); setCreateStep(0); setError('') }} finish={() => void finishCreate()}/>
   if (settings) return <ConnectionSettings profiles={profiles.length} sessions={sessions.length} connected={connectionStatus === 'connected'} endpoint={activeEndpoint !== 'http://127.0.0.1:9119' ? activeEndpoint : undefined} theme={theme} setTheme={setTheme} uiScale={uiScale} setUiScale={setUiScale} close={() => setSettings(false)} refresh={() => refresh()} onPairingBusy={setPairingBusyState} onPaired={async endpoint => { const normalized = activateEndpoint(endpoint); const data = await refresh(normalized, true); if (!data) throw new Error(lastConnectionErrorRef.current || 'Signed in, but authenticated Hermes REST or live WebSocket verification failed.'); localStorage.setItem('hermes-mobile-active-endpoint', normalized) }}/>
   if (selected && profileSheet) return <BotProfileSheet profile={profiles.find(profile => profile.name === selected.profile)} session={selected} onClose={() => setProfileSheet(false)} onUpdated={() => void refresh()}/>
-  if (selected) return <ErrorBoundary onReset={() => setSelected(null)}><ChatView key={selected.id} session={selected} conversationLoading={conversationLoading} messages={messages} settledAssistant={settledAssistant?.sessionId === selected.id && settledAssistant.profile === selected.profile ? settledAssistant : null} profiles={profiles} streaming={streaming} sending={sending} toolActivities={toolActivities} error={error} back={() => { remoteLog('DEBUG', 'Navigation', `Chat chevron back tapped from ${selected.id}`); setSelected(null) }} refresh={() => void openSession(selected)} clearChat={() => handleClearChat(selected)} openProfile={() => setProfileSheet(true)} onSessionModelChange={handleSessionModelChange} pendingClarify={pendingClarify} onAnswerClarify={handleAnswerClarify} onSkipClarify={handleSkipClarify} submit={submit} submitVoice={submitVoice} stop={stop} loadEarlierMessages={loadEarlierMessages}/></ErrorBoundary>
 
-  return <main
-    className={`app roster-shell tab-slide-${slideDirection}`}
-    onTouchStart={handleRosterTouchStart}
-    onTouchMove={handleRosterTouchMove}
-    onTouchEnd={handleRosterTouchEnd}
-    onTouchCancel={handleRosterTouchCancel}
-  >
+  return (
+    <>
+      <main
+        className={`app roster-shell tab-slide-${slideDirection}`}
+        style={selected ? { display: 'none' } : undefined}
+        aria-hidden={Boolean(selected)}
+        inert={selected ? true : undefined}
+        onTouchStart={selected ? undefined : handleRosterTouchStart}
+        onTouchMove={selected ? undefined : handleRosterTouchMove}
+        onTouchEnd={selected ? undefined : handleRosterTouchEnd}
+        onTouchCancel={selected ? undefined : handleRosterTouchCancel}
+      >
     <div className="roster-pinned">
       <header className="roster-head">
         <div className="roster-status">
@@ -2451,10 +2455,40 @@ export default function App() {
         baseUrl={activeEndpoint}
         createOpen={createTaskOpen}
         setCreateOpen={setCreateTaskOpen}
-        active={tab === 'tasks'}
+        active={!selected && tab === 'tasks'}
       />
     <NavIsland tab={tab} setTab={switchTab}/>
   </main>
+  {selected && (
+    <ErrorBoundary onReset={() => setSelected(null)}>
+      <ChatView
+        key={selected.id}
+        session={selected}
+        conversationLoading={conversationLoading}
+        messages={messages}
+        settledAssistant={settledAssistant?.sessionId === selected.id && settledAssistant.profile === selected.profile ? settledAssistant : null}
+        profiles={profiles}
+        streaming={streaming}
+        sending={sending}
+        toolActivities={toolActivities}
+        error={error}
+        back={() => { remoteLog('DEBUG', 'Navigation', `Chat chevron back tapped from ${selected.id}`); setSelected(null) }}
+        refresh={() => void openSession(selected)}
+        clearChat={() => handleClearChat(selected)}
+        openProfile={() => setProfileSheet(true)}
+        onSessionModelChange={handleSessionModelChange}
+        pendingClarify={pendingClarify}
+        onAnswerClarify={handleAnswerClarify}
+        onSkipClarify={handleSkipClarify}
+        submit={submit}
+        submitVoice={submitVoice}
+        stop={stop}
+        loadEarlierMessages={loadEarlierMessages}
+      />
+    </ErrorBoundary>
+  )}
+  </>
+  )
 }
 
 const TABS: Array<{ id: Tab; label: string; icon: typeof Bot }> = [

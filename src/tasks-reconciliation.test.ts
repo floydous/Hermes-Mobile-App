@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
-import { deriveTaskSections, preloadTaskJobs, reconcileTaskJobs, resetTaskFetchCooldown } from './components/TasksView'
+import { deriveTaskSections, preloadTaskJobs, reconcileTaskJobs, resetTaskFetchCooldown, setupTaskPollingController } from './components/TasksView'
 import { normalizeCronJob, type CronJob } from './hermes'
 import * as hermesModule from './hermes'
 
@@ -217,5 +217,36 @@ describe('live Tasks reconciliation', () => {
     }
 
     vi.restoreAllMocks()
+  })
+
+  it('suspends polling timers when active is false and resumes when active is true via setupTaskPollingController', () => {
+    vi.useFakeTimers()
+    try {
+      const onRefresh = vi.fn()
+
+      // 1. Inactive: controller does not invoke refresh or register timer
+      const cleanupInactive = setupTaskPollingController({ active: false, onRefresh, intervalMs: 20_000 })
+      expect(onRefresh).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(60_000)
+      expect(onRefresh).not.toHaveBeenCalled()
+      cleanupInactive()
+
+      // 2. Active: controller triggers immediate refresh and registers 20s interval
+      const cleanupActive = setupTaskPollingController({ active: true, onRefresh, intervalMs: 20_000 })
+      expect(onRefresh).toHaveBeenCalledTimes(1)
+
+      vi.advanceTimersByTime(20_000)
+      expect(onRefresh).toHaveBeenCalledTimes(2)
+
+      vi.advanceTimersByTime(40_000)
+      expect(onRefresh).toHaveBeenCalledTimes(4)
+
+      // 3. Cleanup on transition to inactive: stops timer completely
+      cleanupActive()
+      vi.advanceTimersByTime(60_000)
+      expect(onRefresh).toHaveBeenCalledTimes(4) // No further calls after cleanup
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
