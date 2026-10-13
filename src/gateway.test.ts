@@ -361,6 +361,89 @@ describe('Desktop Gateway protocol', () => {
     await submitPromise
   })
 
+  it('passes confirm_empty_truncate when truncateOrdinal is 0 even if truncateRowId is > 1', async () => {
+    let mockWs!: MockWebSocket
+    const client = new HermesGatewayClient(
+      async () => 'ws://127.0.0.1:9119/api/ws',
+      url => {
+        mockWs = new MockWebSocket(url)
+        return mockWs as unknown as WebSocket
+      }
+    )
+
+    const connectPromise = client.connect()
+    await Promise.resolve()
+    mockWs.receive({ method: 'event', params: { type: 'gateway.ready', payload: {} } })
+    await connectPromise
+
+    const submitPromise = client.submitPrompt(
+      's-1',
+      'Edited first message',
+      vi.fn(),
+      { truncateRowId: 14, truncateOrdinal: 0 }
+    )
+
+    const promptFrame = await mockWs.waitForSent(line => line.includes('"prompt.submit"'))
+    const promptCall = JSON.parse(promptFrame.trim())
+    expect(promptCall.params.confirm_truncate).toBe(true)
+    expect(promptCall.params.confirm_empty_truncate).toBe(true)
+    expect(promptCall.params.truncate_before_row_id).toBe(14)
+
+    mockWs.receive({ jsonrpc: '2.0', id: promptCall.id, result: { status: 'streaming' } })
+    mockWs.receive({
+      method: 'event',
+      params: { type: 'message.complete', session_id: 's-1', payload: { status: 'complete', text: 'Answer' } },
+    })
+    await submitPromise
+  })
+
+  it('automatically retries with confirm_empty_truncate: true when server rejects with confirm_empty_truncate requirement', async () => {
+    let mockWs!: MockWebSocket
+    const client = new HermesGatewayClient(
+      async () => 'ws://127.0.0.1:9119/api/ws',
+      url => {
+        mockWs = new MockWebSocket(url)
+        return mockWs as unknown as WebSocket
+      }
+    )
+
+    const connectPromise = client.connect()
+    await Promise.resolve()
+    mockWs.receive({ method: 'event', params: { type: 'gateway.ready', payload: {} } })
+    await connectPromise
+
+    const submitPromise = client.submitPrompt(
+      's-1',
+      'Edited prompt',
+      vi.fn(),
+      { truncateRowId: 5, truncateOrdinal: 1 }
+    )
+
+    // First call without confirm_empty_truncate
+    const frame1 = await mockWs.waitForSent(line => line.includes('"prompt.submit"'))
+    const call1 = JSON.parse(frame1.trim())
+    expect(call1.params.confirm_empty_truncate).toBeUndefined()
+
+    // Server returns error demanding confirm_empty_truncate=true
+    mockWs.receive({
+      jsonrpc: '2.0',
+      id: call1.id,
+      error: { code: -32603, message: 'truncation would erase the entire session transcript; resubmit with confirm_empty_truncate=true if this is intended' },
+    })
+
+    // Client should automatically retry with confirm_empty_truncate = true
+    const frame2 = await mockWs.waitForSent(line => line.includes('"confirm_empty_truncate":true'))
+    const call2 = JSON.parse(frame2.trim())
+    expect(call2.params.confirm_empty_truncate).toBe(true)
+
+    mockWs.receive({ jsonrpc: '2.0', id: call2.id, result: { status: 'streaming' } })
+    mockWs.receive({
+      method: 'event',
+      params: { type: 'message.complete', session_id: 's-1', payload: { status: 'complete', text: 'Answer' } },
+    })
+    await submitPromise
+  })
+
   it('dispatches terminal message.complete event to active turn listener even if event carries remapped runtime session_id', async () => {
     let mockWs!: MockWebSocket
     const client = new HermesGatewayClient(

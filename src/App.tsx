@@ -2011,17 +2011,19 @@ export default function App() {
   const swipeStartYRef = useRef<number | null>(null)
   const swipeTrackingRef = useRef(false)
   const swipeIntentConfirmedRef = useRef(false)
+  const swipeStartedOnInteractiveRef = useRef(false)
 
   const handleRosterTouchStart = (event: React.TouchEvent<HTMLElement>) => {
     if (event.touches.length !== 1) return
     const target = event.target as HTMLElement | null
     if (target?.closest('input, textarea, select, [type="range"], .task-detail, .task-create-sheet, .task-modal-backdrop, .roster-nav, .roster-pinned, .nav-island')) return
 
+    swipeStartedOnInteractiveRef.current = Boolean(target?.closest('.bot-row, button, a'))
     swipeStartXRef.current = event.touches[0].clientX
     swipeStartYRef.current = event.touches[0].clientY
     swipeTrackingRef.current = true
     swipeIntentConfirmedRef.current = false
-    remoteLog('DEBUG', 'Gesture', `TouchStart on roster at x=${Math.round(event.touches[0].clientX)} y=${Math.round(event.touches[0].clientY)} target=${target?.tagName}.${target?.className}`)
+    remoteLog('DEBUG', 'Gesture', `TouchStart on roster at x=${Math.round(event.touches[0].clientX)} y=${Math.round(event.touches[0].clientY)} target=${target?.tagName}.${target?.className} isInteractive=${swipeStartedOnInteractiveRef.current}`)
   }
 
   const handleRosterTouchMove = (event: React.TouchEvent<HTMLElement>) => {
@@ -2031,11 +2033,13 @@ export default function App() {
     const deltaX = currentX - swipeStartXRef.current
     const deltaY = currentY - swipeStartYRef.current
 
+    const slop = swipeStartedOnInteractiveRef.current ? 36 : 20
+
     if (!swipeIntentConfirmedRef.current) {
-      if (isHorizontalSwipeIntent(deltaX, deltaY, 10)) {
+      if (isHorizontalSwipeIntent(deltaX, deltaY, slop)) {
         swipeIntentConfirmedRef.current = true
         remoteLog('DEBUG', 'Gesture', `Swipe intent confirmed: deltaX=${Math.round(deltaX)} deltaY=${Math.round(deltaY)}`)
-      } else if (Math.hypot(deltaX, deltaY) >= 10) {
+      } else if (Math.hypot(deltaX, deltaY) >= slop) {
         // Vertical or diagonal movement: immediately yield to vertical scrolling
         swipeTrackingRef.current = false
         return
@@ -2059,15 +2063,18 @@ export default function App() {
     const deltaX = endX - swipeStartXRef.current
     const deltaY = endY - swipeStartYRef.current
     const wasConfirmed = swipeIntentConfirmedRef.current
+    const wasInteractive = swipeStartedOnInteractiveRef.current
 
     swipeTrackingRef.current = false
     swipeIntentConfirmedRef.current = false
+    swipeStartedOnInteractiveRef.current = false
     swipeStartXRef.current = null
     swipeStartYRef.current = null
 
-    // Require confirmed horizontal intent with at least 44px delta
+    const minDelta = wasInteractive ? 64 : 56
+    // Require confirmed horizontal intent with at least minDelta
     if (wasConfirmed) {
-      const nextTab = computeNextSwipeTab(tab, deltaX, deltaY, 44)
+      const nextTab = computeNextSwipeTab(tab, deltaX, deltaY, minDelta)
       remoteLog('DEBUG', 'Gesture', `TouchEnd evaluated: deltaX=${Math.round(deltaX)} confirmed=${wasConfirmed} nextTab=${nextTab || 'none'}`)
       if (nextTab) {
         if (document.activeElement instanceof HTMLElement) {
@@ -2081,6 +2088,7 @@ export default function App() {
   const handleRosterTouchCancel = () => {
     swipeTrackingRef.current = false
     swipeIntentConfirmedRef.current = false
+    swipeStartedOnInteractiveRef.current = false
     swipeStartXRef.current = null
     swipeStartYRef.current = null
   }

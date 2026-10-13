@@ -371,13 +371,13 @@ export class HermesGatewayClient {
       if (options?.truncateRowId != null) {
         payload.confirm_truncate = true
         payload.truncate_before_row_id = options.truncateRowId
-        if (options.truncateRowId === 0 || options.truncateRowId === 1) {
+        if (options.truncateRowId === 0 || options.truncateRowId === 1 || options.truncateOrdinal === 0) {
           payload.confirm_empty_truncate = true
         }
       } else if (options?.truncateMessageId != null) {
         payload.confirm_truncate = true
         payload.truncate_before_message_id = String(options.truncateMessageId)
-        if (options.truncateMessageId === 0 || options.truncateMessageId === 1 || options.truncateMessageId === '0' || options.truncateMessageId === '1') {
+        if (options.truncateMessageId === 0 || options.truncateMessageId === 1 || options.truncateMessageId === '0' || options.truncateMessageId === '1' || options.truncateOrdinal === 0) {
           payload.confirm_empty_truncate = true
         }
       } else if (options?.truncateOrdinal != null) {
@@ -387,7 +387,20 @@ export class HermesGatewayClient {
           payload.confirm_empty_truncate = true
         }
       }
-      await this.call('prompt.submit', payload, 30_000)
+      try {
+        await this.call('prompt.submit', payload, 30_000)
+      } catch (submitErr) {
+        if (
+          submitErr instanceof Error &&
+          submitErr.message.includes('confirm_empty_truncate=true') &&
+          !payload.confirm_empty_truncate
+        ) {
+          payload.confirm_empty_truncate = true
+          await this.call('prompt.submit', payload, 30_000)
+        } else {
+          throw submitErr
+        }
+      }
 
       resetWatchdog()
       const maxCeilingPromise = new Promise<never>((_, reject) => {

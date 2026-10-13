@@ -4,17 +4,17 @@ import { computeNextSwipeTab, isHorizontalSwipeIntent } from './tab-swipe'
 
 describe('Horizontal Tab Swipe Navigation', () => {
   it('correctly advances tabs upon horizontal left swipe', () => {
-    expect(computeNextSwipeTab('bots', -50, 5)).toBe('sessions')
-    expect(computeNextSwipeTab('sessions', -60, 10)).toBe('tasks')
+    expect(computeNextSwipeTab('bots', -60, 5)).toBe('sessions')
+    expect(computeNextSwipeTab('sessions', -70, 10)).toBe('tasks')
     // At the rightmost tab, cannot swipe further left
-    expect(computeNextSwipeTab('tasks', -50, 0)).toBeNull()
+    expect(computeNextSwipeTab('tasks', -60, 0)).toBeNull()
   })
 
   it('correctly navigates backwards upon horizontal right swipe', () => {
-    expect(computeNextSwipeTab('tasks', 50, 5)).toBe('sessions')
-    expect(computeNextSwipeTab('sessions', 60, 10)).toBe('bots')
+    expect(computeNextSwipeTab('tasks', 60, 5)).toBe('sessions')
+    expect(computeNextSwipeTab('sessions', 70, 10)).toBe('bots')
     // At the leftmost tab, cannot swipe further right
-    expect(computeNextSwipeTab('bots', 50, 0)).toBeNull()
+    expect(computeNextSwipeTab('bots', 60, 0)).toBeNull()
   })
 
   it('rejects predominantly vertical scrolling gestures', () => {
@@ -23,16 +23,16 @@ describe('Horizontal Tab Swipe Navigation', () => {
     expect(computeNextSwipeTab('sessions', 50, 80)).toBeNull()
   })
 
-  it('rejects gestures below the 44px threshold to preserve taps and micro-jitters', () => {
-    expect(computeNextSwipeTab('bots', -30, 2)).toBeNull()
-    expect(computeNextSwipeTab('sessions', 40, 0)).toBeNull()
+  it('rejects gestures below the threshold to preserve taps and micro-jitters', () => {
+    expect(computeNextSwipeTab('bots', -40, 2)).toBeNull()
+    expect(computeNextSwipeTab('sessions', 45, 0)).toBeNull()
   })
 
   it('detects horizontal intent past slop threshold', () => {
-    // Less than 10px slop -> not confirmed
-    expect(isHorizontalSwipeIntent(5, 2)).toBe(false)
-    // Clear horizontal dominance -> confirmed
-    expect(isHorizontalSwipeIntent(15, 5)).toBe(true)
+    // Below slop -> not confirmed
+    expect(isHorizontalSwipeIntent(10, 2)).toBe(false)
+    // Clear horizontal dominance past slop -> confirmed
+    expect(isHorizontalSwipeIntent(25, 5)).toBe(true)
     // Diagonal or vertical -> yields to scroll
     expect(isHorizontalSwipeIntent(15, 15)).toBe(false)
     expect(isHorizontalSwipeIntent(5, 20)).toBe(false)

@@ -4,7 +4,7 @@ export function computeNextSwipeTab(
   currentTab: Tab,
   deltaX: number,
   deltaY: number,
-  minDelta = 44
+  minDelta = 56
 ): Tab | null {
   if (Math.abs(deltaX) < minDelta) return null
   if (Math.abs(deltaX) <= Math.abs(deltaY) * 1.25) return null
@@ -25,7 +25,7 @@ export function computeNextSwipeTab(
 export function isHorizontalSwipeIntent(
   deltaX: number,
   deltaY: number,
-  slop = 10
+  slop = 20
 ): boolean {
   const distance = Math.hypot(deltaX, deltaY)
   if (distance < slop) return false

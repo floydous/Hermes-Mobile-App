@@ -328,8 +328,8 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
     const thread = threadRef.current
     if (!thread) return
 
-    // Auto-fetch earlier messages when scrolled near top
-    if (thread.scrollTop < 140 && !loadingEarlier && !pullRefreshing) {
+    // Auto-fetch earlier messages when scrolled near top only after initial layout has settled
+    if (initializedRef.current && thread.scrollTop < 140 && !loadingEarlier && !pullRefreshing) {
       if (hasEarlierInBatch) {
         revealEarlierInBatch()
       } else if (hasMoreEarlier && messages.length >= 10 && loadEarlierMessages) {
