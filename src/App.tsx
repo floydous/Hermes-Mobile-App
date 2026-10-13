@@ -40,6 +40,7 @@ import {
   resolveLatestSessionPreview,
   setCachedSessionMessages,
 } from './session-cache'
+import { remoteLog, setRemoteLoggerEndpoint } from './remote-logger'
 import {
   executeTurnSubmissionPipeline,
 } from './session-title'
@@ -72,6 +73,7 @@ import {
   getPersistedClarify,
   isSessionCanonical,
   persistClarify,
+  reconcileSettledSessionTurn,
   resolveMatchingClarify,
 } from './clarify-isolation'
 
@@ -317,7 +319,11 @@ export default function App() {
       if (backEvent.defaultPrevented) return true
       const navigation = navigationRef.current
       if (navigation.profileSheet) { setProfileSheet(false); return true }
-      if (navigation.selected) { setSelected(null); return true }
+      if (navigation.selected) {
+        remoteLog('DEBUG', 'Navigation', `Hardware back pressed: leaving session ${selectedRef.current?.id || 'unknown'}`)
+        setSelected(null)
+        return true
+      }
       if (navigation.settings) { setSettings(false); return true }
       if (navigation.createOpen) { setCreateOpen(false); return true }
       if (navigation.tab !== 'bots') { switchTab('bots'); return true }
@@ -341,6 +347,7 @@ export default function App() {
     activeEndpointRef.current = normalized
     setActiveHermesEndpoint(normalized)
     setActiveEndpoint(normalized)
+    setRemoteLoggerEndpoint(normalized)
     return normalized
   }
   const refresh = useCallback(async (requestedEndpoint = activeEndpointRef.current, supersede = false): Promise<{ profiles: LiveProfile[]; sessions: LiveSession[] } | null> => {
@@ -417,6 +424,7 @@ export default function App() {
             if (p.last_session.resolved_id) map[p.last_session.resolved_id] = p.name
           }
         }
+        remoteLog('DEBUG', 'GatewayActive', `active_list: ${activeList.map(s => `${s.id}:${s.status}`).join(', ') || 'none'}`)
         setActiveTurns(prev => reconcileActiveTurns(prev, activeList, map, Date.now(), endedSet, activeInFlightTurnsRef.current.toSet()))
       }).catch(() => {})
 
@@ -833,6 +841,7 @@ export default function App() {
       title: session.title || 'Untitled session',
       preview: session.preview || '',
     }
+    remoteLog('DEBUG', 'OpenSession', `Opening session ${safeSession.id} (${safeSession.profile}) "${safeSession.title}"`)
     const requestId = ++sessionLoadRef.current
     const isCanonical = isSessionCanonical(safeSession, profilesRef.current, adhocSessionIdsRef.current)
     const activeTurn = Object.values(activeTurnsRef.current).find(t =>
@@ -965,8 +974,6 @@ export default function App() {
           setCachedSessionMessages(cid, resolvedLoaded)
         }
 
-        if (requestId !== sessionLoadRef.current || selectedRef.current?.id !== safeSession.id) return
-
         const currentActive = Object.values(activeTurnsRef.current).find(t =>
           t && doesSessionMatchTurn(safeSession, t.sessionId || '', t.profile, profilesRef.current, id => getResolvedSessionId(id, activeEndpointRef.current), adhocSessionIdsRef.current)
         )
@@ -979,21 +986,31 @@ export default function App() {
         )
         const isTranscriptSettled = isTurnSettledByTranscript(currentActive, resolvedLoaded, isTurnInFlightAsync)
 
+        // Session-scoped turn settlement reconciliation: cleanup active turn identity-safely
+        // even if user already navigated back to roster before loadMessages completed
+        remoteLog('DEBUG', 'Settlement', `Session ${safeSession.id}: isTranscriptSettled=${isTranscriptSettled}, hadActive=${Boolean(currentActive)}`)
+        if (isTranscriptSettled) {
+          settleGatewayTurn(safeSession.id, activeEndpointRef.current)
+          if (currentActive) {
+            recentEndedTurnsRef.current.set(safeSession.id, Date.now())
+            setActiveTurns(prev => reconcileSettledSessionTurn(
+              prev,
+              safeSession,
+              profilesRef.current,
+              id => getResolvedSessionId(id, activeEndpointRef.current),
+              adhocSessionIdsRef.current
+            ))
+          }
+        }
+
+        // Visible UI screen guard: do not overwrite current view if user already navigated away
+        if (requestId !== sessionLoadRef.current || selectedRef.current?.id !== safeSession.id) return
+
         if (isTranscriptSettled) {
           // If the turn has legitimately settled, clear sending and active turn
           setSending(false)
           setStreaming('')
           setToolActivities([])
-          settleGatewayTurn(safeSession.id, activeEndpointRef.current)
-          if (currentActive) {
-            recentEndedTurnsRef.current.set(safeSession.id, Date.now())
-            setActiveTurns(prev => {
-              if (!prev[safeSession.profile]) return prev
-              const next = { ...prev }
-              delete next[safeSession.profile]
-              return next
-            })
-          }
         } else if (currentActive) {
           // Turn is still active: maintain live sending and tool activity state
           setSending(true)
@@ -1239,6 +1256,7 @@ export default function App() {
     const text = rawText.trim()
     if (!text && !attachmentRefs.length) return false
     const prompt = buildAttachmentPrompt(text, attachmentRefs)
+    remoteLog('INFO', 'PromptSubmit', `Submit prompt in ${turnSessionId} (${turnProfile}): "${prompt.slice(0, 60)}"`)
     let completionUsage: LiveUsage | undefined
     let finalText = ''
     const settledSnapshot = settledAssistantRef.current
@@ -2016,7 +2034,7 @@ export default function App() {
   if (createOpen) return <CreateWizard step={createStep} setStep={setCreateStep} draft={botDraft} setDraft={setBotDraft} creating={creating} error={error} close={() => { setCreateOpen(false); setCreateStep(0); setError('') }} finish={() => void finishCreate()}/>
   if (settings) return <ConnectionSettings profiles={profiles.length} sessions={sessions.length} connected={connectionStatus === 'connected'} endpoint={activeEndpoint !== 'http://127.0.0.1:9119' ? activeEndpoint : undefined} theme={theme} setTheme={setTheme} uiScale={uiScale} setUiScale={setUiScale} close={() => setSettings(false)} refresh={() => refresh()} onPairingBusy={setPairingBusyState} onPaired={async endpoint => { const normalized = activateEndpoint(endpoint); const data = await refresh(normalized, true); if (!data) throw new Error(lastConnectionErrorRef.current || 'Signed in, but authenticated Hermes REST or live WebSocket verification failed.'); localStorage.setItem('hermes-mobile-active-endpoint', normalized) }}/>
   if (selected && profileSheet) return <BotProfileSheet profile={profiles.find(profile => profile.name === selected.profile)} session={selected} onClose={() => setProfileSheet(false)} onUpdated={() => void refresh()}/>
-  if (selected) return <ErrorBoundary onReset={() => setSelected(null)}><ChatView session={selected} conversationLoading={conversationLoading} messages={messages} settledAssistant={settledAssistant?.sessionId === selected.id && settledAssistant.profile === selected.profile ? settledAssistant : null} profiles={profiles} streaming={streaming} sending={sending} toolActivities={toolActivities} error={error} back={() => setSelected(null)} refresh={() => void openSession(selected)} clearChat={() => handleClearChat(selected)} openProfile={() => setProfileSheet(true)} onSessionModelChange={handleSessionModelChange} pendingClarify={pendingClarify} onAnswerClarify={handleAnswerClarify} onSkipClarify={handleSkipClarify} submit={submit} submitVoice={submitVoice} stop={stop} loadEarlierMessages={loadEarlierMessages}/></ErrorBoundary>
+  if (selected) return <ErrorBoundary onReset={() => setSelected(null)}><ChatView session={selected} conversationLoading={conversationLoading} messages={messages} settledAssistant={settledAssistant?.sessionId === selected.id && settledAssistant.profile === selected.profile ? settledAssistant : null} profiles={profiles} streaming={streaming} sending={sending} toolActivities={toolActivities} error={error} back={() => { remoteLog('DEBUG', 'Navigation', `Chat chevron back tapped from ${selected.id}`); setSelected(null) }} refresh={() => void openSession(selected)} clearChat={() => handleClearChat(selected)} openProfile={() => setProfileSheet(true)} onSessionModelChange={handleSessionModelChange} pendingClarify={pendingClarify} onAnswerClarify={handleAnswerClarify} onSkipClarify={handleSkipClarify} submit={submit} submitVoice={submitVoice} stop={stop} loadEarlierMessages={loadEarlierMessages}/></ErrorBoundary>
 
   return <main
     className={`app roster-shell tab-slide-${slideDirection}`}

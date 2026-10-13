@@ -9,6 +9,8 @@ import {
   tokenizeStreamChunk,
   consolidateSettledNodes,
 } from './components/SmoothStreamingView'
+import { reconcileActiveTurns } from './chat-turn'
+import { doesSessionMatchTurn, reconcileSettledSessionTurn } from './clarify-isolation'
 import type { LiveMessage } from './hermes'
 
 class MockDomNode {
@@ -225,6 +227,45 @@ describe('Runtime Performance & Resource Optimization', () => {
       persistSnapshot(currentText + 'FINAL')
       expect(writes.length).toBe(2)
       expect(writes[1]).toBe(currentText + 'FINAL')
+    })
+  })
+
+  describe('Session Rebind & Back-Navigation Settlement Safety', () => {
+    it('does not synthesize a thinking turn when gateway reports status starting during agent hydration', () => {
+      const currentTurns = {}
+      const activeSessions = [
+        // Gateway agent hydration (agent_build_started = true, agent_ready = false)
+        { id: 'adhoc-session-1', session_key: 'adhoc-session-1', status: 'starting', started_at: 100 },
+      ]
+      const sessionToProfile = { 'adhoc-session-1': 'default' }
+      const result = reconcileActiveTurns(currentTurns, activeSessions, sessionToProfile)
+      expect(result['default']).toBeUndefined()
+      expect(result['adhoc-session-1']).toBeUndefined()
+    })
+
+    it('settles ad-hoc session turns by identity without deleting sibling sessions under the same profile', () => {
+      const targetSession = { id: 'session-alpha', profile: 'default', title: 'Ad-hoc Chat 1', preview: '' }
+      const siblingSession = { id: 'session-beta', profile: 'default', title: 'Ad-hoc Chat 2', preview: '' }
+
+      const activeTurns: Record<string, any> = {
+        'session-alpha': { sessionId: 'session-alpha', profile: 'default', status: 'thinking' },
+        'session-beta': { sessionId: 'session-beta', profile: 'default', status: 'thinking' },
+      }
+
+      // Production helper: identity-safe deletion matching targetSession
+      const nextTurns = reconcileSettledSessionTurn(
+        activeTurns,
+        targetSession,
+        [],
+        (id: string) => id,
+        new Set(['session-alpha', 'session-beta'])
+      )
+
+      // Target session was removed
+      expect(nextTurns['session-alpha']).toBeUndefined()
+      // Sibling ad-hoc session sharing the 'default' profile remains intact!
+      expect(nextTurns['session-beta']).toBeDefined()
+      expect(nextTurns['session-beta'].sessionId).toBe('session-beta')
     })
   })
 })

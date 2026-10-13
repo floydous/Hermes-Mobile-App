@@ -1,6 +1,7 @@
 import type { LiveProfile, LiveSession } from './hermes'
 import type { ClarifyRequest } from './components/ClarifyCard'
 import type { ActiveBotTurn } from './chat-turn'
+import { remoteLog } from './remote-logger'
 
 const titleize = (value?: string | null) =>
   (value || '')
@@ -114,6 +115,30 @@ export function doesSessionMatchTurn(
   if (sessionIsCanonical && turnIsCanonical && session.profile === turnProfile) return true
 
   return false
+}
+
+/**
+ * Removes active turn tracking for a confirmed-settled session using identity matching.
+ * Ad-hoc sessions sharing the 'default' profile will ONLY remove turns belonging to this
+ * exact session, preserving sibling sessions' active turns.
+ */
+export function reconcileSettledSessionTurn(
+  currentTurns: Record<string, ActiveBotTurn>,
+  session: LiveSession,
+  profiles: LiveProfile[],
+  resolvedIdGetter: (id: string) => string,
+  adhocSessionIds?: Set<string>
+): Record<string, ActiveBotTurn> {
+  let changed = false
+  const next = { ...currentTurns }
+  for (const [key, turn] of Object.entries(next)) {
+    if (turn && doesSessionMatchTurn(session, turn.sessionId || '', turn.profile, profiles, resolvedIdGetter, adhocSessionIds)) {
+      remoteLog('INFO', 'Settlement', `Identity-matched turn key "${key}" (session=${turn.sessionId}) settled for session ${session.id}`)
+      delete next[key]
+      changed = true
+    }
+  }
+  return changed ? next : currentTurns
 }
 
 export interface ClarifyResolutionSources {

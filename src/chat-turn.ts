@@ -30,7 +30,7 @@ export function isActiveChatTurn(turnId: number, currentTurnId: number, expected
 
 export function isSessionStatusWorking(status: string): boolean {
   const norm = (status || '').trim().toLowerCase()
-  return norm === 'working' || norm === 'starting' || norm === 'waiting'
+  return norm === 'working' || norm === 'waiting'
 }
 
 export class InFlightSubmissionTracker {

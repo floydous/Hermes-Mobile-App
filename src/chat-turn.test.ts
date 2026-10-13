@@ -29,8 +29,9 @@ describe('active chat turn guard', () => {
 
   it('identifies working session statuses', () => {
     expect(isSessionStatusWorking('working')).toBe(true)
-    expect(isSessionStatusWorking('starting')).toBe(true)
     expect(isSessionStatusWorking('waiting')).toBe(true)
+    // 'starting' is gateway agent process hydration (not active prompt execution)
+    expect(isSessionStatusWorking('starting')).toBe(false)
     expect(isSessionStatusWorking('idle')).toBe(false)
     expect(isSessionStatusWorking('stopped')).toBe(false)
     expect(isSessionStatusWorking('')).toBe(false)
@@ -117,7 +118,7 @@ describe('active chat turn guard', () => {
     const activeSessions = [
       { id: 'sess-coder', session_key: 'sess-coder-key', status: 'working', started_at: 100 },
       { id: 'sess-idle', session_key: 'sess-idle-key', status: 'idle', started_at: 200 },
-      { id: 'sess-designer', session_key: 'sess-designer-key', status: 'starting', started_at: 300 },
+      { id: 'sess-designer', session_key: 'sess-designer-key', status: 'waiting', started_at: 300 },
     ]
 
     const mapping = {
@@ -138,10 +139,10 @@ describe('active chat turn guard', () => {
     // idleBot was reported idle by gateway: cleared
     expect(reconciled.idleBot).toBeUndefined()
 
-    // designer was working on gateway: newly created active turn
+    // designer was waiting on gateway: newly created active turn
     expect(reconciled.designer).toBeDefined()
     expect(reconciled.designer.profile).toBe('designer')
-    expect(reconciled.designer.statusText).toBe('Thinking…')
+    expect(reconciled.designer.statusText).toBe('Needs your input…')
   })
 
   it('prevents reviving a turn that ended while active_list was in-flight', () => {
