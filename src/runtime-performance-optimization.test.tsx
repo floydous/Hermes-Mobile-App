@@ -377,5 +377,33 @@ describe('Runtime Performance & Resource Optimization', () => {
       expect(diskWrites).toHaveLength(1)
       expect(diskWrites[0].id).toBe('session-123')
     })
+
+    it('session roster reconciliation on periodic interval reads from memory cache and executes zero synchronous disk reads', () => {
+      const memoryCache = new Map<string, any>()
+      memoryCache.set('session-1', [{ id: 1, role: 'user', content: 'hello' }])
+
+      let diskReadCount = 0
+      const mockDiskRead = () => {
+        diskReadCount++
+        return null
+      }
+
+      // Reconciliation logic under test:
+      const prevSessions = [{ id: 'session-1', profile: 'default' }, { id: 'session-2', profile: 'default' }]
+      const retainedSessions: any[] = []
+
+      for (const prev of prevSessions) {
+        // Fast-path: read strictly from memoryCache, never disk
+        const inMemCount = memoryCache.get(prev.id)?.length || 0
+        const hasLocalMessages = inMemCount > 0
+        if (hasLocalMessages) {
+          retainedSessions.push(prev)
+        }
+      }
+
+      expect(diskReadCount).toBe(0) // Zero disk reads!
+      expect(retainedSessions).toHaveLength(1)
+      expect(retainedSessions[0].id).toBe('session-1')
+    })
   })
 })

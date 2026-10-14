@@ -308,9 +308,8 @@ export default function App() {
   const rosterPullStartRef = useRef<number | null>(null)
 
   const setRowRipplePoint = (event: React.PointerEvent<HTMLButtonElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect()
-    const x = event.clientX - rect.left
-    const y = event.clientY - rect.top
+    const x = event.nativeEvent.offsetX ?? 50
+    const y = event.nativeEvent.offsetY ?? 24
     event.currentTarget.style.setProperty('--ripple-x', `${x}px`)
     event.currentTarget.style.setProperty('--ripple-y', `${y}px`)
   }
@@ -383,8 +382,7 @@ export default function App() {
               activeInFlightTurnsRef.current.has(prevId) ||
               activeInFlightTurnsRef.current.has(p.name) ||
               selectedRef.current?.id === prevId ||
-              (messageCacheRef.current.get(prevId)?.length || 0) > 0 ||
-              getCachedSessionMessages(prevId)?.length
+              (messageCacheRef.current.get(prevId)?.length || 0) > 0
             )
             if (isFreshOrInFlight) {
               return { ...p, canonical_session: prev.canonical_session }
@@ -411,8 +409,7 @@ export default function App() {
               selectedRef.current?.id === prev.id
             )
             const hasLocalMessages = Boolean(
-              (messageCacheRef.current.get(prev.id)?.length || 0) > 0 ||
-              getCachedSessionMessages(prev.id)?.length
+              (messageCacheRef.current.get(prev.id)?.length || 0) > 0
             )
             if (isInFlight || hasLocalMessages) {
               nextMap.set(prev.id, prev)
@@ -2411,8 +2408,7 @@ export default function App() {
                 const isWaitingInput = Boolean(activeTurn && (activeTurn.status === 'waiting' || activeTurn.needsInput))
                 return (
                     <button
-                      className={`bot-row enter ${isWorking ? 'working' : ''} ${isWaitingInput ? 'waiting' : ''}`}
-                      style={{ animationDelay: `${Math.min(index, 8) * 28}ms` }}
+                      className={`bot-row ${isWorking ? 'working' : ''} ${isWaitingInput ? 'waiting' : ''}`}
                       key={profile.name}
                       onPointerDown={handleRowPointerDown}
                       onClick={() => {
@@ -2476,8 +2472,7 @@ export default function App() {
                   const profile = profileMap.get(session.profile)
                   return (
                     <button
-                      className={`bot-row enter ${isWorking ? 'working' : ''} ${isOpening ? 'opening' : ''} ${isWaitingInput ? 'waiting' : ''}`}
-                      style={{ animationDelay: `${Math.min(index, 8) * 28}ms` }}
+                      className={`bot-row ${isWorking ? 'working' : ''} ${isOpening ? 'opening' : ''} ${isWaitingInput ? 'waiting' : ''}`}
                       key={`${session.profile}:${session.id}`}
                       onPointerDown={handleRowPointerDown}
                       onClick={() => {

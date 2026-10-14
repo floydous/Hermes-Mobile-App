@@ -3377,6 +3377,10 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
   user-select: none;
 }
 
+.bot-row > * {
+  pointer-events: none;
+}
+
 .bot-row:hover,
 .bot-row:active,
 .bot-row:focus {
