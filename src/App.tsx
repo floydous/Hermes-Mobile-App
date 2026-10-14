@@ -316,10 +316,7 @@ export default function App() {
     document.documentElement.style.setProperty('--ui-scale', String(uiScale))
     localStorage.setItem('hermes-mobile-ui-scale', String(uiScale))
   }, [uiScale])
-  const [rosterPullDistance, setRosterPullDistance] = useState(0)
-  const [rosterPullRefreshing, setRosterPullRefreshing] = useState(false)
   const rosterScrollRef = useRef<HTMLDivElement | null>(null)
-  const rosterPullStartRef = useRef<number | null>(null)
 
   const setRowRipplePoint = (event: React.PointerEvent<HTMLButtonElement>) => {
     const x = event.nativeEvent.offsetX ?? 50
@@ -526,10 +523,7 @@ export default function App() {
       }
     }
   }, [])
-  const pullRefreshRoster = async () => {
-    setRosterPullRefreshing(true)
-    try { await refresh(activeEndpointRef.current, false, false) } finally { setRosterPullRefreshing(false) }
-  }
+
 
   useEffect(() => {
     return onGatewayGlobalEvent(event => {
@@ -2093,73 +2087,6 @@ export default function App() {
     } finally { setCreating(false) }
   }
 
-  const rosterPullStartXRef = useRef<number | null>(null)
-  const rosterPullStartYRef = useRef<number | null>(null)
-  const rosterPullActive = rosterPullDistance > 6 || rosterPullRefreshing
-  const rosterPullOnInteractiveRef = useRef(false)
-  const rosterTouchStart = (event: React.TouchEvent<HTMLElement>) => {
-    const target = event.target as HTMLElement | null
-    if (target?.closest('input,textarea,select') || rosterScrollRef.current?.scrollTop !== 0) return
-    rosterPullStartXRef.current = event.touches[0].clientX
-    rosterPullStartYRef.current = event.touches[0].clientY
-    rosterPullOnInteractiveRef.current = Boolean(target?.closest('.bot-row, button, a'))
-  }
-  const rosterTouchMove = (event: React.TouchEvent<HTMLElement>) => {
-    if (rosterPullStartYRef.current == null || rosterPullStartXRef.current == null) return
-    if (rosterScrollRef.current && rosterScrollRef.current.scrollTop > 0) {
-      rosterPullStartYRef.current = null
-      rosterPullStartXRef.current = null
-      setRosterPullDistance(0)
-      return
-    }
-
-    const currentX = event.touches[0].clientX
-    const currentY = event.touches[0].clientY
-    const deltaX = Math.abs(currentX - rosterPullStartXRef.current)
-    const rawDeltaY = currentY - rosterPullStartYRef.current
-
-    // Horizontal protection: if horizontal movement exceeds 14px or dominates vertical movement,
-    // this is a horizontal gesture (swipe tabs or edge-swipe back) — CANCEL pull-to-refresh immediately!
-    if (deltaX > 14 && deltaX * 1.25 > rawDeltaY) {
-      rosterPullStartYRef.current = null
-      rosterPullStartXRef.current = null
-      if (rosterPullDistance > 0) setRosterPullDistance(0)
-      return
-    }
-
-    // Require deliberate vertical downward pull
-    if (rawDeltaY <= 14 || rawDeltaY < deltaX * 1.5) {
-      if (rosterPullDistance > 0) setRosterPullDistance(0)
-      return
-    }
-
-    const slop = rosterPullOnInteractiveRef.current ? 32 : 14
-    if (rawDeltaY <= slop) {
-      if (rosterPullDistance > 0) setRosterPullDistance(0)
-      return
-    }
-
-    // Resistance curve: pull increases smoothly up to 72px
-    const distance = Math.min(72, Math.max(0, (rawDeltaY - slop) * 0.55))
-    if (distance > 0 && event.cancelable) event.preventDefault()
-    setRosterPullDistance(distance)
-  }
-  const rosterTouchEnd = () => {
-    // Threshold is 56px to trigger refresh; swiping back up below 56px cancels it!
-    const shouldRefresh = rosterPullDistance >= 56
-    rosterPullStartYRef.current = null
-    rosterPullStartXRef.current = null
-    rosterPullOnInteractiveRef.current = false
-    setRosterPullDistance(0)
-    if (shouldRefresh) void pullRefreshRoster()
-  }
-  const rosterTouchCancel = () => {
-    rosterPullStartYRef.current = null
-    rosterPullStartXRef.current = null
-    rosterPullOnInteractiveRef.current = false
-    setRosterPullDistance(0)
-  }
-
   const swipeStartXRef = useRef<number | null>(null)
   const swipeStartYRef = useRef<number | null>(null)
   const swipeTrackingRef = useRef(false)
@@ -2415,33 +2342,7 @@ export default function App() {
       key="roster-scroll"
       ref={rosterScrollRef}
       style={{ display: tab === 'tasks' ? 'none' : undefined }}
-      onTouchStart={rosterTouchStart}
-      onTouchMove={rosterTouchMove}
-      onTouchEnd={rosterTouchEnd}
-      onTouchCancel={rosterTouchCancel}
     >
-        {rosterPullActive && (
-          <div
-            className={`roster-pull-floating-cue ${rosterPullRefreshing ? 'refreshing' : 'dragging'}`}
-            style={{
-              transform: `translate3d(-50%, ${rosterPullRefreshing ? 58 : Math.min(68, rosterPullDistance + 12)}px, 0)`,
-              opacity: rosterPullRefreshing ? 1 : Math.min(1, rosterPullDistance / 30),
-            }}
-            aria-live="polite"
-          >
-            <div
-              className={`pull-floating-indicator ${rosterPullRefreshing ? 'refreshing' : ''} ${rosterPullDistance >= 48 ? 'ready' : ''}`}
-              style={!rosterPullRefreshing ? {
-                transform: `rotate(${Math.min(360, (rosterPullDistance / 48) * 360)}deg)`,
-              } : undefined}
-            >
-              <RefreshCw size={16} className={rosterPullRefreshing ? 'pull-refresh-spinner' : ''} />
-            </div>
-            <span className="sr-only">
-              {rosterPullRefreshing ? 'Refreshing list…' : rosterPullDistance >= 48 ? 'Release to refresh' : 'Pull down to refresh'}
-            </span>
-          </div>
-        )}
         {error && <Notice message={error} retry={() => void refresh()}/>}
         {((loading && !profiles.length) || (tab === 'sessions' && loading && !sessions.length)) ? <Skeleton/> : (
           <>

@@ -211,10 +211,7 @@ export function TasksView({
   const isCreateOpen = propCreateOpen !== undefined ? propCreateOpen : internalCreateOpen
   const setIsCreateOpen = propSetCreateOpen || setInternalCreateOpen
   const [deleteCandidate, setDeleteCandidate] = useState<CronJob | null>(null)
-  const [pullDistance, setPullDistance] = useState(0)
-  const [pullRefreshing, setPullRefreshing] = useState(false)
   const scrollRef = useRef<HTMLElement | null>(null)
-  const pullStartRef = useRef<number | null>(null)
   useEdgeSwipeBack(scrollRef, back || (() => {}), Boolean(back) && !selected && !isCreateOpen && active)
   const optimisticJobsRef = useRef(new Map<string, CronJob>())
   const scopeKey = profiles.map(profile => profile.name).sort().join('|')
@@ -242,10 +239,6 @@ export function TasksView({
     } finally {
       setLoading(false)
     }
-  }
-  const pullRefresh = async () => {
-    setPullRefreshing(true)
-    try { await refresh(false, true) } finally { setPullRefreshing(false) }
   }
   useEffect(() => {
     const persisted = loadPersistedTaskJobs(effectiveBaseUrl)
@@ -338,35 +331,12 @@ export function TasksView({
   const visibleCount = running.length + scheduled.length + attention.length
   const runningCount = filteredJobs.filter(job => stateOf(job) === 'running').length
   const scheduledCount = filteredJobs.filter(job => stateOf(job) === 'scheduled').length
-  const pullActive = pullDistance > 8 || pullRefreshing
   return (
     <div
       className="tasks-sheet tasks-scroll"
       style={{ display: active ? undefined : 'none', ...style }}
       ref={scrollRef as any}
-      onTouchStart={event => { if (scrollRef.current?.scrollTop === 0) pullStartRef.current = event.touches[0].clientY }}
-      onTouchMove={event => { if (pullStartRef.current == null || scrollRef.current?.scrollTop !== 0) return; const distance = Math.min(76, Math.max(0, event.touches[0].clientY - pullStartRef.current)); if (distance > 0) event.preventDefault(); setPullDistance(distance) }}
-      onTouchEnd={() => { const shouldRefresh = pullDistance >= 56; pullStartRef.current = null; setPullDistance(0); if (shouldRefresh) void pullRefresh() }}
     >
-    {pullActive && (
-      <div
-        className="pull-floating-overlay"
-        style={{
-          transform: `translate3d(-50%, ${pullRefreshing ? 20 : Math.min(28, pullDistance * 0.45)}px, 0)`,
-          opacity: pullRefreshing ? 1 : Math.min(1, pullDistance / 24),
-        }}
-        aria-live="polite"
-      >
-        <div
-          className={`pull-floating-indicator ${pullRefreshing ? 'refreshing' : ''} ${pullDistance >= 56 ? 'ready' : ''}`}
-          style={!pullRefreshing ? {
-            transform: `rotate(${Math.min(360, (pullDistance / 56) * 360)}deg)`,
-          } : undefined}
-        >
-          <RefreshCw size={15} className={pullRefreshing ? 'pull-refresh-spinner' : ''} />
-        </div>
-      </div>
-    )}
 
     <section className="tasks-intro">
       <h1>Tasks</h1>

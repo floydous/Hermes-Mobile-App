@@ -61,7 +61,7 @@ export function shouldAutoRevealEarlierMessages({
   isFollowing,
   scrollTop,
   loadingEarlier,
-  pullRefreshing,
+  pullRefreshing = false,
   threshold = 140,
 }: {
   initialized: boolean
@@ -69,7 +69,7 @@ export function shouldAutoRevealEarlierMessages({
   isFollowing: boolean
   scrollTop: number
   loadingEarlier: boolean
-  pullRefreshing: boolean
+  pullRefreshing?: boolean
   threshold?: number
 }): boolean {
   if (!initialized) return false
@@ -196,9 +196,6 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
     window.addEventListener('hermes-mobile-back', onMobileBack)
     return () => window.removeEventListener('hermes-mobile-back', onMobileBack)
   }, [confirmClearOpen, clearing, confirmClearExiting])
-  const [pullDistance, setPullDistance] = useState(0)
-  const [pullRefreshing, setPullRefreshing] = useState(false)
-  const pullStartRef = useRef<number | null>(null)
   const [editRequest, setEditRequest] = useState<ComposerEditRequest | null>(null)
   const [modelLabel, setModelLabel] = useState(session.model || '')
   const dropFilesRef: ComposerDropFilesRef = useRef<((files: File[]) => void) | null>(null)
@@ -440,7 +437,6 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
       isFollowing: nearEnd,
       scrollTop: thread.scrollTop,
       loadingEarlier: coordinatorRef.current.isFetchLocked() || loadingEarlier,
-      pullRefreshing,
     })
 
     if (canAutoReveal) {
@@ -450,26 +446,6 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
         void fetchEarlier()
       }
     }
-  }
-
-  const pullRefresh = async () => {
-    setPullRefreshing(true)
-    try { await Promise.resolve(refresh()) } finally { window.setTimeout(() => setPullRefreshing(false), 180) }
-  }
-  const onThreadTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
-    if (threadRef.current?.scrollTop === 0) pullStartRef.current = event.touches[0].clientY
-  }
-  const onThreadTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
-    if (pullStartRef.current == null || threadRef.current?.scrollTop !== 0) return
-    const distance = Math.min(64, Math.max(0, event.touches[0].clientY - pullStartRef.current))
-    if (distance > 0) event.preventDefault()
-    setPullDistance(distance)
-  }
-  const onThreadTouchEnd = () => {
-    const shouldRefresh = pullDistance >= 48
-    pullStartRef.current = null
-    setPullDistance(0)
-    if (shouldRefresh && !pullRefreshing) void pullRefresh()
   }
 
   const onDragOver = (event: DragEvent<HTMLElement>) => {
@@ -532,27 +508,8 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
 
     {visibleError && <div className="chat-error"><span>{visibleError}</span><button onClick={() => setControlError('')}><X size={14}/></button></div>}
 
-    <div className="thread-scroll" ref={threadRef} onScroll={onScroll} onTouchStart={onThreadTouchStart} onTouchMove={onThreadTouchMove} onTouchEnd={onThreadTouchEnd}>
+    <div className="thread-scroll" ref={threadRef} onScroll={onScroll}>
       <div className="thread-content" ref={contentRef}>
-        {(pullDistance > 6 || pullRefreshing) && (
-          <div
-            className="pull-floating-overlay"
-            style={{
-              transform: `translate3d(-50%, ${pullRefreshing ? 20 : Math.min(28, pullDistance * 0.45)}px, 0)`,
-              opacity: pullRefreshing ? 1 : Math.min(1, pullDistance / 24),
-            }}
-            aria-live="polite"
-          >
-            <div
-              className={`pull-floating-indicator ${pullRefreshing ? 'refreshing' : ''} ${pullDistance >= 48 ? 'ready' : ''}`}
-              style={!pullRefreshing ? {
-                transform: `rotate(${Math.min(360, (pullDistance / 48) * 360)}deg)`,
-              } : undefined}
-            >
-              <RotateCw size={15} className={pullRefreshing ? 'pull-refresh-spinner' : ''} />
-            </div>
-          </div>
-        )}
         {showConversationLoading && (
           <section className="chat-empty-state conversation-loading" aria-live="polite" aria-label={`Loading ${botName} conversation`}>
             <BotAvatar profile={botProfile} fallbackName={session.profile} variant="welcome"/>
