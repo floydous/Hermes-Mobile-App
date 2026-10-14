@@ -528,7 +528,7 @@ export default function App() {
   }, [])
   const pullRefreshRoster = async () => {
     setRosterPullRefreshing(true)
-    try { await refresh(activeEndpointRef.current, true, true) } finally { setRosterPullRefreshing(false) }
+    try { await refresh(activeEndpointRef.current, false, false) } finally { setRosterPullRefreshing(false) }
   }
 
   useEffect(() => {
@@ -2093,43 +2093,69 @@ export default function App() {
     } finally { setCreating(false) }
   }
 
+  const rosterPullStartXRef = useRef<number | null>(null)
+  const rosterPullStartYRef = useRef<number | null>(null)
   const rosterPullActive = rosterPullDistance > 6 || rosterPullRefreshing
   const rosterPullOnInteractiveRef = useRef(false)
   const rosterTouchStart = (event: React.TouchEvent<HTMLElement>) => {
     const target = event.target as HTMLElement | null
     if (target?.closest('input,textarea,select') || rosterScrollRef.current?.scrollTop !== 0) return
-    rosterPullStartRef.current = event.touches[0].clientY
+    rosterPullStartXRef.current = event.touches[0].clientX
+    rosterPullStartYRef.current = event.touches[0].clientY
     rosterPullOnInteractiveRef.current = Boolean(target?.closest('.bot-row, button, a'))
   }
   const rosterTouchMove = (event: React.TouchEvent<HTMLElement>) => {
-    if (rosterPullStartRef.current == null) return
+    if (rosterPullStartYRef.current == null || rosterPullStartXRef.current == null) return
     if (rosterScrollRef.current && rosterScrollRef.current.scrollTop > 0) {
-      rosterPullStartRef.current = null
+      rosterPullStartYRef.current = null
+      rosterPullStartXRef.current = null
       setRosterPullDistance(0)
       return
     }
-    const rawDelta = event.touches[0].clientY - rosterPullStartRef.current
-    const slop = rosterPullOnInteractiveRef.current ? 24 : 8
-    // Pulling downwards from top (scrollTop === 0)
-    if (rawDelta <= slop) {
+
+    const currentX = event.touches[0].clientX
+    const currentY = event.touches[0].clientY
+    const deltaX = Math.abs(currentX - rosterPullStartXRef.current)
+    const rawDeltaY = currentY - rosterPullStartYRef.current
+
+    // Horizontal protection: if horizontal movement exceeds 14px or dominates vertical movement,
+    // this is a horizontal gesture (swipe tabs or edge-swipe back) — CANCEL pull-to-refresh immediately!
+    if (deltaX > 14 && deltaX * 1.25 > rawDeltaY) {
+      rosterPullStartYRef.current = null
+      rosterPullStartXRef.current = null
       if (rosterPullDistance > 0) setRosterPullDistance(0)
       return
     }
+
+    // Require deliberate vertical downward pull
+    if (rawDeltaY <= 14 || rawDeltaY < deltaX * 1.5) {
+      if (rosterPullDistance > 0) setRosterPullDistance(0)
+      return
+    }
+
+    const slop = rosterPullOnInteractiveRef.current ? 32 : 14
+    if (rawDeltaY <= slop) {
+      if (rosterPullDistance > 0) setRosterPullDistance(0)
+      return
+    }
+
     // Resistance curve: pull increases smoothly up to 72px
-    const distance = Math.min(72, Math.max(0, (rawDelta - slop) * 0.55))
+    const distance = Math.min(72, Math.max(0, (rawDeltaY - slop) * 0.55))
     if (distance > 0 && event.cancelable) event.preventDefault()
     setRosterPullDistance(distance)
   }
   const rosterTouchEnd = () => {
-    // Threshold is 48px to trigger refresh; swiping back up below 48px cancels it!
-    const shouldRefresh = rosterPullDistance >= 48
-    rosterPullStartRef.current = null
+    // Threshold is 56px to trigger refresh; swiping back up below 56px cancels it!
+    const shouldRefresh = rosterPullDistance >= 56
+    rosterPullStartYRef.current = null
+    rosterPullStartXRef.current = null
     rosterPullOnInteractiveRef.current = false
     setRosterPullDistance(0)
     if (shouldRefresh) void pullRefreshRoster()
   }
   const rosterTouchCancel = () => {
-    rosterPullStartRef.current = null
+    rosterPullStartYRef.current = null
+    rosterPullStartXRef.current = null
     rosterPullOnInteractiveRef.current = false
     setRosterPullDistance(0)
   }
@@ -2426,7 +2452,8 @@ export default function App() {
                 const isWaitingInput = Boolean(activeTurn && (activeTurn.status === 'waiting' || activeTurn.needsInput))
                 return (
                     <button
-                      className={`bot-row ${isWorking ? 'working' : ''} ${isWaitingInput ? 'waiting' : ''}`}
+                      className={`bot-row enter ${isWorking ? 'working' : ''} ${isWaitingInput ? 'waiting' : ''}`}
+                      style={{ animationDelay: `${Math.min(index, 8) * 28}ms` }}
                       key={profile.name}
                       onPointerDown={handleRowPointerDown}
                       onClick={() => {
@@ -2490,7 +2517,8 @@ export default function App() {
                   const profile = profileMap.get(session.profile)
                   return (
                     <button
-                      className={`bot-row ${isWorking ? 'working' : ''} ${isOpening ? 'opening' : ''} ${isWaitingInput ? 'waiting' : ''}`}
+                      className={`bot-row enter ${isWorking ? 'working' : ''} ${isOpening ? 'opening' : ''} ${isWaitingInput ? 'waiting' : ''}`}
+                      style={{ animationDelay: `${Math.min(index, 8) * 28}ms` }}
                       key={`${session.profile}:${session.id}`}
                       onPointerDown={handleRowPointerDown}
                       onClick={() => {
