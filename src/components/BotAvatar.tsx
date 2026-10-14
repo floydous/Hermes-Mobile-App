@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { memo, useEffect, useState } from 'react'
 
 import { canonicalProfileAvatarSvg } from '../avatar-render'
 import { loadProfileAvatar, type LiveProfile } from '../hermes'
@@ -97,7 +97,7 @@ export function clearAvatarCache(profileName?: string) {
   }
 }
 
-export function BotAvatar({ profile, fallbackName, variant = 'roster' }: Props) {
+export const BotAvatar = memo(function BotAvatar({ profile, fallbackName, variant = 'roster' }: Props) {
   const profileName = profile?.name
   const meta = profile?.ui_meta?.['hermes-bots']
   const isAssetAllowed = shouldLoadAvatarAsset(profile)
@@ -145,4 +145,4 @@ export function BotAvatar({ profile, fallbackName, variant = 'roster' }: Props) 
   if (!profile) return <span className={`avatar-fallback ${className}`}>{initials(fallbackName)}</span>
   if (resolvedAsset || explicitImage) return <img className={`avatar-fallback bot-avatar bot-avatar-image ${className}`} src={resolvedAsset || explicitImage || undefined} alt=""/>
   return <span className={`avatar-fallback bot-avatar bot-avatar-svg ${className}`} aria-hidden="true" dangerouslySetInnerHTML={{ __html: svg }}/>
-}
+})

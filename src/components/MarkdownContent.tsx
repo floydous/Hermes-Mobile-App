@@ -1197,6 +1197,17 @@ export const MemoizedMarkdownBlock = memo(
   areMarkdownBlockPropsEqual
 )
 
+const MARKDOWN_SPECIAL_RE = /[*`_#\[\]~>$<\\|@]/
+
+export function isPlainTextMessage(text: string): boolean {
+  if (!text) return true
+  if (MARKDOWN_SPECIAL_RE.test(text)) return false
+  if (text.includes('MEDIA:') || text.includes('Attached:') || text.includes('://')) return false
+  if (/(?:^|\n)\s*(?:[-+*]|\d+\.)\s+/.test(text)) return false
+  if (/(?:^|\n)(?: {4}|\t)\S/.test(text)) return false
+  return true
+}
+
 export const MarkdownContent = memo(function MarkdownContent({
   children,
   isStreaming: _isStreaming,
@@ -1206,6 +1217,19 @@ export const MarkdownContent = memo(function MarkdownContent({
 }) {
   const text = typeof children === 'string' ? children : children == null ? '' : String(children)
   if (!text.trim()) return null
+
+  // Zero-overhead fast path for plain text messages without markdown syntax
+  if (isPlainTextMessage(text)) {
+    const paragraphs = text.split(/\n{2,}/)
+    return (
+      <div className="markdown-body">
+        {paragraphs.map((para, i) => (
+          <p key={i}>{para}</p>
+        ))}
+      </div>
+    )
+  }
+
   prewarmMessageImageCache(text)
   const segments = parseMessageSegments(text)
 

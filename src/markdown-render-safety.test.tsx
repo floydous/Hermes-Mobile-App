@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { renderToString } from 'react-dom/server'
 import React from 'react'
 
-import { MarkdownContent } from './components/MarkdownContent'
+import { isPlainTextMessage, MarkdownContent } from './components/MarkdownContent'
 
 describe('Markdown Content Rendering Safety & Syntax Highlighting', () => {
   it('renders and highlights standard backtick-fenced code blocks', () => {
@@ -104,5 +104,27 @@ describe('Markdown Content Rendering Safety & Syntax Highlighting', () => {
     expect(htmlMention).toContain('@coder')
     expect(htmlMention).toContain('@tester')
     expect(htmlMention).not.toContain('node=')
+  })
+
+  it('accurately classifies plain text vs markdown syntax via isPlainTextMessage', () => {
+    // Pure plain text
+    expect(isPlainTextMessage('Hello world, how are you today?')).toBe(true)
+    expect(isPlainTextMessage('Paragraph 1.\n\nParagraph 2.')).toBe(true)
+    expect(isPlainTextMessage('Simple sentence with numbers 123 and punctuation (fine).')).toBe(true)
+
+    // Markdown syntax MUST return false
+    expect(isPlainTextMessage('Bold **text**')).toBe(false)
+    expect(isPlainTextMessage('Italic *text*')).toBe(false)
+    expect(isPlainTextMessage('Code `inline`')).toBe(false)
+    expect(isPlainTextMessage('# Heading')).toBe(false)
+    expect(isPlainTextMessage('[link](https://example.com)')).toBe(false)
+    expect(isPlainTextMessage('Plain text with url https://example.com')).toBe(false)
+    expect(isPlainTextMessage('- bullet item')).toBe(false)
+    expect(isPlainTextMessage('1. ordered item')).toBe(false)
+    expect(isPlainTextMessage('    indented code block')).toBe(false)
+    expect(isPlainTextMessage('> quote')).toBe(false)
+    expect(isPlainTextMessage('Equation $E=mc^2$')).toBe(false)
+    expect(isPlainTextMessage('Mention @alice')).toBe(false)
+    expect(isPlainTextMessage('MEDIA:/path/to/img.png')).toBe(false)
   })
 })
