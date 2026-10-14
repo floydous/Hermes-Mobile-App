@@ -66,6 +66,7 @@ const toDataUrl = (file: File): Promise<string> => new Promise((resolve, reject)
 const attachmentId = (file: File) => `${file.name}:${file.size}:${file.lastModified}`
 const formatFileSize = (size: number) => size < 1024 * 1024 ? `${Math.max(1, Math.round(size / 1024))} KB` : `${(size / (1024 * 1024)).toFixed(1)} MB`
 const maxAttachmentBytes = 50 * 1024 * 1024
+const MODEL_OPTIONS_CACHE = new Map<string, ModelOptions>()
 
 export const Composer = memo(function Composer({ session, profiles, sending, draggingFiles, editRequest, cancelEdit, dropFilesRef, onControlError, onModelLabel, onSessionModelChange, submit, submitVoice, stop, perfTraceId }: ComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -114,11 +115,28 @@ export const Composer = memo(function Composer({ session, profiles, sending, dra
   }, [session.id, perfTraceId])
 
   useEffect(() => {
+    if (voiceState !== 'idle') {
+      voiceDiscardRef.current = true
+      void stopSttListening().catch(() => {})
+      setVoiceState('idle')
+      setVoiceInterim('')
+      setRecordSeconds(0)
+    }
     setAttachments([])
+    setDraft('')
+    setVoiceReview('')
   }, [session.id])
 
   useEffect(() => {
+    const cached = MODEL_OPTIONS_CACHE.get(session.profile)
+    if (cached) {
+      setModelOptions(cached)
+      setModel(current => current || cached.model || '')
+      setProvider(cached.provider || '')
+      return
+    }
     void loadModelOptions(session.profile).then(options => {
+      MODEL_OPTIONS_CACHE.set(session.profile, options)
       setModelOptions(options)
       setModel(current => current || options.model || '')
       setProvider(options.provider || '')

@@ -2509,7 +2509,6 @@ export default function App() {
       onReset={() => { cancelPendingCachedHydration(); setSelected(null) }}
     >
       <ChatView
-        key={selected.id}
         session={selected}
         perfTraceId={sessionOpenTraceMapRef.current.get(selected.id)}
         conversationLoading={conversationLoading}
