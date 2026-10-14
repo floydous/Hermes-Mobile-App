@@ -1,4 +1,5 @@
 import { useEffect, type RefObject } from 'react'
+import { remoteLog } from './remote-logger'
 
 export const EDGE_SWIPE_MAX_START_PX = 72
 export const EDGE_SWIPE_COMMIT_PX = 48
@@ -61,6 +62,7 @@ export function createEdgeSwipeController<T extends HTMLElement>(
     intentConfirmed = false
     cancelling = false
     committed = false
+    remoteLog('DEBUG', 'EdgeSwipe', `TouchStart at x=${Math.round(startX)} y=${Math.round(startY)} target=${target?.tagName}`)
   }
 
   const onTouchMove = (event: TouchEvent) => {
@@ -118,24 +120,23 @@ export function createEdgeSwipeController<T extends HTMLElement>(
     tracking = false
     intentConfirmed = false
     if (committed || shouldCommitEdgeSwipe(deltaX, deltaY, durationMs)) {
+      remoteLog('DEBUG', 'EdgeSwipe', `Edge swipe committed: deltaX=${Math.round(deltaX)} duration=${durationMs}ms -> executing onBack immediately`)
       if (event.cancelable) {
         event.preventDefault()
       }
-      if (typeof HTMLElement !== 'undefined' && document.activeElement instanceof HTMLElement) {
-        document.activeElement.blur()
-      } else if (document.activeElement && typeof (document.activeElement as any).blur === 'function') {
-        (document.activeElement as any).blur()
+      if (document.activeElement && (
+        document.activeElement.tagName === 'INPUT' ||
+        document.activeElement.tagName === 'TEXTAREA' ||
+        (document.activeElement as HTMLElement).isContentEditable ||
+        (document.activeElement.tagName === undefined && typeof (document.activeElement as any).blur === 'function' && document.activeElement !== (document as any).body)
+      )) {
+        (document.activeElement as HTMLElement).blur()
       }
-      element.classList.remove('edge-swipe-active', 'edge-swipe-cancelling')
-      element.classList.add('edge-swipe-committed')
-      element.style.setProperty('--edge-swipe-offset', '100vw')
-      resetTimer = window.setTimeout(() => {
-        onBack()
-        window.requestAnimationFrame(() => {
-          clearMotion()
-        })
-      }, 200)
+      clearMotion()
+      onBack()
+      try { window.focus() } catch {}
     } else {
+      remoteLog('DEBUG', 'EdgeSwipe', `Edge swipe cancelled: deltaX=${Math.round(deltaX)} duration=${durationMs}ms`)
       cancelMotion()
     }
   }

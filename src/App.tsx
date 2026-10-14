@@ -2247,8 +2247,6 @@ export default function App() {
       <main
         className={`app roster-shell tab-slide-${slideDirection}`}
         style={selected ? { display: 'none' } : undefined}
-        aria-hidden={Boolean(selected)}
-        inert={selected ? true : undefined}
         onTouchStart={selected ? undefined : handleRosterTouchStart}
         onTouchMove={selected ? undefined : handleRosterTouchMove}
         onTouchEnd={selected ? undefined : handleRosterTouchEnd}

@@ -281,4 +281,46 @@ describe('edge swipe back', () => {
       ;(globalThis as any).window = origWindow
     }
   })
+
+  it('executes onBack immediately on commit without a 200ms dead zone and protects document.body from blur', () => {
+    let backCalled = false
+    let bodyBlurred = false
+    const listeners: Record<string, (e: any) => void> = {}
+    const mockElement = {
+      addEventListener: (t: string, fn: any) => { listeners[t] = fn },
+      removeEventListener: (t: string) => { delete listeners[t] },
+      classList: { add: vi.fn(), remove: vi.fn() },
+      style: { setProperty: vi.fn(), removeProperty: vi.fn() },
+    }
+    const mockBody = {
+      blur: () => { bodyBlurred = true },
+    }
+    const origDoc = (globalThis as any).document
+    const origWindow = (globalThis as any).window
+    try {
+      ;(globalThis as any).window = { innerWidth: 400, clearTimeout, setTimeout, focus: vi.fn() }
+      ;(globalThis as any).document = {
+        body: mockBody,
+        activeElement: mockBody, // body is active
+      }
+
+      const cleanup = createEdgeSwipeController(mockElement as any, () => { backCalled = true })
+
+      listeners['touchstart']({ touches: [{ clientX: 20, clientY: 100 }] })
+      listeners['touchmove']({ touches: [{ clientX: 180, clientY: 100 }], cancelable: true, preventDefault: () => {} })
+      listeners['touchend']({ changedTouches: [{ clientX: 180, clientY: 100 }], cancelable: true, preventDefault: () => {} })
+
+      // onBack MUST be called immediately! Zero 200ms lag!
+      expect(backCalled).toBe(true)
+      // document.body MUST NEVER be blurred!
+      expect(bodyBlurred).toBe(false)
+      // window.focus() was called to preserve input focus!
+      expect((globalThis as any).window.focus).toHaveBeenCalled()
+
+      cleanup()
+    } finally {
+      ;(globalThis as any).document = origDoc
+      ;(globalThis as any).window = origWindow
+    }
+  })
 })
