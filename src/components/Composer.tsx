@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowUp,
   BrainCircuit,
@@ -23,6 +23,7 @@ import { cacheImageDataUrl, isImagePath } from './MarkdownContent'
 import { BotAvatar } from './BotAvatar'
 import { applySlashCompletion } from '../slash-routing'
 import { isExpectedVoiceCleanupError, VOICE_AUTOSEND_HOLD_MS } from '../voice-input'
+import { recordTracePhase } from '../remote-logger'
 
 export type ComposerEditRequest = { text: string; messageId?: number; nonce: number }
 export type ComposerDropFilesRef = { current: ((files: File[]) => void) | null }
@@ -48,6 +49,7 @@ export type ComposerProps = {
   submit: (attachments: { name: string; refText: string }[], text: string, options?: { editMessageId?: number }) => Promise<boolean>
   submitVoice: (text: string) => Promise<boolean>
   stop: () => void
+  perfTraceId?: string
 }
 
 const reasoningChoices = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']
@@ -65,7 +67,7 @@ const attachmentId = (file: File) => `${file.name}:${file.size}:${file.lastModif
 const formatFileSize = (size: number) => size < 1024 * 1024 ? `${Math.max(1, Math.round(size / 1024))} KB` : `${(size / (1024 * 1024)).toFixed(1)} MB`
 const maxAttachmentBytes = 50 * 1024 * 1024
 
-export const Composer = memo(function Composer({ session, profiles, sending, draggingFiles, editRequest, cancelEdit, dropFilesRef, onControlError, onModelLabel, onSessionModelChange, submit, submitVoice, stop }: ComposerProps) {
+export const Composer = memo(function Composer({ session, profiles, sending, draggingFiles, editRequest, cancelEdit, dropFilesRef, onControlError, onModelLabel, onSessionModelChange, submit, submitVoice, stop, perfTraceId }: ComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [draft, setDraft] = useState('')
@@ -102,6 +104,14 @@ export const Composer = memo(function Composer({ session, profiles, sending, dra
   const slashOpen = Boolean(slashText)
   const allModels = useMemo(() => (modelOptions.providers || []).flatMap(item => (item.featured_models?.length ? item.featured_models : item.models || []).map(name => ({ name, provider: item.slug, providerName: item.name, authenticated: item.authenticated !== false }))).filter((item, index, rows) => rows.findIndex(other => other.provider === item.provider && other.name === item.name) === index), [modelOptions])
   const filteredModels = useMemo(() => allModels.filter(item => `${item.name} ${item.providerName}`.toLowerCase().includes(modelSearch.toLowerCase())), [allModels, modelSearch])
+
+  useLayoutEffect(() => {
+    if (perfTraceId) {
+      recordTracePhase(perfTraceId, 'composer_commit', {
+        sessionId: session.id,
+      })
+    }
+  }, [session.id, perfTraceId])
 
   useEffect(() => {
     setAttachments([])

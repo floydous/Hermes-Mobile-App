@@ -12,7 +12,7 @@ import { SCROLL_FOLLOW_THRESHOLD, shouldStickToBottom } from '../scroll-follow'
 import { formatResponseStats } from '../message-stats'
 import { getInitialSpinnerPhrase, getProgressiveSpinnerPhrase, getRandomToolThreshold } from '../spinner-phrases'
 import { useEdgeSwipeBack } from '../edge-swipe'
-import { remoteLog } from '../remote-logger'
+import { remoteLog, recordTracePhase } from '../remote-logger'
 import { Composer, type ComposerDropFilesRef, type ComposerEditRequest } from './Composer'
 import type { LiveMessage, LiveProfile, LiveSession, LiveUsage } from '../hermes'
 
@@ -39,6 +39,7 @@ type Props = {
   submitVoice: (text: string) => Promise<boolean>
   stop: () => void
   loadEarlierMessages?: () => Promise<boolean>
+  perfTraceId?: string
 }
 
 const titleize = (value?: string | null) => (value || '').split(/[-_]+/).filter(Boolean).map(part => (part[0] ? part[0].toUpperCase() + part.slice(1) : '')).join(' ') || 'Bot'
@@ -195,7 +196,7 @@ export class FetchEarlierCoordinator {
   }
 }
 
-export function ChatView({ session, conversationLoading, messages, settledAssistant, profiles, streaming, sending, toolActivities, error, back, refresh, clearChat, openProfile, onSessionModelChange, pendingClarify, onAnswerClarify, onSkipClarify, submit, submitVoice, stop, loadEarlierMessages }: Props) {
+export function ChatView({ session, conversationLoading, messages, settledAssistant, profiles, streaming, sending, toolActivities, error, back, refresh, clearChat, openProfile, onSessionModelChange, pendingClarify, onAnswerClarify, onSkipClarify, submit, submitVoice, stop, loadEarlierMessages, perfTraceId }: Props) {
   const mountedRef = useRef(true)
   const coordinatorRef = useRef<FetchEarlierCoordinator>(new FetchEarlierCoordinator(session.id))
 
@@ -396,7 +397,14 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
     setLoadingEarlier(false)
     scrollAnchorRef.current = null
     prependingEarlierRef.current = false
-  }, [session.id])
+    if (perfTraceId) {
+      recordTracePhase(perfTraceId, 'chat_commit', {
+        sessionId: session.id,
+        messagesCount: messages.length,
+        renderedCount: renderedMessages.length,
+      })
+    }
+  }, [session.id, perfTraceId])
 
   useLayoutEffect(() => {
     const thread = threadRef.current
@@ -411,11 +419,19 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
   useLayoutEffect(() => {
     if (!messages.length || initializedRef.current) return
     initializedRef.current = true
+    if (perfTraceId) {
+      recordTracePhase(perfTraceId, 'scroll_request_start')
+    }
     const frame = requestAnimationFrame(() => {
       scrollToLatest('auto')
       requestAnimationFrame(() => {
         scrollToLatest('auto')
         initialScrolledToBottomRef.current = true
+        if (perfTraceId) {
+          recordTracePhase(perfTraceId, 'two_raf_reached', {
+            scrollHeight: threadRef.current?.scrollHeight || 0,
+          })
+        }
       })
     })
     return () => cancelAnimationFrame(frame)
@@ -714,7 +730,7 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
         onSkip={() => onSkipClarify?.(pendingClarify.requestId)}
       />
     ) : (
-      <Composer session={session} profiles={profiles} sending={sending} draggingFiles={draggingFiles} editRequest={editRequest} cancelEdit={() => setEditRequest(null)} dropFilesRef={dropFilesRef} onControlError={setControlError} onModelLabel={setModelLabel} onSessionModelChange={onSessionModelChange} submit={submit} submitVoice={submitVoice} stop={stop}/>
+      <Composer session={session} profiles={profiles} sending={sending} draggingFiles={draggingFiles} editRequest={editRequest} cancelEdit={() => setEditRequest(null)} dropFilesRef={dropFilesRef} onControlError={setControlError} onModelLabel={setModelLabel} onSessionModelChange={onSessionModelChange} submit={submit} submitVoice={submitVoice} stop={stop} perfTraceId={perfTraceId}/>
     )}
 
     {confirmClearOpen && (

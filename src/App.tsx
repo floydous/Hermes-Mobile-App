@@ -941,6 +941,7 @@ export default function App() {
     })
   }, [sessions, canonicalSessionIds, activeTurns, selected?.id, query])
   const profileMap = useMemo(() => new Map(profiles.map(p => [p.name, p])), [profiles])
+  const sessionOpenTraceMapRef = useRef<Map<string, string>>(new Map())
   const [openingSessionId, setOpeningSessionId] = useState<string | null>(null)
   const cachedHydrationRafRef = useRef<number | null>(null)
   const cachedHydrationTimerRef = useRef<number | null>(null)
@@ -1010,17 +1011,13 @@ export default function App() {
     }
 
     const perfTraceId = startPerformanceTrace('session_open')
-    recordTracePhase(perfTraceId, 'cache_hydrate', {
+    sessionOpenTraceMapRef.current.set(safeSession.id, perfTraceId)
+    recordTracePhase(perfTraceId, 'cache_read_end', {
       isCacheHit: Boolean(cached && cached.length > 0),
       cachedCount: cached?.length || 0,
       sessionId: safeSession.id,
       profile: safeSession.profile,
     })
-    if (typeof requestAnimationFrame !== 'undefined') {
-      requestAnimationFrame(() => {
-        recordTracePhase(perfTraceId, 'frame_0_paint')
-      })
-    }
 
     // Immediately mark session as read on Frame 0
     try {
@@ -1033,7 +1030,11 @@ export default function App() {
     } catch {}
 
     // Synchronously mount ChatView on Frame 0 so the screen transitions in 0ms without freezing
+    const tDispatchStart = performance.now()
     setSelected(safeSession)
+    recordTracePhase(perfTraceId, 'selection_dispatch_end', {
+      dispatchMs: Math.round((performance.now() - tDispatchStart) * 100) / 100,
+    })
     const adhocSet = new Set(sessionsRef.current.map(s => s.id))
     const matchingClarify = resolveMatchingClarify({
       session: safeSession,
@@ -1087,7 +1088,7 @@ export default function App() {
     return (async () => {
       try {
         const loaded = await loadMessages(safeSession.id, safeSession.profile, activeEndpointRef.current)
-        recordTracePhase(perfTraceId, 'network_load', { loadedCount: loaded.length })
+        recordTracePhase(perfTraceId, 'network_response', { loadedCount: loaded.length })
         if (requestId !== sessionLoadRef.current) return
         networkLoadedRequestIdRef.current = requestId
         cancelPendingCachedHydration()
@@ -1187,13 +1188,16 @@ export default function App() {
         } else if (!isTranscriptIdentical || !existingMessages.length) {
           setMessages(deduplicateConsecutiveMessages(resolvedLoaded))
         }
+        recordTracePhase(perfTraceId, 'network_state_applied', { count: resolvedLoaded.length })
         if (typeof requestAnimationFrame !== 'undefined') {
           requestAnimationFrame(() => {
-            recordTracePhase(perfTraceId, 'transcript_render', { renderedCount: resolvedLoaded.length })
+            recordTracePhase(perfTraceId, 'transcript_commit', { renderedCount: resolvedLoaded.length })
             finishPerformanceTrace(perfTraceId, 'settle', { totalMessages: resolvedLoaded.length })
+            sessionOpenTraceMapRef.current.delete(safeSession.id)
           })
         } else {
           finishPerformanceTrace(perfTraceId, 'settle', { totalMessages: resolvedLoaded.length })
+          sessionOpenTraceMapRef.current.delete(safeSession.id)
         }
       }
       catch (reason) {
@@ -2507,6 +2511,7 @@ export default function App() {
       <ChatView
         key={selected.id}
         session={selected}
+        perfTraceId={sessionOpenTraceMapRef.current.get(selected.id)}
         conversationLoading={conversationLoading}
         messages={messages}
         settledAssistant={settledAssistant?.sessionId === selected.id && settledAssistant.profile === selected.profile ? settledAssistant : null}
