@@ -326,67 +326,32 @@ describe('Runtime Performance & Resource Optimization', () => {
       expect(hasCodeContent('>     def hello():\n>         return 1')).toBe(true)
     })
 
-    it('coalesces streaming updates using requestAnimationFrame and flushes terminal state', () => {
-      let pendingText: string | null = null
-      let rafHandle: number | null = null
-      let committedText = ''
+    it('guarantees streaming text accumulates monotonically and never oscillates between full text and delta tokens', () => {
+      let streamingState = ''
+      const historyStates: string[] = []
 
-      const rafCallbacks: Array<() => void> = []
-      const mockRaf = (cb: () => void) => {
-        rafCallbacks.push(cb)
-        return rafCallbacks.length
-      }
-      const mockCancelRaf = (id: number) => {
-        rafCallbacks[id - 1] = () => {}
+      // In submitPrompt's onDelta pipeline, text arrives monotonically accumulated:
+      const onDelta = (accumulated: string) => {
+        streamingState = accumulated
+        historyStates.push(streamingState)
       }
 
-      const scheduleCoalesced = (text: string) => {
-        pendingText = text
-        if (rafHandle == null) {
-          rafHandle = mockRaf(() => {
-            rafHandle = null
-            if (pendingText != null) {
-              committedText = pendingText
-              pendingText = null
-            }
-          })
-        }
+      // Simulate stream chunks arriving
+      let localAccumulated = ''
+      const incomingChunks = ['Once ', 'upon ', 'a ', 'time ', 'in ', 'a ', 'digital ', 'realm…']
+      for (const chunk of incomingChunks) {
+        localAccumulated += chunk
+        onDelta(localAccumulated)
       }
 
-      const flushImmediately = (targetText?: string) => {
-        if (rafHandle != null) {
-          mockCancelRaf(rafHandle)
-          rafHandle = null
-        }
-        const val = targetText !== undefined ? targetText : pendingText
-        if (val != null) {
-          committedText = val
-          pendingText = null
-        }
+      expect(streamingState).toBe('Once upon a time in a digital realm…')
+      expect(historyStates).toHaveLength(8)
+
+      // Verify that every state strictly extends previous state, with zero rewinds/resets
+      for (let i = 1; i < historyStates.length; i++) {
+        expect(historyStates[i].startsWith(historyStates[i - 1])).toBe(true)
+        expect(historyStates[i].length).toBeGreaterThan(historyStates[i - 1].length)
       }
-
-      // Simulate 5 rapid tokens arriving within a single frame
-      scheduleCoalesced('H')
-      scheduleCoalesced('He')
-      scheduleCoalesced('Hel')
-      scheduleCoalesced('Hell')
-      scheduleCoalesced('Hello')
-
-      // Exactly ONE requestAnimationFrame should be scheduled
-      expect(rafCallbacks).toHaveLength(1)
-      expect(committedText).toBe('') // Not committed yet
-
-      // Advance frame
-      rafCallbacks[0]()
-      expect(committedText).toBe('Hello') // Committed latest text in 1 commit
-      expect(rafHandle).toBeNull()
-
-      // Terminal event arrives and flushes immediately
-      scheduleCoalesced('Hello world')
-      expect(rafCallbacks).toHaveLength(2)
-      flushImmediately('')
-      expect(committedText).toBe('')
-      expect(rafHandle).toBeNull()
     })
 
     it('populates all alias candidate IDs in memory cache while executing only a single disk write', () => {

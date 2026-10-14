@@ -196,42 +196,6 @@ export default function App() {
   const [connectionStatus, setConnectionStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking')
   const lastConnectionErrorRef = useRef('')
   const [streaming, setStreaming] = useState('')
-  const pendingStreamingTextRef = useRef<string | null>(null)
-  const streamingRafRef = useRef<number | null>(null)
-
-  const scheduleCoalescedStreaming = useCallback((text: string) => {
-    pendingStreamingTextRef.current = text
-    if (streamingRafRef.current == null && typeof requestAnimationFrame !== 'undefined') {
-      streamingRafRef.current = requestAnimationFrame(() => {
-        streamingRafRef.current = null
-        if (pendingStreamingTextRef.current != null) {
-          setStreaming(pendingStreamingTextRef.current)
-          pendingStreamingTextRef.current = null
-        }
-      })
-    }
-  }, [])
-
-  const flushStreamingImmediately = useCallback((targetText?: string) => {
-    if (streamingRafRef.current != null) {
-      try { cancelAnimationFrame(streamingRafRef.current) } catch {}
-      streamingRafRef.current = null
-    }
-    const val = targetText !== undefined ? targetText : pendingStreamingTextRef.current
-    if (val != null) {
-      setStreaming(val)
-      pendingStreamingTextRef.current = null
-    }
-  }, [])
-
-  useEffect(() => {
-    return () => {
-      if (streamingRafRef.current != null) {
-        try { cancelAnimationFrame(streamingRafRef.current) } catch {}
-        streamingRafRef.current = null
-      }
-    }
-  }, [])
   const [settledAssistant, setSettledAssistant] = useState<SettledAssistantState | null>(null)
   const settledAssistantRef = useRef<SettledAssistantState | null>(null)
   settledAssistantRef.current = settledAssistant
@@ -576,21 +540,25 @@ export default function App() {
         const prof = resolveProfileForSessionId(sid, profilesRef.current, sessionsRef.current, activeTurnsRef.current)
         if (sid && typeof event.payload.text === 'string') {
           // If this session is actively being driven by local turn submission pipeline,
-          // submitPrompt's onDelta manages accumulated streaming state
-          const isLocallyDriven = activeInFlightTurnsRef.current.has(sid) || (prof ? activeInFlightTurnsRef.current.has(prof) : false)
-          if (!isLocallyDriven) {
-            const currentAccumulated = activeTurnsRef.current[sid]?.streamingText || (prof ? activeTurnsRef.current[prof]?.streamingText : '') || ''
-            const nextAccumulated = currentAccumulated + event.payload.text
-            if (activeTurnsRef.current[sid]) {
-              activeTurnsRef.current[sid].streamingText = nextAccumulated
-            }
-            if (prof && activeTurnsRef.current[prof]) {
-              activeTurnsRef.current[prof].streamingText = nextAccumulated
-            }
-            scheduleThrottledTurnPersistence()
-            if (doesSessionMatchTurn(selectedRef.current, sid, prof || '', profilesRef.current, id => getResolvedSessionId(id, activeEndpointRef.current), adhocSessionIdsRef.current)) {
-              scheduleCoalescedStreaming(nextAccumulated)
-            }
+          // submitPrompt's onDelta pipeline authoritatively manages streamingText and setStreaming.
+          if (sendingRef.current && doesSessionMatchTurn(selectedRef.current, sid, prof || '', profilesRef.current, id => getResolvedSessionId(id, activeEndpointRef.current), adhocSessionIdsRef.current)) {
+            return
+          }
+          if (activeInFlightTurnsRef.current.has(sid) || (prof ? activeInFlightTurnsRef.current.has(prof) : false)) {
+            return
+          }
+
+          const currentTurn = activeTurnsRef.current[sid] || (prof ? activeTurnsRef.current[prof] : undefined)
+          const nextText = (currentTurn?.streamingText || '') + event.payload.text
+          if (activeTurnsRef.current[sid]) {
+            activeTurnsRef.current[sid].streamingText = nextText
+          }
+          if (prof && activeTurnsRef.current[prof]) {
+            activeTurnsRef.current[prof].streamingText = nextText
+          }
+          scheduleThrottledTurnPersistence()
+          if (doesSessionMatchTurn(selectedRef.current, sid, prof || '', profilesRef.current, id => getResolvedSessionId(id, activeEndpointRef.current), adhocSessionIdsRef.current)) {
+            setStreaming(nextText)
           }
         }
       }
@@ -1083,7 +1051,7 @@ export default function App() {
       }
     } else {
       setSending(false)
-      flushStreamingImmediately('')
+      setStreaming('')
       setToolActivities([])
       const hasCached = Boolean(cached && cached.length > 0)
       setConversationLoading(!hasCached && !safeSession.id.startsWith('draft:'))
