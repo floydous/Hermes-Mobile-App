@@ -196,6 +196,42 @@ export default function App() {
   const [connectionStatus, setConnectionStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking')
   const lastConnectionErrorRef = useRef('')
   const [streaming, setStreaming] = useState('')
+  const pendingStreamingTextRef = useRef<string | null>(null)
+  const streamingRafRef = useRef<number | null>(null)
+
+  const scheduleCoalescedStreaming = useCallback((text: string) => {
+    pendingStreamingTextRef.current = text
+    if (streamingRafRef.current == null && typeof requestAnimationFrame !== 'undefined') {
+      streamingRafRef.current = requestAnimationFrame(() => {
+        streamingRafRef.current = null
+        if (pendingStreamingTextRef.current != null) {
+          setStreaming(pendingStreamingTextRef.current)
+          pendingStreamingTextRef.current = null
+        }
+      })
+    }
+  }, [])
+
+  const flushStreamingImmediately = useCallback((targetText?: string) => {
+    if (streamingRafRef.current != null) {
+      try { cancelAnimationFrame(streamingRafRef.current) } catch {}
+      streamingRafRef.current = null
+    }
+    const val = targetText !== undefined ? targetText : pendingStreamingTextRef.current
+    if (val != null) {
+      setStreaming(val)
+      pendingStreamingTextRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (streamingRafRef.current != null) {
+        try { cancelAnimationFrame(streamingRafRef.current) } catch {}
+        streamingRafRef.current = null
+      }
+    }
+  }, [])
   const [settledAssistant, setSettledAssistant] = useState<SettledAssistantState | null>(null)
   const settledAssistantRef = useRef<SettledAssistantState | null>(null)
   settledAssistantRef.current = settledAssistant
@@ -547,7 +583,7 @@ export default function App() {
           }
           scheduleThrottledTurnPersistence()
           if (doesSessionMatchTurn(selectedRef.current, sid, prof || '', profilesRef.current, id => getResolvedSessionId(id, activeEndpointRef.current), adhocSessionIdsRef.current)) {
-            setStreaming(event.payload.text)
+            scheduleCoalescedStreaming(event.payload.text)
           }
         }
       }
@@ -789,6 +825,22 @@ export default function App() {
   }, [])
 
   const lastReadCacheRef = useRef<Map<string, number>>(new Map())
+
+  // Pre-warm lastRead in memory on mount to prevent synchronous disk I/O in render loops
+  useEffect(() => {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i)
+          if (key && key.startsWith('hermes-last-read:')) {
+            const sid = key.slice('hermes-last-read:'.length)
+            const val = Number(localStorage.getItem(key) || 0)
+            lastReadCacheRef.current.set(sid, val)
+          }
+        }
+      }
+    } catch {}
+  }, [])
   const getLastReadTime = useCallback((sid: string): number => {
     if (!sid) return 0
     const inMem = lastReadCacheRef.current.get(sid)
@@ -1023,29 +1075,12 @@ export default function App() {
         setMessages(cached || [])
       }
     } else {
-      // Instant transition on Frame 0: Mount ChatView immediately with skeleton loading (<16ms)
       setSending(false)
-      setStreaming('')
+      flushStreamingImmediately('')
       setToolActivities([])
-      setConversationLoading(!safeSession.id.startsWith('draft:'))
-      setMessages([])
-
-      // If cached messages exist, yield to the browser event loop to paint the skeleton screen first,
-      // then populate the cached messages in the very next animation frame
-      if (cached && cached.length > 0) {
-        cachedHydrationRafRef.current = requestAnimationFrame(() => {
-          cachedHydrationTimerRef.current = (window.setTimeout(() => {
-            cachedHydrationTimerRef.current = null
-            cachedHydrationRafRef.current = null
-            // Safety: verify hydration generation, session identity, and network non-supersedence
-            if (hydrationTokenRef.current !== hydrationToken) return
-            if (sessionLoadRef.current !== requestId || selectedRef.current?.id !== safeSession.id) return
-            if (networkLoadedRequestIdRef.current === requestId) return
-            setMessages(cached!)
-            setConversationLoading(false)
-          }, 0) as unknown) as number
-        })
-      }
+      const hasCached = Boolean(cached && cached.length > 0)
+      setConversationLoading(!hasCached && !safeSession.id.startsWith('draft:'))
+      setMessages(hasCached ? cached! : [])
     }
 
     // Rebind session on gateway to retrieve any in-flight open_requests (e.g. clarify from background run)
@@ -1095,8 +1130,12 @@ export default function App() {
           const uniqueAliasIds = Array.from(new Set(candidateIds))
           for (const cid of uniqueAliasIds) {
             messageCacheRef.current.set(cid, resolvedLoaded)
-            setCachedSessionMessages(cid, resolvedLoaded)
           }
+          setTimeout(() => {
+            for (const cid of uniqueAliasIds) {
+              setCachedSessionMessages(cid, resolvedLoaded)
+            }
+          }, 0)
         }
 
         const currentActive = Object.values(activeTurnsRef.current).find(t =>
@@ -1147,7 +1186,7 @@ export default function App() {
           const hasUserMsg = resolvedLoaded.some(m => m.id === currentActive.userMessage?.id || (m.role === 'user' && m.content === currentActive.userMessage?.content))
           const merged = hasUserMsg ? resolvedLoaded : [...resolvedLoaded, currentActive.userMessage]
           setMessages(deduplicateConsecutiveMessages(merged))
-        } else if (!isTranscriptIdentical) {
+        } else {
           setMessages(deduplicateConsecutiveMessages(resolvedLoaded))
         }
         finishPerformanceTrace(perfTraceId, 'settle', { totalMessages: resolvedLoaded.length })
@@ -1438,36 +1477,34 @@ export default function App() {
     setStreaming('')
     setToolActivities([])
 
-    setMessages(items => {
-      let baseItems = items
-      if (options?.editMessageId != null) {
-        const idx = items.findIndex(m => m.id === options.editMessageId)
-        if (idx >= 0) baseItems = items.slice(0, idx)
-      }
-      const lastItem = baseItems[baseItems.length - 1]
-      const hasExistingAssistantAtTail = Boolean(
-        lastItem &&
-        lastItem.role === 'assistant' &&
-        (!priorSettled || lastItem.content === priorSettled.content)
-      )
-      const assistantToInject = (!hasExistingAssistantAtTail && priorAssistantMessage)
-        ? [priorAssistantMessage]
-        : []
-      const rawNext = [...baseItems, ...assistantToInject, localUserMessage]
+    let baseItems = messagesRef.current
+    if (options?.editMessageId != null) {
+      const idx = baseItems.findIndex(m => m.id === options.editMessageId)
+      if (idx >= 0) baseItems = baseItems.slice(0, idx)
+    }
+    const lastItem = baseItems[baseItems.length - 1]
+    const hasExistingAssistantAtTail = Boolean(
+      lastItem &&
+      lastItem.role === 'assistant' &&
+      (!priorSettled || lastItem.content === priorSettled.content)
+    )
+    const assistantToInject = (!hasExistingAssistantAtTail && priorAssistantMessage)
+      ? [priorAssistantMessage]
+      : []
+    const rawNext = [...baseItems, ...assistantToInject, localUserMessage]
+    const nextMessages = deduplicateConsecutiveMessages(rawNext)
 
-      const nextMessages = deduplicateConsecutiveMessages(rawNext)
+    setMessages(nextMessages)
 
-      const aliasIds = new Set<string>([
-        turnSessionId,
-        turnSession.id,
-        getResolvedSessionId(turnSessionId, activeEndpointRef.current),
-      ].filter(Boolean))
-      for (const aid of aliasIds) {
-        messageCacheRef.current.set(aid, nextMessages)
-        setCachedSessionMessages(aid, nextMessages)
-      }
-      return nextMessages
-    })
+    const aliasIds = new Set<string>([
+      turnSessionId,
+      turnSession.id,
+      getResolvedSessionId(turnSessionId, activeEndpointRef.current),
+    ].filter(Boolean))
+    for (const aid of aliasIds) {
+      messageCacheRef.current.set(aid, nextMessages)
+      setCachedSessionMessages(aid, nextMessages)
+    }
 
     const editMsgId = options?.editMessageId
     let truncateRowId: number | undefined
@@ -2060,10 +2097,12 @@ export default function App() {
   }
 
   const rosterPullActive = rosterPullDistance > 6 || rosterPullRefreshing
+  const rosterPullOnInteractiveRef = useRef(false)
   const rosterTouchStart = (event: React.TouchEvent<HTMLElement>) => {
-    const target = event.target as HTMLElement
-    if (target.closest('input,textarea,select') || rosterScrollRef.current?.scrollTop !== 0) return
+    const target = event.target as HTMLElement | null
+    if (target?.closest('input,textarea,select') || rosterScrollRef.current?.scrollTop !== 0) return
     rosterPullStartRef.current = event.touches[0].clientY
+    rosterPullOnInteractiveRef.current = Boolean(target?.closest('.bot-row, button, a'))
   }
   const rosterTouchMove = (event: React.TouchEvent<HTMLElement>) => {
     if (rosterPullStartRef.current == null) return
@@ -2073,13 +2112,14 @@ export default function App() {
       return
     }
     const rawDelta = event.touches[0].clientY - rosterPullStartRef.current
+    const slop = rosterPullOnInteractiveRef.current ? 24 : 8
     // Pulling downwards from top (scrollTop === 0)
-    if (rawDelta <= 8) {
+    if (rawDelta <= slop) {
       if (rosterPullDistance > 0) setRosterPullDistance(0)
       return
     }
     // Resistance curve: pull increases smoothly up to 72px
-    const distance = Math.min(72, Math.max(0, (rawDelta - 8) * 0.55))
+    const distance = Math.min(72, Math.max(0, (rawDelta - slop) * 0.55))
     if (distance > 0 && event.cancelable) event.preventDefault()
     setRosterPullDistance(distance)
   }
@@ -2087,11 +2127,13 @@ export default function App() {
     // Threshold is 48px to trigger refresh; swiping back up below 48px cancels it!
     const shouldRefresh = rosterPullDistance >= 48
     rosterPullStartRef.current = null
+    rosterPullOnInteractiveRef.current = false
     setRosterPullDistance(0)
     if (shouldRefresh) void pullRefreshRoster()
   }
   const rosterTouchCancel = () => {
     rosterPullStartRef.current = null
+    rosterPullOnInteractiveRef.current = false
     setRosterPullDistance(0)
   }
 
@@ -2180,6 +2222,8 @@ export default function App() {
         }
         switchTab(nextTab)
       }
+    } else {
+      remoteLog('DEBUG', 'Gesture', `TouchEnd tap preserved: deltaX=${Math.round(deltaX)} deltaY=${Math.round(deltaY)} wasInteractive=${wasInteractive}`)
     }
   }
 
@@ -2380,13 +2424,16 @@ export default function App() {
                 const isWorking = Boolean(activeTurn)
                 const isWaitingInput = Boolean(activeTurn && (activeTurn.status === 'waiting' || activeTurn.needsInput))
                 return (
-                  <button
-                    className={`bot-row enter ${isWorking ? 'working' : ''} ${isWaitingInput ? 'waiting' : ''}`}
-                    style={{ animationDelay: `${Math.min(index, 8) * 28}ms` }}
-                    key={profile.name}
-                    onPointerDown={handleRowPointerDown}
-                    onClick={() => void openBot(profile, session)}
-                  >
+                    <button
+                      className={`bot-row enter ${isWorking ? 'working' : ''} ${isWaitingInput ? 'waiting' : ''}`}
+                      style={{ animationDelay: `${Math.min(index, 8) * 28}ms` }}
+                      key={profile.name}
+                      onPointerDown={handleRowPointerDown}
+                      onClick={() => {
+                        remoteLog('DEBUG', 'Action', `Bot row click fired on ${profile.name}`)
+                        void openBot(profile, session)
+                      }}
+                    >
                     <div className="bot-avatar-wrap">
                       <BotAvatar profile={profile} fallbackName={profile.name}/>
                       {isWorking && (
@@ -2447,7 +2494,10 @@ export default function App() {
                       style={{ animationDelay: `${Math.min(index, 8) * 28}ms` }}
                       key={`${session.profile}:${session.id}`}
                       onPointerDown={handleRowPointerDown}
-                      onClick={() => void openSession(session)}
+                      onClick={() => {
+                        remoteLog('DEBUG', 'Action', `Session row click fired on ${session.id}`)
+                        void openSession(session)
+                      }}
                     >
                       <div className="bot-avatar-wrap">
                         <BotAvatar profile={profile} fallbackName={session.profile} variant="session"/>

@@ -383,12 +383,70 @@ export function exportBufferedPerformanceEvents(): PerformanceRecord[] {
  */
 export function clearPerformanceBuffer() {
   eventQueue.length = 0
+  stringLogQueue.length = 0
   activeTraces.clear()
   droppedRecordsCount = 0
+  if (stringFlushTimer != null) {
+    clearTimeout(stringFlushTimer)
+    stringFlushTimer = null
+  }
+}
+
+const MAX_STRING_QUEUE_SIZE = 100
+const stringLogQueue: string[] = []
+let stringFlushTimer: ReturnType<typeof setTimeout> | null = null
+let isStringFlushing = false
+
+export async function flushStringLogs(isUnload = false): Promise<void> {
+  if (isStringFlushing || stringLogQueue.length === 0) return
+  isStringFlushing = true
+
+  const batch = stringLogQueue.splice(0, MAX_STRING_QUEUE_SIZE)
+  const bodyText = batch.join('\n')
+  const url = resolveLogServerUrl()
+
+  if (isUnload && typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
+    try {
+      const blob = new Blob([bodyText], { type: 'text/plain' })
+      const queued = navigator.sendBeacon(url, blob)
+      if (queued) {
+        isStringFlushing = false
+        return
+      }
+    } catch {}
+  }
+
+  try {
+    const headers: Record<string, string> = { 'Content-Type': 'text/plain' }
+    if (authToken) {
+      headers['X-Hermes-Debug-Token'] = authToken
+      headers['Authorization'] = `Bearer ${authToken}`
+    }
+
+    if (typeof fetch === 'function') {
+      const controller = typeof AbortController !== 'undefined' ? new AbortController() : null
+      const timeoutId = controller ? setTimeout(() => controller.abort(), 3500) : null
+
+      await fetch(url, {
+        method: 'POST',
+        headers,
+        body: bodyText,
+        mode: 'cors',
+        keepalive: isUnload,
+        signal: controller ? controller.signal : undefined,
+      })
+
+      if (timeoutId) clearTimeout(timeoutId)
+    }
+  } catch {
+    // Fail silently without blocking UI
+  } finally {
+    isStringFlushing = false
+  }
 }
 
 /**
- * Standard log transport - preserves simple strings with remoteLog().
+ * Standard log transport - batches string logs asynchronously without blocking UI interactions.
  */
 export function remoteLog(level: 'DEBUG' | 'INFO' | 'WARN' | 'ERROR', tag: string, message: string) {
   const line = `[${level}][${tag}] ${message}`
@@ -400,21 +458,18 @@ export function remoteLog(level: 'DEBUG' | 'INFO' | 'WARN' | 'ERROR', tag: strin
     console.log(line)
   }
 
-  // Transmit to the single resolved endpoint
-  if (typeof fetch === 'function') {
-    const url = resolveLogServerUrl()
-    const headers: Record<string, string> = { 'Content-Type': 'text/plain' }
-    if (authToken) {
-      headers['X-Hermes-Debug-Token'] = authToken
-      headers['Authorization'] = `Bearer ${authToken}`
-    }
+  if (!isPerformanceEnabled) return
 
-    void fetch(url, {
-      method: 'POST',
-      headers,
-      body: line,
-      mode: 'cors',
-    }).catch(() => {})
+  if (stringLogQueue.length >= MAX_STRING_QUEUE_SIZE) {
+    stringLogQueue.shift()
+  }
+  stringLogQueue.push(line)
+
+  if (stringFlushTimer == null) {
+    stringFlushTimer = setTimeout(() => {
+      stringFlushTimer = null
+      void flushStringLogs()
+    }, 1000)
   }
 }
 
@@ -426,6 +481,7 @@ function setupLifecycleFlushListeners() {
 
   const flushImmediate = () => {
     void flushPerformanceEvents(true)
+    void flushStringLogs(true)
   }
 
   window.addEventListener('visibilitychange', () => {

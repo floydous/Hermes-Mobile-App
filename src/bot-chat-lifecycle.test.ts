@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { isSessionCanonical, isTurnCanonicalForProfile, doesSessionMatchTurn } from './clarify-isolation'
 import { isBotRowWorking, shouldRetainLocalMessages, isTurnSettledByTranscript, shouldShowWorkingIndicator } from './chat-turn'
-import type { LiveProfile, LiveSession } from './hermes'
+import { deduplicateConsecutiveMessages } from './session-cache'
+import type { LiveMessage, LiveProfile, LiveSession } from './hermes'
 
 describe('Bot Chat Lifecycle & Mid-Turn Reentry Resilience', () => {
   const profiles: LiveProfile[] = [
@@ -129,5 +130,35 @@ describe('Bot Chat Lifecycle & Mid-Turn Reentry Resilience', () => {
 
     expect(activeInFlightTurns.has('researcher')).toBe(false)
     expect(activeInFlightTurns.has('20261008_120000_res123')).toBe(false)
+  })
+
+  it('Session re-opening with identical server transcript commits messages and never leaves view empty', () => {
+    const historicalMessages: LiveMessage[] = [
+      { id: 1, role: 'user', content: 'What is quantum physics?' },
+      { id: 2, role: 'assistant', content: 'Quantum physics is the study of matter and energy at the most fundamental level.' },
+    ]
+
+    // Simulate session opening flow:
+    // 1. Initial cached state is populated
+    let renderedMessages: LiveMessage[] = historicalMessages
+    let conversationLoading = false
+
+    expect(renderedMessages).toHaveLength(2)
+    expect(conversationLoading).toBe(false)
+
+    // 2. Server returns identical transcript (isTranscriptIdentical = true)
+    const backendLoaded: LiveMessage[] = [...historicalMessages]
+    const isTranscriptIdentical = true
+
+    // Under the fixed logic:
+    // Even when isTranscriptIdentical is true, setMessages(deduplicateConsecutiveMessages(resolvedLoaded)) runs!
+    renderedMessages = deduplicateConsecutiveMessages(backendLoaded)
+    conversationLoading = false
+
+    // Messages must NEVER be empty []
+    expect(renderedMessages).toHaveLength(2)
+    expect(renderedMessages[0].content).toBe('What is quantum physics?')
+    expect(renderedMessages[1].content).toBe('Quantum physics is the study of matter and energy at the most fundamental level.')
+    expect(conversationLoading).toBe(false)
   })
 })

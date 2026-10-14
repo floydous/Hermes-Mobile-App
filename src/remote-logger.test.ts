@@ -5,6 +5,7 @@ import {
   exportBufferedPerformanceEvents,
   finishPerformanceTrace,
   flushPerformanceEvents,
+  flushStringLogs,
   isPerformanceDiagnosticsEnabled,
   recordPerformanceEvent,
   recordTracePhase,
@@ -234,5 +235,30 @@ describe('Remote Performance Diagnostics & Logger', () => {
     // Connecting to remote gateway at 10.0.0.130 must not redirect debug logger away from PC
     setRemoteLoggerEndpoint('http://10.0.0.130:9119')
     expect(resolveLogServerUrl()).toBe('http://100.117.86.67:8765/')
+  })
+
+  it('batches string logs asynchronously and does not invoke fetch when disabled', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true })
+    globalThis.fetch = fetchMock
+
+    setPerformanceDiagnosticsEnabled(false)
+    remoteLog('DEBUG', 'Gesture', 'Touch started')
+    remoteLog('DEBUG', 'Gesture', 'Touch moved')
+
+    await flushStringLogs()
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    setPerformanceDiagnosticsEnabled(true)
+    remoteLog('DEBUG', 'Gesture', 'Touch started')
+    remoteLog('DEBUG', 'Gesture', 'Touch moved')
+    remoteLog('DEBUG', 'Gesture', 'Touch ended')
+
+    await flushStringLogs()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const body = fetchMock.mock.calls[0][1].body as string
+    expect(body).toContain('[DEBUG][Gesture] Touch started')
+    expect(body).toContain('[DEBUG][Gesture] Touch moved')
+    expect(body).toContain('[DEBUG][Gesture] Touch ended')
+    expect(body.split('\n')).toHaveLength(3)
   })
 })

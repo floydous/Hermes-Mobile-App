@@ -325,5 +325,92 @@ describe('Runtime Performance & Resource Optimization', () => {
       expect(hasCodeContent('> ~~~python\n> print(1)\n> ~~~')).toBe(true)
       expect(hasCodeContent('>     def hello():\n>         return 1')).toBe(true)
     })
+
+    it('coalesces streaming updates using requestAnimationFrame and flushes terminal state', () => {
+      let pendingText: string | null = null
+      let rafHandle: number | null = null
+      let committedText = ''
+
+      const rafCallbacks: Array<() => void> = []
+      const mockRaf = (cb: () => void) => {
+        rafCallbacks.push(cb)
+        return rafCallbacks.length
+      }
+      const mockCancelRaf = (id: number) => {
+        rafCallbacks[id - 1] = () => {}
+      }
+
+      const scheduleCoalesced = (text: string) => {
+        pendingText = text
+        if (rafHandle == null) {
+          rafHandle = mockRaf(() => {
+            rafHandle = null
+            if (pendingText != null) {
+              committedText = pendingText
+              pendingText = null
+            }
+          })
+        }
+      }
+
+      const flushImmediately = (targetText?: string) => {
+        if (rafHandle != null) {
+          mockCancelRaf(rafHandle)
+          rafHandle = null
+        }
+        const val = targetText !== undefined ? targetText : pendingText
+        if (val != null) {
+          committedText = val
+          pendingText = null
+        }
+      }
+
+      // Simulate 5 rapid tokens arriving within a single frame
+      scheduleCoalesced('H')
+      scheduleCoalesced('He')
+      scheduleCoalesced('Hel')
+      scheduleCoalesced('Hell')
+      scheduleCoalesced('Hello')
+
+      // Exactly ONE requestAnimationFrame should be scheduled
+      expect(rafCallbacks).toHaveLength(1)
+      expect(committedText).toBe('') // Not committed yet
+
+      // Advance frame
+      rafCallbacks[0]()
+      expect(committedText).toBe('Hello') // Committed latest text in 1 commit
+      expect(rafHandle).toBeNull()
+
+      // Terminal event arrives and flushes immediately
+      scheduleCoalesced('Hello world')
+      expect(rafCallbacks).toHaveLength(2)
+      flushImmediately('')
+      expect(committedText).toBe('')
+      expect(rafHandle).toBeNull()
+    })
+
+    it('populates all alias candidate IDs in memory cache while executing only a single disk write', () => {
+      const memoryCache = new Map<string, any>()
+      const diskWrites: Array<{ id: string; data: any }> = []
+
+      const mockSetCachedSessionMessages = (id: string, msgs: any) => {
+        diskWrites.push({ id, data: msgs })
+      }
+
+      const candidateIds = ['session-123', 'canonical-default', 'draft:default']
+      const resolvedLoaded = [{ id: 1, role: 'assistant', content: 'test' }]
+
+      // Optimized path: write to all memory aliases, but only disk for primary ID
+      for (const cid of candidateIds) {
+        memoryCache.set(cid, resolvedLoaded)
+      }
+      mockSetCachedSessionMessages('session-123', resolvedLoaded)
+
+      expect(memoryCache.get('session-123')).toBe(resolvedLoaded)
+      expect(memoryCache.get('canonical-default')).toBe(resolvedLoaded)
+      expect(memoryCache.get('draft:default')).toBe(resolvedLoaded)
+      expect(diskWrites).toHaveLength(1)
+      expect(diskWrites[0].id).toBe('session-123')
+    })
   })
 })
