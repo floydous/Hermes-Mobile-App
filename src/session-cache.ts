@@ -1,4 +1,4 @@
-import type { LiveMessage } from './hermes'
+import type { LiveMessage, LiveProfile, LiveSession } from './hermes'
 import { isPerformanceDiagnosticsEnabled, recordPerformanceEvent } from './remote-logger'
 
 export function parseCachedSessionIndex(rawIndex: string | null): string[] {
@@ -16,6 +16,49 @@ export function parseLastReadTimestamp(rawVal: string | null): number | null {
   if (!rawVal) return null
   const num = Number(rawVal)
   return Number.isFinite(num) && num > 0 ? num : null
+}
+
+export function areProfilesShallowEqual(a: LiveProfile[], b: LiveProfile[]): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    const p1 = a[i]
+    const p2 = b[i]
+    if (
+      p1.name !== p2.name ||
+      p1.display_name !== p2.display_name ||
+      p1.model !== p2.model ||
+      p1.canonical_session?.id !== p2.canonical_session?.id ||
+      p1.canonical_session?.resolved_id !== p2.canonical_session?.resolved_id ||
+      p1.last_session?.id !== p2.last_session?.id
+    ) {
+      return false
+    }
+  }
+  return true
+}
+
+export function areSessionsShallowEqual(a: LiveSession[], b: LiveSession[]): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    const s1 = a[i]
+    const s2 = b[i]
+    if (
+      s1.id !== s2.id ||
+      s1.title !== s2.title ||
+      s1.preview !== s2.preview ||
+      s1.profile !== s2.profile ||
+      s1.model !== s2.model ||
+      s1.last_active !== s2.last_active ||
+      s1.message_count !== s2.message_count ||
+      s1.unread !== s2.unread ||
+      s1.unread_count !== s2.unread_count
+    ) {
+      return false
+    }
+  }
+  return true
 }
 
 function isUsageEqual(a?: LiveMessage['usage'], b?: LiveMessage['usage']): boolean {
@@ -253,22 +296,13 @@ export function resolveLatestSessionPreview(
     return (srvTime - lastTime) <= 30000
   }
 
-  // 1. Check in-memory cached transcript
+  // 1. Check in-memory cached transcript (0ms, zero disk I/O)
   if (cachedMessages && cachedMessages.length > 0 && isCacheFresh(cachedMessages)) {
     const text = getLatestFromList(cachedMessages)
     if (text) return text
   }
 
-  // 2. Check persistent localStorage transcript
-  if (sessionId) {
-    const persisted = getCachedSessionMessages(sessionId)
-    if (persisted && persisted.length > 0 && isCacheFresh(persisted)) {
-      const text = getLatestFromList(persisted)
-      if (text) return text
-    }
-  }
-
-  // 3. Fallback to server-provided preview if no fresh transcript is cached yet
+  // 2. Direct fallback to server-provided preview (0ms, zero disk I/O)
   return (fallbackPreview || '').trim()
 }
 

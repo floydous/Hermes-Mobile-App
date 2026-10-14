@@ -33,6 +33,52 @@ export function isSessionStatusWorking(status: string): boolean {
   return norm === 'working' || norm === 'waiting'
 }
 
+export function areActiveTurnsEqual(
+  a: Record<string, ActiveBotTurn | undefined>,
+  b: Record<string, ActiveBotTurn | undefined>
+): boolean {
+  if (a === b) return true
+  const keysA = Object.keys(a).filter(k => Boolean(a[k]))
+  const keysB = Object.keys(b).filter(k => Boolean(b[k]))
+  if (keysA.length !== keysB.length) return false
+  for (const k of keysA) {
+    const turnA = a[k]
+    const turnB = b[k]
+    if (!turnA || !turnB) return false
+    if (
+      turnA.sessionId !== turnB.sessionId ||
+      turnA.profile !== turnB.profile ||
+      turnA.status !== turnB.status ||
+      turnA.statusText !== turnB.statusText ||
+      turnA.needsInput !== turnB.needsInput ||
+      turnA.streamingText !== turnB.streamingText ||
+      turnA.startedAt !== turnB.startedAt ||
+      turnA.userMessage?.id !== turnB.userMessage?.id ||
+      turnA.userMessage?.role !== turnB.userMessage?.role ||
+      turnA.userMessage?.content !== turnB.userMessage?.content ||
+      (turnA.toolActivities?.length || 0) !== (turnB.toolActivities?.length || 0)
+    ) {
+      return false
+    }
+    if (turnA.toolActivities && turnB.toolActivities) {
+      for (let i = 0; i < turnA.toolActivities.length; i++) {
+        const actA = turnA.toolActivities[i]
+        const actB = turnB.toolActivities[i]
+        if (
+          actA.id !== actB.id ||
+          actA.name !== actB.name ||
+          actA.status !== actB.status ||
+          actA.duration_s !== actB.duration_s ||
+          actA.summary !== actB.summary
+        ) {
+          return false
+        }
+      }
+    }
+  }
+  return true
+}
+
 export class InFlightSubmissionTracker {
   private counts = new Map<string, number>()
 

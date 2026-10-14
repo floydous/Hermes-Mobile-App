@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { computeProgressiveRenderSlice, shouldAutoRevealEarlierMessages, FetchEarlierCoordinator } from './components/ChatView'
+import {
+  computeProgressiveRenderSlice,
+  resolveChatWindowState,
+  computeNextRevealedEarlierOffset,
+  type ChatWindowState,
+  shouldAutoRevealEarlierMessages,
+  FetchEarlierCoordinator,
+} from './components/ChatView'
 
 describe('Progressive Message Windowing Algorithm & Top Offset Tracking', () => {
   it('caps initial render to 25 items for a 100-message transcript with offset 75', () => {
@@ -365,5 +372,284 @@ describe('Progressive Message Windowing Algorithm & Top Offset Tracking', () => 
     await fetchCall
     expect(successCount).toBe(1)
     expect(coordinator.isFetchLocked()).toBe(false)
+  })
+
+  describe('resolveChatWindowState Lifecycle & First-Render Guarantee', () => {
+    it('bounds cold 100-message open to exactly 25 messages across mount-to-settle lifecycle', () => {
+      // Step 1: Initial mount: messages = 0, conversationLoading = true
+      let state: ChatWindowState = {
+        sessionId: 'session-cold',
+        offset: 0,
+        isSettled: false,
+      }
+      const initial = resolveChatWindowState({
+        currentState: state,
+        sessionId: 'session-cold',
+        messagesLength: 0,
+        conversationLoading: true,
+      })
+      expect(initial.effectiveOffset).toBe(0)
+      expect(initial.nextState.isSettled).toBe(false)
+      state = initial.nextState
+
+      // Step 2: loadMessages completes with 100 messages, conversationLoading = false
+      const settled = resolveChatWindowState({
+        currentState: state,
+        sessionId: 'session-cold',
+        messagesLength: 100,
+        conversationLoading: false,
+      })
+      // MUST immediately yield offset 75!
+      expect(settled.effectiveOffset).toBe(75)
+      expect(settled.nextState.offset).toBe(75)
+      expect(settled.nextState.isSettled).toBe(true)
+
+      // Verified render slice commits strictly 25 messages
+      const slice = computeProgressiveRenderSlice(
+        Array.from({ length: 100 }, (_, i) => ({ id: i + 1 })),
+        settled.effectiveOffset
+      )
+      expect(slice.renderedMessages).toHaveLength(25)
+      expect(slice.renderedMessages[0].id).toBe(76)
+      expect(slice.renderedMessages[24].id).toBe(100)
+    })
+
+    it('correctly handles partial initial arrival (0 -> 12 -> 100 messages) without premature settling', () => {
+      // Step 1: Mount with 0 messages, loading
+      let state: ChatWindowState = {
+        sessionId: 'session-chunked',
+        offset: 0,
+        isSettled: false,
+      }
+
+      // Step 2: Partial chunk or optimistic user message arrives (12 messages), BUT loading is still true!
+      const partial = resolveChatWindowState({
+        currentState: state,
+        sessionId: 'session-chunked',
+        messagesLength: 12,
+        conversationLoading: true, // Still loading!
+      })
+      expect(partial.effectiveOffset).toBe(0)
+      expect(partial.nextState.isSettled).toBe(false)
+      state = partial.nextState
+
+      // Step 3: Full transcript arrives (100 messages), loading finishes
+      const full = resolveChatWindowState({
+        currentState: state,
+        sessionId: 'session-chunked',
+        messagesLength: 100,
+        conversationLoading: false,
+      })
+      expect(full.effectiveOffset).toBe(75)
+      expect(full.nextState.offset).toBe(75)
+      expect(full.nextState.isSettled).toBe(true)
+
+      const slice = computeProgressiveRenderSlice(
+        Array.from({ length: 100 }, (_, i) => ({ id: i + 1 })),
+        full.effectiveOffset
+      )
+      expect(slice.renderedMessages).toHaveLength(25)
+    })
+
+    it('immediately yields offset 75 on session switch to a fully cached session on the very first return', () => {
+      const stateA: ChatWindowState = {
+        sessionId: 'session-A',
+        offset: 50,
+        isSettled: true,
+      }
+
+      const switchCached = resolveChatWindowState({
+        currentState: stateA,
+        sessionId: 'session-B',
+        messagesLength: 100,
+        conversationLoading: false,
+      })
+      expect(switchCached.effectiveOffset).toBe(75)
+      expect(switchCached.nextState.offset).toBe(75)
+      expect(switchCached.nextState.isSettled).toBe(true)
+    })
+
+    it('bounds 100 cached messages to 25 items even while a background refresh is pending (conversationLoading = true)', () => {
+      const state: ChatWindowState = {
+        sessionId: 'session-refreshing',
+        offset: 0,
+        isSettled: false,
+      }
+
+      const refreshing = resolveChatWindowState({
+        currentState: state,
+        sessionId: 'session-refreshing',
+        messagesLength: 100,
+        conversationLoading: true,
+      })
+      expect(refreshing.effectiveOffset).toBe(75)
+      expect(refreshing.nextState.offset).toBe(75)
+    })
+
+    it('preserves user-expanded window (offset 50) when a background refresh occurs (conversationLoading = true) on an already settled session', () => {
+      const settledExpanded: ChatWindowState = {
+        sessionId: 'session-settled-expand',
+        offset: 50,
+        isSettled: true,
+      }
+
+      const duringRefresh = resolveChatWindowState({
+        currentState: settledExpanded,
+        sessionId: 'session-settled-expand',
+        messagesLength: 100,
+        conversationLoading: true,
+      })
+
+      expect(duringRefresh.effectiveOffset).toBe(50)
+      expect(duringRefresh.nextState.offset).toBe(50)
+      expect(duringRefresh.nextState.isSettled).toBe(true)
+      expect(duringRefresh.nextState).toBe(settledExpanded)
+    })
+
+    it('safely clamps offset when transcript shrinks, clears, or receives non-finite values', () => {
+      // Shrunk from 100 to 20 messages
+      const stateShrunk: ChatWindowState = {
+        sessionId: 'session-shrunk',
+        offset: 75,
+        isSettled: true,
+      }
+      const shrunk = resolveChatWindowState({
+        currentState: stateShrunk,
+        sessionId: 'session-shrunk',
+        messagesLength: 20,
+        conversationLoading: false,
+      })
+      expect(shrunk.effectiveOffset).toBe(0)
+      expect(shrunk.nextState.offset).toBe(0)
+
+      // Transcript cleared to 0 messages
+      const stateCleared: ChatWindowState = {
+        sessionId: 'session-cleared',
+        offset: 75,
+        isSettled: true,
+      }
+      const cleared = resolveChatWindowState({
+        currentState: stateCleared,
+        sessionId: 'session-cleared',
+        messagesLength: 0,
+        conversationLoading: false,
+      })
+      expect(cleared.effectiveOffset).toBe(0)
+      expect(cleared.nextState.offset).toBe(0)
+
+      // NaN offset
+      const stateNaN: ChatWindowState = {
+        sessionId: 'session-nan',
+        offset: NaN,
+        isSettled: true,
+      }
+      const nanClamped = resolveChatWindowState({
+        currentState: stateNaN,
+        sessionId: 'session-nan',
+        messagesLength: 100,
+        conversationLoading: false,
+      })
+      expect(nanClamped.effectiveOffset).toBe(0)
+      expect(Number.isFinite(nanClamped.effectiveOffset)).toBe(true)
+
+      // Infinity offset
+      const stateInf: ChatWindowState = {
+        sessionId: 'session-inf',
+        offset: Infinity,
+        isSettled: true,
+      }
+      const infClamped = resolveChatWindowState({
+        currentState: stateInf,
+        sessionId: 'session-inf',
+        messagesLength: 100,
+        conversationLoading: false,
+      })
+      expect(infClamped.effectiveOffset).toBe(0)
+
+      // Fractional offset
+      const stateFrac: ChatWindowState = {
+        sessionId: 'session-frac',
+        offset: 50.7,
+        isSettled: true,
+      }
+      const fracClamped = resolveChatWindowState({
+        currentState: stateFrac,
+        sessionId: 'session-frac',
+        messagesLength: 100,
+        conversationLoading: false,
+      })
+      expect(fracClamped.effectiveOffset).toBe(50)
+      expect(Number.isInteger(fracClamped.effectiveOffset)).toBe(true)
+    })
+
+    it('maintains strict referential equality on no-op renders preventing render loops', () => {
+      const stableState: ChatWindowState = {
+        sessionId: 'session-stable',
+        offset: 75,
+        isSettled: true,
+      }
+
+      const result = resolveChatWindowState({
+        currentState: stableState,
+        sessionId: 'session-stable',
+        messagesLength: 100,
+        conversationLoading: false,
+      })
+
+      expect(result.nextState).toBe(stableState)
+      expect(result.effectiveOffset).toBe(75)
+    })
+
+    it('supports sequential batched reveal updates without losing batches (75 -> 50 -> 25)', () => {
+      let state: ChatWindowState = {
+        sessionId: 'session-reveal-queue',
+        offset: 75,
+        isSettled: true,
+      }
+      const updater = (prev: ChatWindowState): ChatWindowState => ({
+        ...prev,
+        offset: Math.max(0, prev.offset - 25),
+        isSettled: true,
+      })
+
+      state = updater(state)
+      expect(state.offset).toBe(50)
+      state = updater(state)
+      expect(state.offset).toBe(25)
+    })
+
+    it('reveals repeatedly until offset reaches zero with no overshoot using production computeNextRevealedEarlierOffset', () => {
+      const messages = Array.from({ length: 100 }, (_, i) => ({ id: i + 1 }))
+      let offset = 75
+
+      // Step 1: initial 75 -> 50
+      offset = computeNextRevealedEarlierOffset(offset, 25)
+      expect(offset).toBe(50)
+      let slice = computeProgressiveRenderSlice(messages, offset)
+      expect(slice.renderedMessages).toHaveLength(50)
+      expect(slice.renderedMessages[0].id).toBe(51)
+
+      // Step 2: 50 -> 25
+      offset = computeNextRevealedEarlierOffset(offset, 25)
+      expect(offset).toBe(25)
+      slice = computeProgressiveRenderSlice(messages, offset)
+      expect(slice.renderedMessages).toHaveLength(75)
+      expect(slice.renderedMessages[0].id).toBe(26)
+
+      // Step 3: 25 -> 0 (all messages revealed)
+      offset = computeNextRevealedEarlierOffset(offset, 25)
+      expect(offset).toBe(0)
+      slice = computeProgressiveRenderSlice(messages, offset)
+      expect(slice.renderedMessages).toHaveLength(100)
+      expect(slice.renderedMessages[0].id).toBe(1)
+      expect(slice.hasEarlierInBatch).toBe(false)
+      expect(slice.remainingEarlier).toBe(0)
+
+      // Step 4: further reveal at 0 must not overshoot below 0
+      offset = computeNextRevealedEarlierOffset(offset, 25)
+      expect(offset).toBe(0)
+      slice = computeProgressiveRenderSlice(messages, offset)
+      expect(slice.renderedMessages).toHaveLength(100)
+    })
   })
 })

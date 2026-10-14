@@ -1,7 +1,9 @@
-import { describe, expect, it, beforeEach } from 'vitest'
+import { describe, expect, it, beforeEach, vi } from 'vitest'
 import {
   areMessageListsEqual,
   areMessageListsShallowEqual,
+  areProfilesShallowEqual,
+  areSessionsShallowEqual,
   deduplicateConsecutiveMessages,
   getCachedSessionMessages,
   isHumanChatSession,
@@ -11,7 +13,8 @@ import {
   resolveLatestSessionPreview,
   setCachedSessionMessages,
 } from './session-cache'
-import type { LiveMessage } from './hermes'
+import { areActiveTurnsEqual, type ActiveBotTurn } from './chat-turn'
+import type { LiveMessage, LiveProfile, LiveSession } from './hermes'
 
 describe('session-cache message caching and eviction', () => {
   const store = new Map<string, string>()
@@ -132,13 +135,14 @@ describe('session-cache message caching and eviction', () => {
     )
     expect(preview1).toBe('Proses pengiriman ke @hermes telah selesai (status settled).')
 
-    // Case 2: Persistent localStorage cache provides the true latest message
+    // Case 2: Zero disk I/O in render loop - when cachedMessages is omitted, directly falls back
+    // to server preview without synchronous localStorage reads
     setCachedSessionMessages('sess-persisted', historicalMessages)
     const preview2 = resolveLatestSessionPreview(
       'sess-persisted',
       'Initial opening prompt from days ago'
     )
-    expect(preview2).toBe('Proses pengiriman ke @hermes telah selesai (status settled).')
+    expect(preview2).toBe('Initial opening prompt from days ago')
 
     // Case 3: Empty cache falls back to server preview
     const preview3 = resolveLatestSessionPreview(
@@ -147,17 +151,25 @@ describe('session-cache message caching and eviction', () => {
     )
     expect(preview3).toBe('Fallback server preview')
 
-    // Case 4: Recent user prompt followed by assistant reply correctly resolves the assistant reply
+    // Case 4: Recent user prompt followed by assistant reply correctly resolves when in memory
     const recentTurnMessages: LiveMessage[] = [
       { id: 1, role: 'user', content: 'Oke' },
       { id: 2, role: 'assistant', content: 'Siap! Kapan pun kamu butuh bantuan, langsung panggil saja. Selamat beraktivitas!' },
     ]
-    setCachedSessionMessages('sess-default', recentTurnMessages)
     const preview4 = resolveLatestSessionPreview(
       'sess-default',
-      'Oke'
+      'Oke',
+      recentTurnMessages
     )
     expect(preview4).toBe('Siap! Kapan pun kamu butuh bantuan, langsung panggil saja. Selamat beraktivitas!')
+
+    // Case 4b: Zero storage calls across 100 sessions
+    const storageSpy = vi.spyOn(mockStorage, 'getItem')
+    for (let i = 0; i < 100; i++) {
+      resolveLatestSessionPreview(`sess-${i}`, 'Fallback preview')
+    }
+    expect(storageSpy).not.toHaveBeenCalled()
+    storageSpy.mockRestore()
 
     // Case 5: Stale cache fallback when server has significantly newer activity (>30s)
     const oldMessages: LiveMessage[] = [
@@ -206,6 +218,25 @@ describe('session-cache message caching and eviction', () => {
       Math.floor(Date.now() / 1000)
     )
     expect(preview8).toBe('Optimistic reply without timestamp')
+
+    // Case 9: System/tool-only RAM transcript -> falls back to server preview
+    const systemToolOnly: LiveMessage[] = [
+      { id: 1, role: 'system', content: 'You are an agent' },
+      { id: 2, role: 'tool', content: '{"status":"ok"}' },
+    ]
+    const preview9 = resolveLatestSessionPreview(
+      'sess-systool',
+      'Fallback prompt',
+      systemToolOnly
+    )
+    expect(preview9).toBe('Fallback prompt')
+
+    // Case 10: Server preview absent and no in-memory transcript -> returns empty string without disk I/O
+    const storageSpy2 = vi.spyOn(mockStorage, 'getItem')
+    const preview10 = resolveLatestSessionPreview('sess-nodisk', null)
+    expect(preview10).toBe('')
+    expect(storageSpy2).not.toHaveBeenCalled()
+    storageSpy2.mockRestore()
   })
 
   it('deduplicateConsecutiveMessages collapses identical adjacent assistant messages and preserves rich metadata', () => {
@@ -420,5 +451,81 @@ describe('session-cache message caching and eviction', () => {
     expect(areMessageListsEqual(list1, listDifferentTimestamp)).toBe(false)
     expect(areMessageListsEqual(list1, listDifferentReasoning)).toBe(false)
     expect(areMessageListsEqual(list1, listDifferentDisplayKind)).toBe(false)
+  })
+
+  describe('areProfilesShallowEqual and areSessionsShallowEqual equality checks', () => {
+    it('compares profiles accurately preventing redundant state updates', () => {
+      const p1: LiveProfile[] = [
+        { name: 'default', display_name: 'Hermes Default', model: 'hermes-3', canonical_session: { id: 'c1', resolved_id: 'r1' } },
+        { name: 'researcher', display_name: 'Researcher', model: 'claude-3-5-sonnet' },
+      ]
+      const p2: LiveProfile[] = [
+        { name: 'default', display_name: 'Hermes Default', model: 'hermes-3', canonical_session: { id: 'c1', resolved_id: 'r1' } },
+        { name: 'researcher', display_name: 'Researcher', model: 'claude-3-5-sonnet' },
+      ]
+      expect(areProfilesShallowEqual(p1, p2)).toBe(true)
+      expect(areProfilesShallowEqual(p1, [{ ...p1[0], display_name: 'Updated Name' }, p1[1]])).toBe(false)
+      expect(areProfilesShallowEqual(p1, [{ ...p1[0], model: 'new-model' }, p1[1]])).toBe(false)
+      expect(areProfilesShallowEqual(p1, [p1[0]])).toBe(false)
+    })
+
+    it('compares sessions accurately preventing redundant state updates', () => {
+      const s1: LiveSession[] = [
+        { id: 'sess-1', title: 'Session 1', preview: 'Hello', profile: 'default', model: 'hermes-3', last_active: 1000 },
+        { id: 'sess-2', title: 'Session 2', preview: 'World', profile: 'researcher', model: 'claude-3-5-sonnet', last_active: 2000 },
+      ]
+      const s2: LiveSession[] = [
+        { id: 'sess-1', title: 'Session 1', preview: 'Hello', profile: 'default', model: 'hermes-3', last_active: 1000 },
+        { id: 'sess-2', title: 'Session 2', preview: 'World', profile: 'researcher', model: 'claude-3-5-sonnet', last_active: 2000 },
+      ]
+      expect(areSessionsShallowEqual(s1, s2)).toBe(true)
+      expect(areSessionsShallowEqual(s1, [{ ...s1[0], preview: 'New preview' }, s1[1]])).toBe(false)
+      expect(areSessionsShallowEqual(s1, [{ ...s1[0], title: 'New title' }, s1[1]])).toBe(false)
+      expect(areSessionsShallowEqual(s1, [{ ...s1[0], last_active: 1001 }, s1[1]])).toBe(false)
+      expect(areSessionsShallowEqual(s1, [s1[0]])).toBe(false)
+    })
+
+    it('compares activeTurns accurately preventing redundant state updates', () => {
+      const baseTurn: ActiveBotTurn = {
+        sessionId: 's1',
+        profile: 'default',
+        status: 'thinking' as const,
+        statusText: 'Thinking…',
+        streamingText: '',
+        toolActivities: [],
+        userMessage: { id: 1, role: 'user', content: 'hi' },
+        startedAt: 1000,
+      }
+      const t1: Record<string, ActiveBotTurn> = { default: baseTurn }
+      const t2: Record<string, ActiveBotTurn> = { default: { ...baseTurn } }
+      expect(areActiveTurnsEqual(t1, t2)).toBe(true)
+      expect(areActiveTurnsEqual(t1, { default: { ...baseTurn, status: 'tool' as const } })).toBe(false)
+      expect(areActiveTurnsEqual(t1, { default: { ...baseTurn, streamingText: 'A' } })).toBe(false)
+      expect(areActiveTurnsEqual(t1, { default: { ...baseTurn, profile: 'other' } })).toBe(false)
+      expect(areActiveTurnsEqual(t1, { default: { ...baseTurn, startedAt: 1001 } })).toBe(false)
+      expect(areActiveTurnsEqual(t1, { default: { ...baseTurn, userMessage: { id: 2, role: 'user', content: 'hi' } } })).toBe(false)
+      expect(areActiveTurnsEqual(t1, { default: { ...baseTurn, userMessage: { id: 1, role: 'assistant', content: 'hi' } } })).toBe(false)
+      expect(areActiveTurnsEqual(t1, { default: { ...baseTurn, userMessage: { id: 1, role: 'user', content: 'new message' } } })).toBe(false)
+      expect(areActiveTurnsEqual(t1, {})).toBe(false)
+
+      // Test nested toolActivities changes
+      const turnWithTools: ActiveBotTurn = {
+        ...baseTurn,
+        toolActivities: [
+          { id: 'tool-1', name: 'search_files', status: 'running', summary: 'Searching files', duration_s: 1.5 },
+        ],
+      }
+      const turnWithToolsSame: ActiveBotTurn = {
+        ...baseTurn,
+        toolActivities: [
+          { id: 'tool-1', name: 'search_files', status: 'running', summary: 'Searching files', duration_s: 1.5 },
+        ],
+      }
+      expect(areActiveTurnsEqual({ default: turnWithTools }, { default: turnWithToolsSame })).toBe(true)
+      expect(areActiveTurnsEqual({ default: turnWithTools }, { default: { ...turnWithTools, toolActivities: [{ id: 'tool-1', name: 'search_files', status: 'done', summary: 'Searching files', duration_s: 1.5 }] } })).toBe(false)
+      expect(areActiveTurnsEqual({ default: turnWithTools }, { default: { ...turnWithTools, toolActivities: [{ id: 'tool-1', name: 'search_files', status: 'running', summary: 'Done searching', duration_s: 1.5 }] } })).toBe(false)
+      expect(areActiveTurnsEqual({ default: turnWithTools }, { default: { ...turnWithTools, toolActivities: [{ id: 'tool-1', name: 'search_files', status: 'running', summary: 'Searching files', duration_s: 2.5 }] } })).toBe(false)
+      expect(areActiveTurnsEqual({ default: turnWithTools }, { default: { ...turnWithTools, toolActivities: [] } })).toBe(false)
+    })
   })
 })

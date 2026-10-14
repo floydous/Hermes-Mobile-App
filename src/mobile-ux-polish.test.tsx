@@ -8,7 +8,9 @@ import {
   isContinuationNudge,
   isModelSwitchMarker,
   parseModelSwitchNotice,
+  resolveLatestSessionPreview,
 } from './session-cache'
+import { initializeLastReadMap, resetLastReadMapForTesting } from './App'
 import { cleanPreviewSnippet } from './live-model'
 import { MessageCard, MarkdownContent, getUiZoomFactor } from './components/MarkdownContent'
 import { SmoothStreamingView } from './components/SmoothStreamingView'
@@ -366,6 +368,114 @@ User asked (deterministic, from compacted turns): '[Lalo Ehrmantraut] Rombak ula
       expect(html).toContain('load-earlier-btn')
       expect(html).toContain('Load earlier messages')
     })
+
+    it('strictly mounts only the newest 25 message cards in a 100-message transcript commit on initial render', () => {
+      const messages100: LiveMessage[] = Array.from({ length: 100 }, (_, i) => ({
+        id: i + 1,
+        role: (i % 2 === 0 ? 'user' : 'assistant') as 'user' | 'assistant',
+        content: `Test Message ${i + 1}`,
+        timestamp: 1000 + i,
+      }))
+
+      const html = renderToString(
+        <ChatView
+          session={dummySession}
+          conversationLoading={false}
+          messages={messages100}
+          settledAssistant={null}
+          profiles={[]}
+          streaming=""
+          sending={false}
+          toolActivities={[]}
+          error=""
+          back={vi.fn()}
+          refresh={vi.fn()}
+          openProfile={vi.fn()}
+          onSessionModelChange={vi.fn()}
+          submit={vi.fn()}
+          submitVoice={vi.fn()}
+          stop={vi.fn()}
+        />
+      )
+
+      const matches = html.match(/class="message-row /g) || []
+      expect(matches.length).toBe(25)
+      expect(html).toContain('Test Message 76')
+      expect(html).toContain('Test Message 100')
+      expect(html).not.toContain('Test Message 75<')
+      expect(html).not.toContain('Test Message 1<')
+    })
+
+    it('bounds 100 messages to 25 items even while conversationLoading is true on initial render', () => {
+      const messages100: LiveMessage[] = Array.from({ length: 100 }, (_, i) => ({
+        id: i + 1,
+        role: (i % 2 === 0 ? 'user' : 'assistant') as 'user' | 'assistant',
+        content: `Test Message ${i + 1}`,
+        timestamp: 1000 + i,
+      }))
+
+      const html = renderToString(
+        <ChatView
+          session={dummySession}
+          conversationLoading={true}
+          messages={messages100}
+          settledAssistant={null}
+          profiles={[]}
+          streaming=""
+          sending={false}
+          toolActivities={[]}
+          error=""
+          back={vi.fn()}
+          refresh={vi.fn()}
+          openProfile={vi.fn()}
+          onSessionModelChange={vi.fn()}
+          submit={vi.fn()}
+          submitVoice={vi.fn()}
+          stop={vi.fn()}
+        />
+      )
+
+      const matches = html.match(/class="message-row /g) || []
+      expect(matches.length).toBe(25)
+      expect(html).toContain('Test Message 76')
+      expect(html).toContain('Test Message 100')
+      expect(html).not.toContain('Test Message 75<')
+    })
+
+    it('mounts all messages without truncation when count <= 25 (e.g. 12 messages)', () => {
+      const messages12: LiveMessage[] = Array.from({ length: 12 }, (_, i) => ({
+        id: i + 1,
+        role: (i % 2 === 0 ? 'user' : 'assistant') as 'user' | 'assistant',
+        content: `Short Message ${i + 1}`,
+        timestamp: 1000 + i,
+      }))
+
+      const html = renderToString(
+        <ChatView
+          session={dummySession}
+          conversationLoading={false}
+          messages={messages12}
+          settledAssistant={null}
+          profiles={[]}
+          streaming=""
+          sending={false}
+          toolActivities={[]}
+          error=""
+          back={vi.fn()}
+          refresh={vi.fn()}
+          openProfile={vi.fn()}
+          onSessionModelChange={vi.fn()}
+          submit={vi.fn()}
+          submitVoice={vi.fn()}
+          stop={vi.fn()}
+        />
+      )
+
+      const matches = html.match(/class="message-row /g) || []
+      expect(matches.length).toBe(12)
+      expect(html).toContain('Short Message 1<')
+      expect(html).toContain('Short Message 12<')
+    })
   })
 
   describe('Out-Of-Band Steer Message Wrapper Stripping', () => {
@@ -524,6 +634,137 @@ User asked (deterministic, from compacted turns): '[Lalo Ehrmantraut] Rombak ula
 
       expect(html).toContain('smooth-streaming-container')
       expect(html).not.toContain('stream-live-caret')
+    })
+  })
+
+  describe('Item 2: Zero Disk I/O in Roster Render and Preview Paths', () => {
+    it('initializes lastRead cache map once and memoizes, avoiding rescanning on subsequent calls', () => {
+      resetLastReadMapForTesting()
+      const store = new Map<string, string>()
+      store.set('hermes-last-read:session-1', '1000')
+      store.set('hermes-last-read:session-2', '2000')
+
+      const mockStorage = {
+        length: 2,
+        key: (idx: number) => (idx === 0 ? 'hermes-last-read:session-1' : 'hermes-last-read:session-2'),
+        getItem: (k: string) => store.get(k) || null,
+        setItem: (k: string, v: string) => store.set(k, v),
+        removeItem: (k: string) => store.delete(k),
+        clear: () => store.clear(),
+      }
+
+      const origWindow = (globalThis as any).window
+      const origStorage = (globalThis as any).localStorage
+      ;(globalThis as any).window = globalThis
+      ;(globalThis as any).localStorage = mockStorage
+
+      try {
+        const spyGetItem = vi.spyOn(mockStorage, 'getItem')
+        const spyKey = vi.spyOn(mockStorage, 'key')
+
+        // First call initializes and scans
+        const map1 = initializeLastReadMap()
+        expect(map1.get('session-1')).toBe(1000)
+        expect(map1.get('session-2')).toBe(2000)
+        const initialGetItemCount = spyGetItem.mock.calls.length
+        expect(initialGetItemCount).toBe(2)
+
+        // Reset spy counts
+        spyGetItem.mockClear()
+        spyKey.mockClear()
+
+        // Second call MUST be memoized: 0 calls to key or getItem
+        const map2 = initializeLastReadMap()
+        expect(map2).toBe(map1) // Exact same reference
+        expect(spyGetItem).not.toHaveBeenCalled()
+        expect(spyKey).not.toHaveBeenCalled()
+
+        spyGetItem.mockRestore()
+        spyKey.mockRestore()
+      } finally {
+        ;(globalThis as any).window = origWindow
+        ;(globalThis as any).localStorage = origStorage
+        resetLastReadMapForTesting()
+      }
+    })
+
+    it('processes 100 roster sessions through full visibleSessions derivation without any localStorage reads', () => {
+      resetLastReadMapForTesting()
+      const store = new Map<string, string>()
+      const mockStorage = {
+        length: 0,
+        key: () => null,
+        getItem: (k: string) => store.get(k) || null,
+        setItem: (k: string, v: string) => store.set(k, v),
+        removeItem: (k: string) => store.delete(k),
+        clear: () => store.clear(),
+      }
+
+      const origWindow = (globalThis as any).window
+      const origStorage = (globalThis as any).localStorage
+      ;(globalThis as any).window = globalThis
+      ;(globalThis as any).localStorage = mockStorage
+
+      try {
+        // Pre-seed in-memory cache for 10 sessions, leave 90 as cache misses
+        const inMemoryCache = new Map<string, LiveMessage[]>()
+        for (let i = 0; i < 10; i++) {
+          inMemoryCache.set(`session-${i}`, [
+            { id: 1, role: 'user', content: `Prompt ${i}`, timestamp: 3000 * 1000 },
+            { id: 2, role: 'assistant', content: `Latest memory reply ${i}`, timestamp: 3000 * 1000 },
+          ])
+        }
+
+        const lastReadMap = initializeLastReadMap()
+
+        // Spy on storage during the full roster derivation loop
+        const storageSpy = vi.spyOn(mockStorage, 'getItem')
+
+        // Simulate App.tsx visibleSessions useMemo loop across 100 sessions
+        const visibleRows = Array.from({ length: 100 }, (_, i) => {
+          const sid = `session-${i}`
+          const cached = inMemoryCache.get(sid)
+          const preview = resolveLatestSessionPreview(
+            sid,
+            `Fallback server preview ${i}`,
+            cached || undefined,
+            3000
+          )
+          const lastRead = lastReadMap.get(sid) ?? 0
+          const { isUnread, unreadCount } = calculateUnreadState(
+            sid,
+            3000,
+            cached || undefined,
+            lastRead,
+            false,
+            false
+          )
+
+          return {
+            id: sid,
+            preview,
+            unread: isUnread,
+            unread_count: unreadCount,
+          }
+        })
+
+        // ZERO localStorage.getItem calls executed!
+        expect(storageSpy).not.toHaveBeenCalled()
+
+        // Correct semantics verified:
+        // Memory hits return latest reply
+        expect(visibleRows[0].preview).toBe('Latest memory reply 0')
+        expect(visibleRows[9].preview).toBe('Latest memory reply 9')
+        // Cache misses cleanly return fallback server preview without disk access
+        expect(visibleRows[10].preview).toBe('Fallback server preview 10')
+        expect(visibleRows[99].preview).toBe('Fallback server preview 99')
+
+        storageSpy.mockRestore()
+      } finally {
+        ;(globalThis as any).window = origWindow
+        ;(globalThis as any).localStorage = origStorage
+        resetLastReadMapForTesting()
+      }
     })
   })
 })

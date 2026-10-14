@@ -55,6 +55,76 @@ export function computeProgressiveRenderSlice<T>(
   return { renderedMessages, hasEarlierInBatch, remainingEarlier }
 }
 
+export interface ChatWindowState {
+  sessionId: string
+  offset: number
+  isSettled: boolean
+}
+
+export function resolveChatWindowState({
+  currentState,
+  sessionId,
+  messagesLength,
+  conversationLoading,
+  windowSize = 25,
+}: {
+  currentState: ChatWindowState
+  sessionId: string
+  messagesLength: number
+  conversationLoading: boolean
+  windowSize?: number
+}): { nextState: ChatWindowState; effectiveOffset: number } {
+  // Case 1: Session changed (e.g. navigation A -> B)
+  if (currentState.sessionId !== sessionId) {
+    const isSettled = messagesLength > 0 && !conversationLoading
+    const initialOffset = Math.max(0, messagesLength - windowSize)
+    const nextState: ChatWindowState = {
+      sessionId,
+      offset: initialOffset,
+      isSettled,
+    }
+    return { nextState, effectiveOffset: initialOffset }
+  }
+
+  // Case 2: History not settled yet (cold open or transcript loading from network)
+  if (!currentState.isSettled) {
+    const isSettled = messagesLength > 0 && !conversationLoading
+    const targetOffset = Math.max(0, messagesLength - windowSize)
+    if (currentState.offset === targetOffset && currentState.isSettled === isSettled) {
+      return { nextState: currentState, effectiveOffset: targetOffset }
+    }
+    const nextState: ChatWindowState = {
+      sessionId,
+      offset: targetOffset,
+      isSettled,
+    }
+    return { nextState, effectiveOffset: targetOffset }
+  }
+
+  // Case 3: Settled - clamp offset safely to integer [0, maxOffset] if transcript shrank (e.g. deletion, edit truncation, or clear)
+  const maxOffset = Math.max(0, messagesLength - windowSize)
+  const safeOffset = Number.isFinite(currentState.offset)
+    ? Math.min(maxOffset, Math.max(0, Math.floor(currentState.offset)))
+    : 0
+  if (safeOffset !== currentState.offset) {
+    const nextState: ChatWindowState = {
+      ...currentState,
+      offset: safeOffset,
+    }
+    return { nextState, effectiveOffset: safeOffset }
+  }
+
+  // Strict referential no-op: zero allocation, zero re-render loop
+  return { nextState: currentState, effectiveOffset: currentState.offset }
+}
+
+export function computeNextRevealedEarlierOffset(currentOffset: number, step = 25): number {
+  if (currentOffset <= 0) return 0
+  const safeOffset = Number.isFinite(currentOffset) ? Math.floor(currentOffset) : 0
+  const safeStep = Number.isFinite(step) && step > 0 ? Math.floor(step) : 25
+  return Math.max(0, safeOffset - safeStep)
+}
+
 export function shouldAutoRevealEarlierMessages({
   initialized,
   initialScrolledToBottom,
@@ -147,7 +217,6 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
     mountedRef.current = true
     return () => { mountedRef.current = false }
   }, [])
-  const [earlierOffset, setEarlierOffset] = useState(() => Math.max(0, messages.length - 25))
   const [revealedTimestampId, setRevealedTimestampId] = useState<number | null>(null)
   const [controlError, setControlError] = useState('')
   const [draggingFiles, setDraggingFiles] = useState(false)
@@ -298,7 +367,22 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
     setDraggingFiles(false)
   }, [session.id])
 
-  const hasInitializedHistoryRef = useRef(false)
+  const [windowState, setWindowState] = useState<ChatWindowState>(() => ({
+    sessionId: session.id,
+    offset: Math.max(0, messages.length - 25),
+    isSettled: messages.length > 0 && !conversationLoading,
+  }))
+
+  const { nextState, effectiveOffset } = resolveChatWindowState({
+    currentState: windowState,
+    sessionId: session.id,
+    messagesLength: messages.length,
+    conversationLoading,
+  })
+
+  if (nextState !== windowState) {
+    setWindowState(nextState)
+  }
 
   useLayoutEffect(() => {
     coordinatorRef.current.onSessionChange(session.id)
@@ -310,24 +394,9 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
     setRevealedTimestampId(null)
     setHasMoreEarlier(true)
     setLoadingEarlier(false)
-    hasInitializedHistoryRef.current = messages.length > 0 && !conversationLoading
-    setEarlierOffset(Math.max(0, messages.length - 25))
     scrollAnchorRef.current = null
     prependingEarlierRef.current = false
   }, [session.id])
-
-  useEffect(() => {
-    // While initial conversation loading is in progress or history has not yet completed initial population:
-    if (!hasInitializedHistoryRef.current) {
-      if (messages.length > 25) {
-        setEarlierOffset(messages.length - 25)
-      }
-      if (!conversationLoading && messages.length > 0) {
-        hasInitializedHistoryRef.current = true
-      }
-      return
-    }
-  }, [messages.length, conversationLoading])
 
   useLayoutEffect(() => {
     const thread = threadRef.current
@@ -337,7 +406,7 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
       scrollAnchorRef.current = null
       prependingEarlierRef.current = false
     }
-  }, [messages, earlierOffset])
+  }, [messages, effectiveOffset])
 
   useLayoutEffect(() => {
     if (!messages.length || initializedRef.current) return
@@ -370,12 +439,20 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
   }, [])
 
   const { renderedMessages, hasEarlierInBatch, remainingEarlier } = useMemo(
-    () => computeProgressiveRenderSlice(messages, earlierOffset),
-    [messages, earlierOffset]
+    () => computeProgressiveRenderSlice(messages, effectiveOffset),
+    [messages, effectiveOffset]
   )
 
+  const prevLoggedOffsetRef = useRef(windowState.offset)
+  useEffect(() => {
+    if (windowState.offset < prevLoggedOffsetRef.current) {
+      remoteLog('DEBUG', 'ChatHistory', `Revealed earlier messages: offset moved from ${prevLoggedOffsetRef.current} to ${windowState.offset}`)
+    }
+    prevLoggedOffsetRef.current = windowState.offset
+  }, [windowState.offset])
+
   const revealEarlierInBatch = useCallback(() => {
-    if (earlierOffset <= 0) return false
+    if (effectiveOffset <= 0) return false
     const thread = threadRef.current
     if (thread) {
       scrollAnchorRef.current = {
@@ -384,11 +461,13 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
       }
       prependingEarlierRef.current = true
     }
-    const nextOffset = Math.max(0, earlierOffset - 25)
-    remoteLog('DEBUG', 'ChatHistory', `Revealed earlier messages: offset moved from ${earlierOffset} to ${nextOffset}`)
-    setEarlierOffset(nextOffset)
+    setWindowState(prev => {
+      const nextOffset = computeNextRevealedEarlierOffset(prev.offset, 25)
+      if (nextOffset === prev.offset) return prev
+      return { ...prev, offset: nextOffset, isSettled: true }
+    })
     return true
-  }, [earlierOffset])
+  }, [effectiveOffset])
 
   const fetchEarlier = useCallback(async () => {
     if (coordinatorRef.current.isFetchLocked() || loadingEarlier || !hasMoreEarlier || !loadEarlierMessages) return
@@ -559,7 +638,7 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
           </div>
         )}
         {renderedMessages.map((message, sliceIndex) => {
-          const index = earlierOffset + sliceIndex
+          const index = effectiveOffset + sliceIndex
           const isLast = index === messages.length - 1
           const previousMessage = index > 0 ? messages[index - 1] : undefined
           const hasAssistantReplyAfter = index < lastAssistantIndex

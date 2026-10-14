@@ -22,6 +22,7 @@ import {
   isOptimisticUserMessageAlreadyCached,
   isSessionRowWorking,
   isTurnSettledByTranscript,
+  areActiveTurnsEqual,
   reconcileActiveTurns,
   resolveDelegationTargetProfile,
   restorePersistedActiveTurns,
@@ -34,6 +35,8 @@ import { errorMessage, RequestEpoch, selectRestoredEndpoint } from './connection
 import {
   areMessageListsEqual,
   areMessageListsShallowEqual,
+  areProfilesShallowEqual,
+  areSessionsShallowEqual,
   calculateUnreadState,
   deduplicateConsecutiveMessages,
   getCachedSessionMessages,
@@ -145,6 +148,33 @@ function resolveProfileForSessionId(
   const foundSession = sessions.find(s => s.id === sid)
   if (foundSession?.profile) return foundSession.profile
   return null
+}
+
+let memoizedLastReadMap: Map<string, number> | null = null
+
+export function initializeLastReadMap(): Map<string, number> {
+  if (memoizedLastReadMap) return memoizedLastReadMap
+  const map = new Map<string, number>()
+  try {
+    if (typeof localStorage !== 'undefined') {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i)
+        if (key && key.startsWith('hermes-last-read:')) {
+          const sid = key.slice('hermes-last-read:'.length)
+          const val = parseLastReadTimestamp(localStorage.getItem(key))
+          if (val != null && Number.isFinite(val)) {
+            map.set(sid, val)
+          }
+        }
+      }
+    }
+  } catch {}
+  memoizedLastReadMap = map
+  return map
+}
+
+export function resetLastReadMapForTesting(): void {
+  memoizedLastReadMap = null
 }
 
 export default function App() {
@@ -379,13 +409,15 @@ export default function App() {
     const endpoint = requestedEndpoint.replace(/\/$/, '')
     const epoch = refreshEpochRef.current.begin()
     refreshInFlightRef.current = true
-    setLoading(true)
+    if (supersede || !profilesRef.current.length) {
+      setLoading(true)
+    }
     if (supersede) setConnectionStatus('checking')
     try {
       const data = await loadSnapshot(endpoint)
       if (!refreshEpochRef.current.isCurrent(epoch)) return null
       setProfiles(prevProfiles => {
-        return data.profiles.map(p => {
+        const next = data.profiles.map(p => {
           const prev = prevProfiles.find(old => old.name === p.name)
           if (!p.canonical_session && prev?.canonical_session) {
             const prevId = prev.canonical_session.id
@@ -401,6 +433,7 @@ export default function App() {
           }
           return p
         })
+        return areProfilesShallowEqual(prevProfiles, next) ? prevProfiles : next
       })
       setSessions(prevSessions => {
         const nextMap = new Map<string, LiveSession>(data.sessions.map(s => [s.id, s]))
@@ -427,7 +460,8 @@ export default function App() {
             }
           }
         }
-        return Array.from(nextMap.values())
+        const next = Array.from(nextMap.values())
+        return areSessionsShallowEqual(prevSessions, next) ? prevSessions : next
       })
       if (selectedRef.current) {
         const curId = selectedRef.current.id
@@ -465,7 +499,10 @@ export default function App() {
           }
         }
         remoteLog('DEBUG', 'GatewayActive', `active_list: ${activeList.map(s => `${s.id}:${s.status}`).join(', ') || 'none'}`)
-        setActiveTurns(prev => reconcileActiveTurns(prev, activeList, map, Date.now(), endedSet, activeInFlightTurnsRef.current.toSet()))
+        setActiveTurns(prev => {
+          const next = reconcileActiveTurns(prev, activeList, map, Date.now(), endedSet, activeInFlightTurnsRef.current.toSet())
+          return areActiveTurnsEqual(prev, next) ? prev : next
+        })
       }).catch(() => {})
 
       if (shouldWarmUp) {
@@ -519,7 +556,9 @@ export default function App() {
     } finally {
       if (refreshEpochRef.current.isCurrent(epoch)) {
         refreshInFlightRef.current = false
-        setLoading(false)
+        if (supersede || !profilesRef.current.length) {
+          setLoading(false)
+        }
       }
     }
   }, [])
@@ -757,18 +796,9 @@ export default function App() {
         }
       } catch {}
 
-      try {
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i)
-          if (key && key.startsWith('hermes-last-read:')) {
-            const sid = key.slice('hermes-last-read:'.length)
-            const val = parseLastReadTimestamp(localStorage.getItem(key))
-            if (val != null) {
-              lastReadCacheRef.current.set(sid, val)
-            }
-          }
-        }
-      } catch {}
+      if (!lastReadCacheRef.current) {
+        lastReadCacheRef.current = initializeLastReadMap()
+      }
 
       let nativeEndpoint: string | null = null
       try { nativeEndpoint = await savedHermesEndpoint() }
@@ -777,9 +807,10 @@ export default function App() {
       const endpoint = activateEndpoint(selectRestoredEndpoint(nativeEndpoint, localStorage.getItem('hermes-mobile-active-endpoint'), 'http://127.0.0.1:9119'))
       await refresh(endpoint, true, true)
       if (active) timer = window.setInterval(() => {
+        if (document.visibilityState !== 'visible') return
         if (navigationRef.current.selected || sendingRef.current) return
         void refresh(activeEndpointRef.current, false, false)
-      }, 10_000)
+      }, 15_000)
     }
     void bootstrap()
     return () => { active = false; if (timer) window.clearInterval(timer); refreshEpochRef.current.begin() }
@@ -804,33 +835,20 @@ export default function App() {
     return () => document.removeEventListener('visibilitychange', resumeSavedConnection)
   }, [])
 
-  const lastReadCacheRef = useRef<Map<string, number>>(new Map())
+  const lastReadCacheRef = useRef<Map<string, number> | null>(null)
 
-  // Pre-warm lastRead in memory on mount to prevent synchronous disk I/O in render loops
-  useEffect(() => {
-    try {
-      if (typeof localStorage !== 'undefined') {
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i)
-          if (key && key.startsWith('hermes-last-read:')) {
-            const sid = key.slice('hermes-last-read:'.length)
-            const val = Number(localStorage.getItem(key) || 0)
-            lastReadCacheRef.current.set(sid, val)
-          }
-        }
-      }
-    } catch {}
-  }, [])
   const getLastReadTime = useCallback((sid: string): number => {
     if (!sid) return 0
-    const inMem = lastReadCacheRef.current.get(sid)
-    if (inMem !== undefined) return inMem
-    const val = Number(localStorage.getItem(`hermes-last-read:${sid}`) || 0)
-    lastReadCacheRef.current.set(sid, val)
-    return val
+    if (!lastReadCacheRef.current) {
+      lastReadCacheRef.current = initializeLastReadMap()
+    }
+    return lastReadCacheRef.current.get(sid) ?? 0
   }, [])
   const setLastReadTime = useCallback((sid: string, val: number) => {
     if (!sid) return
+    if (!lastReadCacheRef.current) {
+      lastReadCacheRef.current = initializeLastReadMap()
+    }
     lastReadCacheRef.current.set(sid, val)
     try { localStorage.setItem(`hermes-last-read:${sid}`, String(val)) } catch {}
   }, [])
