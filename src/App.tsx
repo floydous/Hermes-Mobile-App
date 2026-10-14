@@ -150,8 +150,13 @@ function resolveProfileForSessionId(
 export default function App() {
   const [tab, setTab] = useState<Tab>('bots')
   const [slideDirection, setSlideDirection] = useState<'forward' | 'backward'>('forward')
+  const switchTabRafRef = useRef<number | null>(null)
 
   const switchTab = useCallback((newTab: Tab) => {
+    if (switchTabRafRef.current != null) {
+      try { cancelAnimationFrame(switchTabRafRef.current) } catch {}
+      switchTabRafRef.current = null
+    }
     remoteLog('DEBUG', 'Navigation', `switchTab requested -> ${newTab}`)
     setTab(current => {
       if (newTab === current) return current
@@ -161,6 +166,15 @@ export default function App() {
       setSlideDirection(newIdx >= currentIdx ? 'forward' : 'backward')
       return newTab
     })
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (switchTabRafRef.current != null) {
+        try { cancelAnimationFrame(switchTabRafRef.current) } catch {}
+        switchTabRafRef.current = null
+      }
+    }
   }, [])
   const [profiles, setProfiles] = useState<LiveProfile[]>([])
   const profilesRef = useRef<LiveProfile[]>(profiles)
@@ -1158,7 +1172,7 @@ export default function App() {
           const hasUserMsg = resolvedLoaded.some(m => m.id === currentActive.userMessage?.id || (m.role === 'user' && m.content === currentActive.userMessage?.content))
           const merged = hasUserMsg ? resolvedLoaded : [...resolvedLoaded, currentActive.userMessage]
           setMessages(deduplicateConsecutiveMessages(merged))
-        } else {
+        } else if (!isTranscriptIdentical || !existingMessages.length) {
           setMessages(deduplicateConsecutiveMessages(resolvedLoaded))
         }
         if (typeof requestAnimationFrame !== 'undefined') {
@@ -2203,7 +2217,13 @@ export default function App() {
         if (document.activeElement instanceof HTMLElement) {
           document.activeElement.blur()
         }
-        switchTab(nextTab)
+        if (switchTabRafRef.current != null) {
+          try { cancelAnimationFrame(switchTabRafRef.current) } catch {}
+        }
+        switchTabRafRef.current = requestAnimationFrame(() => {
+          switchTabRafRef.current = null
+          switchTab(nextTab)
+        })
       }
     } else {
       remoteLog('DEBUG', 'Gesture', `TouchEnd tap preserved: deltaX=${Math.round(deltaX)} deltaY=${Math.round(deltaY)} wasInteractive=${wasInteractive}`)

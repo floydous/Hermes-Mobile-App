@@ -19,9 +19,11 @@
   animation-name: app-subpage-enter;
 }
 
-/* Returning to main Roster */
+/* Main Roster shell remains perfectly stable across tab swipes */
 .app.roster-shell {
-  animation-name: app-roster-enter;
+  animation: none !important;
+  transform: none !important;
+  will-change: auto !important;
 }
 
 @keyframes app-page-enter {
