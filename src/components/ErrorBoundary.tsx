@@ -5,6 +5,7 @@ interface Props {
   children: ReactNode
   fallback?: (error: Error, reset: () => void) => ReactNode
   onReset?: () => void
+  onError?: (error: Error, errorInfo: ErrorInfo) => void
 }
 
 interface State {
@@ -20,6 +21,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('Session view error:', error, errorInfo)
+    this.props.onError?.(error, errorInfo)
   }
 
   reset = () => {

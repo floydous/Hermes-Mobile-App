@@ -32,6 +32,7 @@ import {
 } from './chat-turn'
 import { errorMessage, RequestEpoch, selectRestoredEndpoint } from './connection-state'
 import {
+  areMessageListsEqual,
   areMessageListsShallowEqual,
   calculateUnreadState,
   deduplicateConsecutiveMessages,
@@ -333,6 +334,7 @@ export default function App() {
       if (navigation.profileSheet) { setProfileSheet(false); return true }
       if (navigation.selected) {
         remoteLog('DEBUG', 'Navigation', `Hardware back pressed: leaving session ${selectedRef.current?.id || 'unknown'}`)
+        cancelPendingCachedHydration()
         setSelected(null)
         return true
       }
@@ -461,7 +463,7 @@ export default function App() {
       if (shouldWarmUp) {
         // Stagger background warm-up so we don't saturate the network/tunnel
         window.setTimeout(() => {
-          if (!refreshEpochRef.current.isCurrent(epoch)) return
+          if (!refreshEpochRef.current.isCurrent(epoch) || selectedRef.current !== null) return
           const candidates = [
             ...data.profiles.map(p => p.canonical_session ? { id: resolveCanonicalSessionId(p.canonical_session), profile: p.name } : null).filter((item): item is { id: string; profile: string } => Boolean(item?.id)),
             ...data.sessions.slice(0, 8).map(s => ({ id: s.id, profile: s.profile })),
@@ -470,11 +472,12 @@ export default function App() {
             if (!candidate?.id || messageCacheRef.current.has(candidate.id)) return
             const delay = idx < 2 ? 0 : (idx - 1) * 200
             window.setTimeout(() => {
-              if (!refreshEpochRef.current.isCurrent(epoch)) return
+              if (!refreshEpochRef.current.isCurrent(epoch) || selectedRef.current !== null) return
               void loadMessages(candidate.id, candidate.profile, endpoint).then(msgs => {
                 const existing = messageCacheRef.current.get(candidate.id) || []
                 const isTurnActive = Boolean(activeTurnsRef.current[candidate.profile] || activeInFlightTurnsRef.current.has(candidate.profile))
                 if (shouldRetainLocalMessages(msgs, existing, isTurnActive)) return
+                if (areMessageListsEqual(existing, msgs)) return
                 messageCacheRef.current.set(candidate.id, msgs)
                 setCachedSessionMessages(candidate.id, msgs)
               }).catch(() => {})
@@ -483,7 +486,7 @@ export default function App() {
 
           // Pre-warm scheduled tasks so swiping to Tasks is instantaneous with zero delay
           window.setTimeout(() => {
-            if (!refreshEpochRef.current.isCurrent(epoch)) return
+            if (!refreshEpochRef.current.isCurrent(epoch) || selectedRef.current !== null) return
             void preloadTaskJobs(endpoint, data.profiles)
           }, 80)
         }, 50)
@@ -889,8 +892,30 @@ export default function App() {
   }, [sessions, canonicalSessionIds, activeTurns, selected?.id, query])
   const profileMap = useMemo(() => new Map(profiles.map(p => [p.name, p])), [profiles])
   const [openingSessionId, setOpeningSessionId] = useState<string | null>(null)
+  const cachedHydrationRafRef = useRef<number | null>(null)
+  const cachedHydrationTimerRef = useRef<number | null>(null)
+  const hydrationTokenRef = useRef<number>(0)
+  const networkLoadedRequestIdRef = useRef<number>(0)
+
+  const cancelPendingCachedHydration = useCallback(() => {
+    hydrationTokenRef.current++
+    if (cachedHydrationRafRef.current != null) {
+      try { cancelAnimationFrame(cachedHydrationRafRef.current) } catch {}
+      cachedHydrationRafRef.current = null
+    }
+    if (cachedHydrationTimerRef.current != null) {
+      try { window.clearTimeout(cachedHydrationTimerRef.current) } catch {}
+      cachedHydrationTimerRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    return () => cancelPendingCachedHydration()
+  }, [cancelPendingCachedHydration])
 
   const openSession = useCallback((session: LiveSession, latestUsage?: LiveUsage): Promise<void> => {
+    cancelPendingCachedHydration()
+    const hydrationToken = ++hydrationTokenRef.current
     const safeSession: LiveSession = {
       ...session,
       profile: session.profile || 'default',
@@ -997,18 +1022,30 @@ export default function App() {
       } else {
         setMessages(cached || [])
       }
-    } else if (cached !== undefined) {
-      setMessages(cached)
-      setSending(false)
-      setStreaming('')
-      setToolActivities([])
-      setConversationLoading(false)
     } else {
-      setMessages([])
+      // Instant transition on Frame 0: Mount ChatView immediately with skeleton loading (<16ms)
       setSending(false)
       setStreaming('')
       setToolActivities([])
       setConversationLoading(!safeSession.id.startsWith('draft:'))
+      setMessages([])
+
+      // If cached messages exist, yield to the browser event loop to paint the skeleton screen first,
+      // then populate the cached messages in the very next animation frame
+      if (cached && cached.length > 0) {
+        cachedHydrationRafRef.current = requestAnimationFrame(() => {
+          cachedHydrationTimerRef.current = (window.setTimeout(() => {
+            cachedHydrationTimerRef.current = null
+            cachedHydrationRafRef.current = null
+            // Safety: verify hydration generation, session identity, and network non-supersedence
+            if (hydrationTokenRef.current !== hydrationToken) return
+            if (sessionLoadRef.current !== requestId || selectedRef.current?.id !== safeSession.id) return
+            if (networkLoadedRequestIdRef.current === requestId) return
+            setMessages(cached!)
+            setConversationLoading(false)
+          }, 0) as unknown) as number
+        })
+      }
     }
 
     // Rebind session on gateway to retrieve any in-flight open_requests (e.g. clarify from background run)
@@ -1019,6 +1056,8 @@ export default function App() {
         const loaded = await loadMessages(safeSession.id, safeSession.profile, activeEndpointRef.current)
         recordTracePhase(perfTraceId, 'network_load', { loadedCount: loaded.length })
         if (requestId !== sessionLoadRef.current) return
+        networkLoadedRequestIdRef.current = requestId
+        cancelPendingCachedHydration()
         const latestAssistant = latestUsage ? [...loaded].reverse().findIndex(message => message.role === 'assistant') : -1
         const resolvedLoaded = latestAssistant >= 0 ? loaded.map((message, index) => index === loaded.length - latestAssistant - 1 ? { ...message, usage: latestUsage } : message) : loaded
 
@@ -2465,7 +2504,10 @@ export default function App() {
     <NavIsland tab={tab} setTab={switchTab}/>
   </main>
   {selected && (
-    <ErrorBoundary onReset={() => setSelected(null)}>
+    <ErrorBoundary
+      onError={cancelPendingCachedHydration}
+      onReset={() => { cancelPendingCachedHydration(); setSelected(null) }}
+    >
       <ChatView
         key={selected.id}
         session={selected}
@@ -2477,7 +2519,11 @@ export default function App() {
         sending={sending}
         toolActivities={toolActivities}
         error={error}
-        back={() => { remoteLog('DEBUG', 'Navigation', `Chat chevron back tapped from ${selected.id}`); setSelected(null) }}
+        back={() => {
+          cancelPendingCachedHydration()
+          remoteLog('DEBUG', 'Navigation', `Chat chevron back tapped from ${selected.id}`)
+          setSelected(null)
+        }}
         refresh={() => void openSession(selected)}
         clearChat={() => handleClearChat(selected)}
         openProfile={() => setProfileSheet(true)}
