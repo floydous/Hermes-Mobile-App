@@ -93,7 +93,6 @@ describe('Progressive Message Windowing Algorithm & Top Offset Tracking', () => 
       isFollowing: true,
       scrollTop: 0,
       loadingEarlier: false,
-      pullRefreshing: false,
     })).toBe(false)
 
     // 2. Initial mount when initialized=true but initial bottom scroll hasn't settled: must NOT auto-reveal
@@ -103,7 +102,6 @@ describe('Progressive Message Windowing Algorithm & Top Offset Tracking', () => 
       isFollowing: true,
       scrollTop: 0,
       loadingEarlier: false,
-      pullRefreshing: false,
     })).toBe(false)
 
     // 3. Settled at bottom (isFollowing = true), even if scrollTop < 140 in short transcript: must NOT auto-reveal
@@ -113,7 +111,6 @@ describe('Progressive Message Windowing Algorithm & Top Offset Tracking', () => 
       isFollowing: true,
       scrollTop: 50,
       loadingEarlier: false,
-      pullRefreshing: false,
     })).toBe(false)
 
     // 4. User deliberately scrolled UP near top (isFollowing = false, scrollTop = 100 < 140): MUST auto-reveal
@@ -123,7 +120,6 @@ describe('Progressive Message Windowing Algorithm & Top Offset Tracking', () => 
       isFollowing: false,
       scrollTop: 100,
       loadingEarlier: false,
-      pullRefreshing: false,
     })).toBe(true)
 
     // 5. User scrolled mid-transcript (scrollTop = 400 >= 140): must NOT auto-reveal
@@ -133,7 +129,6 @@ describe('Progressive Message Windowing Algorithm & Top Offset Tracking', () => 
       isFollowing: false,
       scrollTop: 400,
       loadingEarlier: false,
-      pullRefreshing: false,
     })).toBe(false)
 
     // 6. Already loading earlier: must NOT auto-reveal
@@ -143,17 +138,6 @@ describe('Progressive Message Windowing Algorithm & Top Offset Tracking', () => 
       isFollowing: false,
       scrollTop: 50,
       loadingEarlier: true,
-      pullRefreshing: false,
-    })).toBe(false)
-
-    // 7. Pull-refresh active: must NOT auto-reveal
-    expect(shouldAutoRevealEarlierMessages({
-      initialized: true,
-      initialScrolledToBottom: true,
-      isFollowing: false,
-      scrollTop: 50,
-      loadingEarlier: false,
-      pullRefreshing: true,
     })).toBe(false)
   })
 
@@ -163,7 +147,6 @@ describe('Progressive Message Windowing Algorithm & Top Offset Tracking', () => 
     let initialScrolledToBottom = false
     let isFollowing = true
     let loadingEarlier = false
-    let pullRefreshing = false
     let scrollTop = 0
 
     // Mount scroll event fired by browser at top
@@ -173,7 +156,6 @@ describe('Progressive Message Windowing Algorithm & Top Offset Tracking', () => 
       isFollowing,
       scrollTop,
       loadingEarlier,
-      pullRefreshing,
     })).toBe(false)
 
     // Stage 2: Initial scrollToBottom executes and settles
@@ -187,7 +169,6 @@ describe('Progressive Message Windowing Algorithm & Top Offset Tracking', () => 
       isFollowing,
       scrollTop,
       loadingEarlier,
-      pullRefreshing,
     })).toBe(false)
 
     // Stage 3: User drags/scrolls upwards towards middle
@@ -199,7 +180,6 @@ describe('Progressive Message Windowing Algorithm & Top Offset Tracking', () => 
       isFollowing,
       scrollTop,
       loadingEarlier,
-      pullRefreshing,
     })).toBe(false)
 
     // Stage 4: User scrolls near the top (< 140)
@@ -210,10 +190,9 @@ describe('Progressive Message Windowing Algorithm & Top Offset Tracking', () => 
       isFollowing,
       scrollTop,
       loadingEarlier,
-      pullRefreshing,
     })).toBe(true)
 
-    // Stage 5: While fetching earlier page, auto-reveal locks to prevent duplicate calls
+    // Stage 5: Fetch in flight
     loadingEarlier = true
     expect(shouldAutoRevealEarlierMessages({
       initialized,
@@ -221,7 +200,6 @@ describe('Progressive Message Windowing Algorithm & Top Offset Tracking', () => 
       isFollowing,
       scrollTop,
       loadingEarlier,
-      pullRefreshing,
     })).toBe(false)
   })
 

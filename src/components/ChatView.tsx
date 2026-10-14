@@ -61,7 +61,6 @@ export function shouldAutoRevealEarlierMessages({
   isFollowing,
   scrollTop,
   loadingEarlier,
-  pullRefreshing = false,
   threshold = 140,
 }: {
   initialized: boolean
@@ -69,14 +68,12 @@ export function shouldAutoRevealEarlierMessages({
   isFollowing: boolean
   scrollTop: number
   loadingEarlier: boolean
-  pullRefreshing?: boolean
   threshold?: number
 }): boolean {
   if (!initialized) return false
   if (!initialScrolledToBottom) return false
   if (isFollowing) return false
   if (loadingEarlier) return false
-  if (pullRefreshing) return false
   return scrollTop < threshold
 }
 
