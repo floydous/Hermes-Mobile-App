@@ -1164,7 +1164,14 @@ export default function App() {
         } else {
           setMessages(deduplicateConsecutiveMessages(resolvedLoaded))
         }
-        finishPerformanceTrace(perfTraceId, 'settle', { totalMessages: resolvedLoaded.length })
+        if (typeof requestAnimationFrame !== 'undefined') {
+          requestAnimationFrame(() => {
+            recordTracePhase(perfTraceId, 'transcript_render', { renderedCount: resolvedLoaded.length })
+            finishPerformanceTrace(perfTraceId, 'settle', { totalMessages: resolvedLoaded.length })
+          })
+        } else {
+          finishPerformanceTrace(perfTraceId, 'settle', { totalMessages: resolvedLoaded.length })
+        }
       }
       catch (reason) {
         if (requestId === sessionLoadRef.current) {
@@ -1749,6 +1756,10 @@ export default function App() {
       })
       finalText = finalOutput
       completionUsage = usage
+      recordTracePhase(perfTraceId, 'stream_generation', {
+        totalTokens: completionUsage?.total,
+        completionLength: finalText.length,
+      })
       recentEndedTurnsRef.current.set(finalSessionId, Date.now())
       recentEndedTurnsRef.current.set(turnSessionId, Date.now())
       if (isCanonical) {
