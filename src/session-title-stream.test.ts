@@ -270,4 +270,48 @@ describe('session title event resolution and TDZ safety', () => {
     expect(sessions[0].title).toBe('TKA Schedule Analysis')
     expect(sessions[1].id).toBe('other')
   })
+
+  it('guarantees onDelta accumulates stream text monotonically without rewinding to single-word chunks', async () => {
+    const deltasReceived: string[] = []
+
+    vi.spyOn(HermesGatewayClient.prototype, 'resumeSession').mockResolvedValue('server-session-99')
+    vi.spyOn(HermesGatewayClient.prototype, 'submitPrompt').mockImplementation(async function(this: any, _sid, _text, listener) {
+      listener({ type: 'message.delta', payload: { text: 'The ' }, terminal: false })
+      listener({ type: 'message.delta', payload: { text: 'quick ' }, terminal: false })
+      listener({ type: 'message.delta', payload: { text: 'brown ' }, terminal: false })
+      listener({ type: 'message.delta', payload: { text: 'fox' }, terminal: false })
+      listener({ type: 'message.complete', payload: { text: 'The quick brown fox' }, terminal: true })
+    })
+
+    const { finalText } = await executeTurnSubmissionPipeline({
+      turnSessionId: 'sess-1',
+      turnProfile: 'default',
+      prompt: 'tell a story',
+      activeEndpoint: 'http://127.0.0.1:9876',
+      connectAndSubmitFn: connectAndSubmit,
+      onDelta: text => {
+        deltasReceived.push(text)
+      },
+      onComplete: () => {},
+      onToolStart: () => {},
+      onToolComplete: () => {},
+      onTitleUpdate: () => {},
+      onSessionsUpdate: () => {},
+      onSelectedIdUpdate: () => {},
+      onError: () => {},
+    })
+
+    expect(finalText).toBe('The quick brown fox')
+    expect(deltasReceived).toEqual([
+      'The ',
+      'The quick ',
+      'The quick brown ',
+      'The quick brown fox',
+    ])
+    // Every consecutive delta must strictly contain and extend the previous delta
+    for (let i = 1; i < deltasReceived.length; i++) {
+      expect(deltasReceived[i].startsWith(deltasReceived[i - 1])).toBe(true)
+      expect(deltasReceived[i].length).toBeGreaterThan(deltasReceived[i - 1].length)
+    }
+  })
 })

@@ -575,15 +575,22 @@ export default function App() {
         const sid = event.sessionId || ''
         const prof = resolveProfileForSessionId(sid, profilesRef.current, sessionsRef.current, activeTurnsRef.current)
         if (sid && typeof event.payload.text === 'string') {
-          if (activeTurnsRef.current[sid]) {
-            activeTurnsRef.current[sid].streamingText = event.payload.text
-          }
-          if (prof && activeTurnsRef.current[prof]) {
-            activeTurnsRef.current[prof].streamingText = event.payload.text
-          }
-          scheduleThrottledTurnPersistence()
-          if (doesSessionMatchTurn(selectedRef.current, sid, prof || '', profilesRef.current, id => getResolvedSessionId(id, activeEndpointRef.current), adhocSessionIdsRef.current)) {
-            scheduleCoalescedStreaming(event.payload.text)
+          // If this session is actively being driven by local turn submission pipeline,
+          // submitPrompt's onDelta manages accumulated streaming state
+          const isLocallyDriven = activeInFlightTurnsRef.current.has(sid) || (prof ? activeInFlightTurnsRef.current.has(prof) : false)
+          if (!isLocallyDriven) {
+            const currentAccumulated = activeTurnsRef.current[sid]?.streamingText || (prof ? activeTurnsRef.current[prof]?.streamingText : '') || ''
+            const nextAccumulated = currentAccumulated + event.payload.text
+            if (activeTurnsRef.current[sid]) {
+              activeTurnsRef.current[sid].streamingText = nextAccumulated
+            }
+            if (prof && activeTurnsRef.current[prof]) {
+              activeTurnsRef.current[prof].streamingText = nextAccumulated
+            }
+            scheduleThrottledTurnPersistence()
+            if (doesSessionMatchTurn(selectedRef.current, sid, prof || '', profilesRef.current, id => getResolvedSessionId(id, activeEndpointRef.current), adhocSessionIdsRef.current)) {
+              scheduleCoalescedStreaming(nextAccumulated)
+            }
           }
         }
       }
