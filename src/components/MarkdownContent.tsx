@@ -20,7 +20,7 @@ import {
 } from 'lucide-react'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import Markdown from 'react-markdown'
-import rehypeHighlight from 'rehype-highlight'
+import hljs from 'highlight.js/lib/common'
 import rehypeKatex from 'rehype-katex'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
@@ -1093,26 +1093,124 @@ function normalizeLatex(text: string): string {
     .join('')
 }
 
-function CodeBlock({ className, children }: { className?: string; children: ReactNode }) {
-  const [copied, setCopied] = useState(false)
-  const value = String(children).replace(/\n$/, '')
-  const language = className?.match(/language-([\w-]+)/)?.[1] || 'code'
-  const copy = async () => {
-    await navigator.clipboard.writeText(value)
-    setCopied(true)
-    window.setTimeout(() => setCopied(false), 1600)
+const MAX_HIGHLIGHT_CACHE_ENTRIES = 150
+const MAX_CODE_BLOCK_CHARS = 50 * 1024 // 50K characters max per snippet
+const HIGHLIGHT_CACHE = new Map<string, string>()
+
+export function getCachedHighlightedCode(lang: string, code: string): string | undefined {
+  if (code.length > MAX_CODE_BLOCK_CHARS) return undefined
+  const key = `${lang}\0${code}`
+  const val = HIGHLIGHT_CACHE.get(key)
+  if (val !== undefined) {
+    HIGHLIGHT_CACHE.delete(key)
+    HIGHLIGHT_CACHE.set(key, val)
   }
-  return <div className="code-block"><div className="code-head"><span>{language}</span><button onClick={() => void copy()} aria-label="Copy code">{copied ? <><Check size={13}/> Copied</> : <><Copy size={13}/> Copy</>}</button></div><pre><code className={className}>{children}</code></pre></div>
+  return val
+}
+
+export function setCachedHighlightedCode(lang: string, code: string, html: string): void {
+  if (code.length > MAX_CODE_BLOCK_CHARS) return
+  const key = `${lang}\0${code}`
+  if (HIGHLIGHT_CACHE.size >= MAX_HIGHLIGHT_CACHE_ENTRIES) {
+    const oldestKey = HIGHLIGHT_CACHE.keys().next().value
+    if (oldestKey) HIGHLIGHT_CACHE.delete(oldestKey)
+  }
+  HIGHLIGHT_CACHE.set(key, html)
+}
+
+export function resetHighlightCacheForTesting(): void {
+  HIGHLIGHT_CACHE.clear()
+}
+
+export async function copyCodeText(rawCode: string): Promise<boolean> {
+  if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+    return false
+  }
+  try {
+    await navigator.clipboard.writeText(rawCode)
+    return true
+  } catch {
+    return false
+  }
+}
+
+export function CodeBlock({ className, children }: { className?: string; children: ReactNode }) {
+  const [copied, setCopied] = useState(false)
+  const rawCode = typeof children === 'string' ? children.replace(/\n$/, '') : String(children ?? '').replace(/\n$/, '')
+  const language = className?.match(/language-([\w-]+)/)?.[1]?.toLowerCase() || ''
+  const displayLang = language || 'code'
+
+  const cachedHtml = language ? getCachedHighlightedCode(language, rawCode) : undefined
+  const [highlightedHtml, setHighlightedHtml] = useState<string | undefined>(cachedHtml)
+
+  const copy = async () => {
+    const success = await copyCodeText(rawCode)
+    if (success) {
+      setCopied(true)
+      globalThis.setTimeout(() => setCopied(false), 1600)
+    }
+  }
+
+  useEffect(() => {
+    if (!language || highlightedHtml) return
+    if (!hljs.getLanguage(language)) return
+
+    let cancelled = false
+    let timerId: number | undefined
+    let idleId: number | undefined
+
+    const runHighlight = () => {
+      if (cancelled) return
+      try {
+        const result = hljs.highlight(rawCode, { language, ignoreIllegals: true })
+        if (!cancelled && result?.value) {
+          setCachedHighlightedCode(language, rawCode, result.value)
+          setHighlightedHtml(result.value)
+        }
+      } catch {}
+    }
+
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      idleId = (window as any).requestIdleCallback(runHighlight, { timeout: 120 })
+    } else {
+      timerId = globalThis.setTimeout(runHighlight, 60) as unknown as number
+    }
+
+    return () => {
+      cancelled = true
+      if (timerId != null) globalThis.clearTimeout(timerId)
+      if (idleId != null && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
+        (window as any).cancelIdleCallback(idleId)
+      }
+    }
+  }, [language, rawCode, highlightedHtml])
+
+  return (
+    <div className="code-block">
+      <div className="code-head">
+        <span>{displayLang}</span>
+        <button onClick={() => void copy()} aria-label="Copy code">
+          {copied ? <><Check size={13}/> Copied</> : <><Copy size={13}/> Copy</>}
+        </button>
+      </div>
+      <pre>
+        {highlightedHtml ? (
+          <code className={className} dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
+        ) : (
+          <code className={className}>{rawCode}</code>
+        )}
+      </pre>
+    </div>
+  )
 }
 
 const STANDARD_REMARK_PLUGINS = [remarkGfm]
-const STANDARD_REHYPE_PLUGINS = [rehypeHighlight]
+const EMPTY_REHYPE_PLUGINS: any[] = []
+const STANDARD_REHYPE_PLUGINS: any[] = EMPTY_REHYPE_PLUGINS
 
 const MATH_REMARK_PLUGINS = [remarkGfm, remarkMath]
-const MATH_REHYPE_PLUGINS = [rehypeHighlight, rehypeKatex]
-
-const EMPTY_REHYPE_PLUGINS: any[] = []
 const MATH_ONLY_REHYPE_PLUGINS = [rehypeKatex]
+const MATH_REHYPE_PLUGINS = MATH_ONLY_REHYPE_PLUGINS
 
 export function hasCodeContent(text: string): boolean {
   if (!text) return false

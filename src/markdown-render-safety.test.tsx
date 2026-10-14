@@ -2,16 +2,23 @@ import { describe, expect, it } from 'vitest'
 import { renderToString } from 'react-dom/server'
 import React from 'react'
 
-import { isPlainTextMessage, MarkdownContent } from './components/MarkdownContent'
+import { isPlainTextMessage, MarkdownContent, setCachedHighlightedCode } from './components/MarkdownContent'
 
 describe('Markdown Content Rendering Safety & Syntax Highlighting', () => {
   it('renders and highlights standard backtick-fenced code blocks', () => {
-    const markdown = '```js\nconst greeting = "hello";\nconsole.log(greeting);\n```'
-    const html = renderToString(<MarkdownContent>{markdown}</MarkdownContent>)
+    const code = 'const greeting = "hello";\nconsole.log(greeting);'
+    const markdown = '```js\n' + code + '\n```'
+    const htmlPlain = renderToString(<MarkdownContent>{markdown}</MarkdownContent>)
 
-    expect(html).toContain('code-block')
-    expect(html).toContain('language-js')
-    expect(html).toContain('hljs')
+    expect(htmlPlain).toContain('code-block')
+    expect(htmlPlain).toContain('language-js')
+    expect(htmlPlain).toContain('const greeting')
+
+    // Test with pre-cached syntax highlighting
+    setCachedHighlightedCode('js', code, '<span class="hljs-keyword">const</span> greeting = <span class="hljs-string">"hello"</span>;')
+    const htmlCached = renderToString(<MarkdownContent>{markdown}</MarkdownContent>)
+    expect(htmlCached).toContain('code-block')
+    expect(htmlCached).toContain('hljs-keyword')
   })
 
   it('renders and highlights tilde-fenced code blocks (~~~)', () => {
@@ -20,7 +27,7 @@ describe('Markdown Content Rendering Safety & Syntax Highlighting', () => {
 
     expect(html).toContain('code-block')
     expect(html).toContain('language-python')
-    expect(html).toContain('hljs')
+    expect(html).toContain('def hello()')
   })
 
   it('renders and highlights code blocks nested inside blockquotes', () => {
@@ -29,7 +36,7 @@ describe('Markdown Content Rendering Safety & Syntax Highlighting', () => {
 
     expect(htmlQuoted).toContain('code-block')
     expect(htmlQuoted).toContain('language-python')
-    expect(htmlQuoted).toContain('hljs')
+    expect(htmlQuoted).toContain('def hello()')
 
     const indentedCode = 'Section header:\n\n    const answer = 42;'
     const htmlIndented = renderToString(<MarkdownContent>{indentedCode}</MarkdownContent>)

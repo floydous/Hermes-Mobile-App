@@ -12,7 +12,16 @@ import {
 } from './session-cache'
 import { initializeLastReadMap, resetLastReadMapForTesting } from './App'
 import { cleanPreviewSnippet } from './live-model'
-import { MessageCard, MarkdownContent, getUiZoomFactor } from './components/MarkdownContent'
+import {
+  MessageCard,
+  MarkdownContent,
+  CodeBlock,
+  copyCodeText,
+  getCachedHighlightedCode,
+  setCachedHighlightedCode,
+  resetHighlightCacheForTesting,
+  getUiZoomFactor,
+} from './components/MarkdownContent'
 import { SmoothStreamingView } from './components/SmoothStreamingView'
 import { ChatView } from './components/ChatView'
 import { shouldRetainLocalMessages } from './chat-turn'
@@ -765,6 +774,95 @@ User asked (deterministic, from compacted turns): '[Lalo Ehrmantraut] Rombak ula
         ;(globalThis as any).localStorage = origStorage
         resetLastReadMapForTesting()
       }
+    })
+  })
+
+  describe('Item 4: Leaf-Level Deferred Code Highlighting & LRU Cache', () => {
+    it('manages LRU cache correctly with promotion on hit and eviction at capacity', () => {
+      resetHighlightCacheForTesting()
+      // Set 150 items
+      for (let i = 0; i < 150; i++) {
+        setCachedHighlightedCode('ts', `code_${i}`, `<span>code_${i}</span>`)
+      }
+      expect(getCachedHighlightedCode('ts', 'code_0')).toBe('<span>code_0</span>')
+      // Promote code_1
+      getCachedHighlightedCode('ts', 'code_1')
+      // Add one more: should evict oldest (which is code_2 since code_0 and code_1 were promoted/accessed)
+      setCachedHighlightedCode('ts', 'code_150', '<span>code_150</span>')
+      expect(getCachedHighlightedCode('ts', 'code_150')).toBe('<span>code_150</span>')
+      expect(getCachedHighlightedCode('ts', 'code_1')).toBe('<span>code_1</span>')
+      expect(getCachedHighlightedCode('ts', 'code_2')).toBeUndefined() // Evicted!
+      resetHighlightCacheForTesting()
+    })
+
+    it('renders CodeBlock with exact raw code and copies pure plain text via copyCodeText', async () => {
+      resetHighlightCacheForTesting()
+      const raw = 'const x: number = 42;\nconsole.log(x);'
+
+      // Render CodeBlock to verify output structure and clean text
+      const html = renderToString(
+        <CodeBlock className="language-typescript">
+          {raw}
+        </CodeBlock>
+      )
+      expect(html).toContain('code-block')
+      expect(html).toContain('typescript')
+      expect(html).toContain('const x: number = 42;')
+      expect(html).toContain('Copy code')
+      expect(html).not.toContain('[object Object]')
+
+      // Test copyCodeText clipboard interaction
+      const writeTextSpy = vi.fn().mockResolvedValue(undefined)
+      const origClipboard = globalThis.navigator?.clipboard
+      Object.defineProperty(globalThis.navigator, 'clipboard', {
+        value: { writeText: writeTextSpy },
+        configurable: true,
+      })
+
+      try {
+        const success = await copyCodeText(raw)
+        expect(success).toBe(true)
+        expect(writeTextSpy).toHaveBeenCalledTimes(1)
+        expect(writeTextSpy).toHaveBeenCalledWith(raw)
+        expect(writeTextSpy).toHaveBeenCalledWith('const x: number = 42;\nconsole.log(x);')
+
+        // Test clipboard failure fallback
+        writeTextSpy.mockRejectedValueOnce(new Error('Permission denied'))
+        const fail = await copyCodeText(raw)
+        expect(fail).toBe(false)
+
+        // Test clipboard completely absent/undefined
+        Object.defineProperty(globalThis.navigator, 'clipboard', {
+          value: undefined,
+          configurable: true,
+        })
+        const absentFail = await copyCodeText(raw)
+        expect(absentFail).toBe(false)
+      } finally {
+        Object.defineProperty(globalThis.navigator, 'clipboard', {
+          value: origClipboard,
+          configurable: true,
+        })
+      }
+    })
+
+    it('skips caching for oversized code blocks exceeding 50K characters', () => {
+      resetHighlightCacheForTesting()
+      const hugeCode = 'x'.repeat(55 * 1024)
+      setCachedHighlightedCode('ts', hugeCode, '<span>huge</span>')
+      expect(getCachedHighlightedCode('ts', hugeCode)).toBeUndefined()
+    })
+
+    it('safely handles unknown and unsupported language labels without crashing', () => {
+      const raw = 'unknown syntax code block'
+      const html = renderToString(
+        <CodeBlock className="language-nonexistentlang123">
+          {raw}
+        </CodeBlock>
+      )
+      expect(html).toContain('code-block')
+      expect(html).toContain('nonexistentlang123')
+      expect(html).toContain('unknown syntax code block')
     })
   })
 })
