@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, startTransition } from 'react'
 import { Bot, CalendarClock, ListTodo, MessageSquare, Plus, RefreshCw, Search, Settings as SettingsIcon, Users, X } from 'lucide-react'
 
 import { ChatView } from './components/ChatView'
@@ -375,8 +375,20 @@ export default function App() {
       const backEvent = new Event('hermes-mobile-back', { cancelable: true })
       window.dispatchEvent(backEvent)
       if (backEvent.defaultPrevented) return true
+
+      const hadPendingIntent = Boolean(openingSessionIdRef.current)
+      sessionLoadRef.current++
+      navigationIntentRef.current++
+      openingSessionIdRef.current = null
+      setOpeningSessionId(null)
+      setConversationLoading(false)
+
       const navigation = navigationRef.current
       if (navigation.profileSheet) { setProfileSheet(false); return true }
+      if (hadPendingIntent) {
+        remoteLog('DEBUG', 'Navigation', `Back pressed while opening: cancelled pending open`)
+        return true
+      }
       if (navigation.selected) {
         remoteLog('DEBUG', 'Navigation', `Hardware back pressed: leaving session ${selectedRef.current?.id || 'unknown'}`)
         cancelPendingCachedHydration()
@@ -849,13 +861,29 @@ export default function App() {
     }
     return lastReadCacheRef.current.get(sid) ?? 0
   }, [])
+  const pendingLastReadTimersRef = useRef<Map<string, number>>(new Map())
   const setLastReadTime = useCallback((sid: string, val: number) => {
     if (!sid) return
     if (!lastReadCacheRef.current) {
       lastReadCacheRef.current = initializeLastReadMap()
     }
     lastReadCacheRef.current.set(sid, val)
-    try { localStorage.setItem(`hermes-last-read:${sid}`, String(val)) } catch {}
+    const existing = pendingLastReadTimersRef.current.get(sid)
+    if (existing != null) globalThis.clearTimeout(existing)
+    const timer = globalThis.setTimeout(() => {
+      pendingLastReadTimersRef.current.delete(sid)
+      try { localStorage.setItem(`hermes-last-read:${sid}`, String(val)) } catch {}
+    }, 100) as unknown as number
+    pendingLastReadTimersRef.current.set(sid, timer)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      for (const timer of pendingLastReadTimersRef.current.values()) {
+        globalThis.clearTimeout(timer)
+      }
+      pendingLastReadTimersRef.current.clear()
+    }
   }, [])
 
   const canonicalSessionIds = useMemo(() => {
@@ -948,6 +976,9 @@ export default function App() {
   const profileMap = useMemo(() => new Map(profiles.map(p => [p.name, p])), [profiles])
   const sessionOpenTraceMapRef = useRef<Map<string, string>>(new Map())
   const [openingSessionId, setOpeningSessionId] = useState<string | null>(null)
+  const openingSessionIdRef = useRef<string | null>(openingSessionId)
+  openingSessionIdRef.current = openingSessionId
+  const navigationIntentRef = useRef(0)
   const cachedHydrationRafRef = useRef<number | null>(null)
   const cachedHydrationTimerRef = useRef<number | null>(null)
   const hydrationTokenRef = useRef<number>(0)
@@ -966,7 +997,10 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    return () => cancelPendingCachedHydration()
+    return () => {
+      navigationIntentRef.current++
+      cancelPendingCachedHydration()
+    }
   }, [cancelPendingCachedHydration])
 
   const openSession = useCallback((session: LiveSession, latestUsage?: LiveUsage): Promise<void> => {
@@ -1034,12 +1068,6 @@ export default function App() {
       }
     } catch {}
 
-    // Synchronously mount ChatView on Frame 0 so the screen transitions in 0ms without freezing
-    const tDispatchStart = performance.now()
-    setSelected(safeSession)
-    recordTracePhase(perfTraceId, 'selection_dispatch_end', {
-      dispatchMs: Math.round((performance.now() - tDispatchStart) * 100) / 100,
-    })
     const adhocSet = new Set(sessionsRef.current.map(s => s.id))
     const matchingClarify = resolveMatchingClarify({
       session: safeSession,
@@ -1050,11 +1078,6 @@ export default function App() {
       getPersistedClarify,
       adhocSessionIds: adhocSet,
     })
-    setPendingClarify(matchingClarify)
-    setProfileSheet(false)
-    setSettledAssistant(null)
-    setError('')
-
     const isTurnInFlight = Boolean(
       (isCanonical && (
         activeInFlightTurnsRef.current.has(safeSession.profile) ||
@@ -1064,28 +1087,42 @@ export default function App() {
     )
     const isCachedSettled = isTurnSettledByTranscript(activeTurn, cached, isTurnInFlight)
 
-    if (matchingClarify || shouldShowWorkingIndicator(activeTurn, isCachedSettled)) {
-      setSending(true)
-      setStreaming(activeTurn?.streamingText || '')
-      setToolActivities(activeTurn?.toolActivities || [])
-      setConversationLoading(false)
-      if (activeTurn?.userMessage) {
-        if (isOptimisticUserMessageAlreadyCached(cached, activeTurn.userMessage)) {
-          setMessages(cached || [])
-        } else {
-          setMessages(cached ? [...cached, activeTurn.userMessage] : [activeTurn.userMessage])
-        }
-      } else {
-        setMessages(cached || [])
+    if (sessionLoadRef.current !== requestId) return Promise.resolve()
+    // Mount ChatView via startTransition so the browser never blocks on the view commit
+    const tDispatchStart = performance.now()
+    startTransition(() => {
+      if (sessionLoadRef.current !== requestId) return
+      setSelected(current => (sessionLoadRef.current !== requestId ? current : safeSession))
+      setOpeningSessionId(current => (sessionLoadRef.current !== requestId ? current : null))
+      if (sessionLoadRef.current === requestId) {
+        openingSessionIdRef.current = null
       }
-    } else {
-      setSending(false)
-      setStreaming('')
-      setToolActivities([])
-      const hasCached = Boolean(cached && cached.length > 0)
-      setConversationLoading(!hasCached && !safeSession.id.startsWith('draft:'))
-      setMessages(hasCached ? cached! : [])
-    }
+      setPendingClarify(current => (sessionLoadRef.current !== requestId ? current : matchingClarify))
+      setProfileSheet(current => (sessionLoadRef.current !== requestId ? current : false))
+      setSettledAssistant(current => (sessionLoadRef.current !== requestId ? current : null))
+      setError(current => (sessionLoadRef.current !== requestId ? current : ''))
+
+      if (matchingClarify || shouldShowWorkingIndicator(activeTurn, isCachedSettled)) {
+        setSending(current => (sessionLoadRef.current !== requestId ? current : true))
+        setStreaming(current => (sessionLoadRef.current !== requestId ? current : (activeTurn?.streamingText || '')))
+        setToolActivities(current => (sessionLoadRef.current !== requestId ? current : (activeTurn?.toolActivities || [])))
+        setConversationLoading(current => (sessionLoadRef.current !== requestId ? current : false))
+        const nextMsgs = activeTurn?.userMessage
+          ? (isOptimisticUserMessageAlreadyCached(cached, activeTurn.userMessage) ? (cached || []) : (cached ? [...cached, activeTurn.userMessage] : [activeTurn.userMessage]))
+          : (cached || [])
+        setMessages(current => (sessionLoadRef.current !== requestId ? current : nextMsgs))
+      } else {
+        setSending(current => (sessionLoadRef.current !== requestId ? current : false))
+        setStreaming(current => (sessionLoadRef.current !== requestId ? current : ''))
+        setToolActivities(current => (sessionLoadRef.current !== requestId ? current : []))
+        const hasCached = Boolean(cached && cached.length > 0)
+        setConversationLoading(current => (sessionLoadRef.current !== requestId ? current : (!hasCached && !safeSession.id.startsWith('draft:'))))
+        setMessages(current => (sessionLoadRef.current !== requestId ? current : (hasCached ? cached! : [])))
+      }
+    })
+    recordTracePhase(perfTraceId, 'selection_dispatch_end', {
+      dispatchMs: Math.round((performance.now() - tDispatchStart) * 100) / 100,
+    })
 
     // Rebind session on gateway to retrieve any in-flight open_requests (e.g. clarify from background run)
     void resumeSession(safeSession.id, safeSession.profile, activeEndpointRef.current).catch(() => {})
@@ -2383,7 +2420,17 @@ export default function App() {
                       onPointerDown={handleRowPointerDown}
                       onClick={() => {
                         remoteLog('DEBUG', 'Action', `Bot row click fired on ${profile.name}`)
-                        void openBot(profile, session)
+                        const intentId = ++navigationIntentRef.current
+                        const openTargetId = session?.id || `draft:${profile.name}`
+                        openingSessionIdRef.current = openTargetId
+                        setOpeningSessionId(openTargetId)
+                        requestAnimationFrame(() => {
+                          if (navigationIntentRef.current !== intentId) return
+                          requestAnimationFrame(() => {
+                            if (navigationIntentRef.current !== intentId) return
+                            void openBot(profile, session)
+                          })
+                        })
                       }}
                     >
                     <div className="bot-avatar-wrap">
@@ -2448,7 +2495,16 @@ export default function App() {
                       onPointerDown={handleRowPointerDown}
                       onClick={() => {
                         remoteLog('DEBUG', 'Action', `Session row click fired on ${session.id}`)
-                        void openSession(session)
+                        const intentId = ++navigationIntentRef.current
+                        openingSessionIdRef.current = session.id
+                        setOpeningSessionId(session.id)
+                        requestAnimationFrame(() => {
+                          if (navigationIntentRef.current !== intentId) return
+                          requestAnimationFrame(() => {
+                            if (navigationIntentRef.current !== intentId) return
+                            void openSession(session)
+                          })
+                        })
                       }}
                     >
                       <div className="bot-avatar-wrap">
@@ -2522,6 +2578,11 @@ export default function App() {
         toolActivities={toolActivities}
         error={error}
         back={() => {
+          sessionLoadRef.current++
+          navigationIntentRef.current++
+          openingSessionIdRef.current = null
+          setOpeningSessionId(null)
+          setConversationLoading(false)
           cancelPendingCachedHydration()
           remoteLog('DEBUG', 'Navigation', `Chat chevron back tapped from ${selected.id}`)
           setSelected(null)
