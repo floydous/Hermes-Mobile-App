@@ -19,7 +19,7 @@ import type { ChangeEvent, KeyboardEvent } from 'react'
 
 import { onError as onSttError, onResult as onSttResult, onStateChange as onSttStateChange, isAvailable as sttIsAvailable, requestPermission as requestSttPermission, startListening as startSttListening, stopListening as stopSttListening } from 'tauri-plugin-stt-api'
 import { attachFile, completeSlash, loadModelOptions, setSessionModel, setSessionReasoning, type LiveProfile, type LiveSession, type ModelOptions, type SlashCompletion } from '../hermes'
-import { cacheImageDataUrl, isImagePath } from './MarkdownContent'
+import { cacheImageDataUrl, isImagePath, parseFileReference } from './MarkdownContent'
 import { BotAvatar } from './BotAvatar'
 import { applySlashCompletion } from '../slash-routing'
 import { isExpectedVoiceCleanupError, VOICE_AUTOSEND_HOLD_MS } from '../voice-input'
@@ -335,6 +335,12 @@ export const Composer = memo(function Composer({ session, profiles, sending, dra
       const uploaded = await attachFile(session.id, session.profile, { name: file.name, dataUrl })
       if (isImagePath(uploaded.name) || isImagePath(file.name)) {
         cacheImageDataUrl(uploaded.name, dataUrl)
+      }
+      if (uploaded.refText) {
+        const refPath = parseFileReference(uploaded.refText)
+        if (refPath && isImagePath(refPath)) {
+          cacheImageDataUrl(refPath, dataUrl)
+        }
       }
       setAttachments(items => items.map(item => item.id === id ? { ...item, name: uploaded.name, status: 'ready', refText: uploaded.refText, error: undefined } : item))
     } catch (reason) {

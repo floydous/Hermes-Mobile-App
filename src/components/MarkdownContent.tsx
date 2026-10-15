@@ -34,9 +34,12 @@ import { formatMessageTime, formatResponseStats } from '../message-stats'
 import { BotAvatar } from './BotAvatar'
 import { ClarifyHistoryCard } from './ClarifyCard'
 import {
+  classifyDoubleTap,
   computeDismissDelay,
   computeSwipeTransform,
+  LightboxGestureController,
   processSwipeMove,
+  shouldDismissOnBackdropClick,
   shouldDismissOnRelease,
 } from '../swipe-dismiss'
 
@@ -320,6 +323,20 @@ export function stripAttachedContextScaffolding(text: string): string {
   return clean
 }
 
+export function parseFileReference(line: string): string | null {
+  const match = line.trim().match(/^(?:📎\s*)?@file:\s*(.+?)\s*$/)
+  if (!match) return null
+  let raw = match[1].trim()
+  if (
+    (raw.startsWith('`') && raw.endsWith('`') && raw.length >= 2) ||
+    (raw.startsWith('"') && raw.endsWith('"') && raw.length >= 2) ||
+    (raw.startsWith("'") && raw.endsWith("'") && raw.length >= 2)
+  ) {
+    raw = raw.slice(1, -1).trim()
+  }
+  return raw || null
+}
+
 type MessageSegment =
   | { type: 'text'; content: string }
   | { type: 'media'; path: string }
@@ -355,7 +372,7 @@ function parseMessageSegments(text: string): MessageSegment[] {
       const attachMatch = line.trim().match(/^Attached:\s*(.+)$/)
       const userImageMatch = line.trim().match(/^\[User attached image:\s*([^\]]+)\]$/)
       const userFileMatch = line.trim().match(/^\[User attached file:\s*([^\]]+)\]$/)
-      const fileRefMatch = line.trim().match(/^@file:`([^`]+)`$/) || line.trim().match(/^📎\s*@file:`([^`]+)`$/)
+      const fileRefPath = parseFileReference(line)
 
       if (mediaMatch) {
         if (currentText.length) {
@@ -382,12 +399,12 @@ function parseMessageSegments(text: string): MessageSegment[] {
         segments.push({ type: 'attachment', path: p })
         continue
       }
-      if (fileRefMatch) {
+      if (fileRefPath) {
         if (currentText.length) {
           segments.push({ type: 'text', content: currentText.join('\n') })
           currentText = []
         }
-        segments.push({ type: 'attachment', path: fileRefMatch[1].trim() })
+        segments.push({ type: 'attachment', path: fileRefPath })
         continue
       }
     }
@@ -460,14 +477,11 @@ export function ImageLightbox({
   const [pan, setPan] = useState({ x: 0, y: 0 })
 
   const closeTimerRef = useRef<number | null>(null)
-  const startYRef = useRef<number | null>(null)
-  const startXRef = useRef<number | null>(null)
-  const isSwipeDownRef = useRef(false)
-  const initialPinchDistRef = useRef<number | null>(null)
-  const initialPinchScaleRef = useRef(1)
-  const lastTapTimeRef = useRef(0)
-  const panStartRef = useRef<{ x: number; y: number } | null>(null)
-  const initialPanRef = useRef({ x: 0, y: 0 })
+  const controllerRef = useRef<LightboxGestureController | null>(null)
+  if (!controllerRef.current) {
+    controllerRef.current = new LightboxGestureController()
+  }
+  const controller = controllerRef.current
 
   const isData = src.startsWith('data:')
   const rawFileName = rawPath
@@ -486,6 +500,7 @@ export function ImageLightbox({
   // Dismissal from top-bar X button or Escape key (subtle scale-down exit)
   const dismiss = useCallback(() => {
     if (isClosing || isGlidingOut) return
+    controller.onExplicitDismiss()
     const delay = computeDismissDelay(prefersReducedMotion())
     if (delay === 0) {
       onClose()
@@ -497,7 +512,7 @@ export function ImageLightbox({
     closeTimerRef.current = window.setTimeout(() => {
       onClose()
     }, delay)
-  }, [isClosing, isGlidingOut, onClose])
+  }, [controller, isClosing, isGlidingOut, onClose])
 
   // Dismissal from swipe-down gesture: continues gliding smoothly downwards off-screen
   const dismissViaSwipeDown = useCallback((finalDragY: number) => {
@@ -517,12 +532,27 @@ export function ImageLightbox({
     }, delay)
   }, [isClosing, isGlidingOut, onClose])
 
-  // Unconditional unmount cleanup for dismissal timers
+  // Unconditional unmount cleanup for dismissal timers and animations
   useEffect(() => {
+    const unsub = controller.subscribe(snap => {
+      setDragY(snap.dragY)
+      setIsDragging(snap.isDragging)
+      setZoomScale(snap.zoomScale)
+      setPan(snap.pan)
+      if (snap.isDismissed && !isClosing && !isGlidingOut) {
+        if (snap.dragY > 0) {
+          dismissViaSwipeDown(snap.dragY)
+        } else {
+          dismiss()
+        }
+      }
+    })
     return () => {
+      unsub()
+      controller.dispose()
       if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
     }
-  }, [])
+  }, [controller, dismiss, dismissViaSwipeDown, isClosing, isGlidingOut])
 
   useEffect(() => {
     if (prefersReducedMotion()) {
@@ -558,140 +588,48 @@ export function ImageLightbox({
     }
   }
 
-  // Double-tap or double-click to toggle zoom (1x <-> 2.5x)
-  const toggleZoom = (e: React.MouseEvent | React.TouchEvent) => {
-    e.stopPropagation()
-    if (zoomScale > 1.05) {
-      setZoomScale(1)
-      setPan({ x: 0, y: 0 })
-    } else {
-      setZoomScale(2.5)
-      setPan({ x: 0, y: 0 })
-    }
-  }
-
   const handleTouchStart = (e: React.TouchEvent) => {
     if (isClosing || isGlidingOut) return
     setIsEntering(false)
-
-    // Two-finger pinch-to-zoom
     if (e.touches.length === 2) {
       const dist = Math.hypot(
         e.touches[0].clientX - e.touches[1].clientX,
         e.touches[0].clientY - e.touches[1].clientY
       )
-      initialPinchDistRef.current = dist
-      initialPinchScaleRef.current = zoomScale
-      setIsDragging(false)
-      isSwipeDownRef.current = false
-      return
-    }
-
-    if (e.touches.length === 1) {
-      const touchX = e.touches[0].clientX
-      const touchY = e.touches[0].clientY
-      const now = Date.now()
-
-      // Double-tap detection (<300ms)
-      if (now - lastTapTimeRef.current < 300) {
-        lastTapTimeRef.current = 0
-        toggleZoom(e)
-        return
-      }
-      lastTapTimeRef.current = now
-
-      startYRef.current = touchY
-      startXRef.current = touchX
-
-      if (zoomScale > 1.05) {
-        // In zoomed mode: start panning
-        panStartRef.current = { x: touchX, y: touchY }
-        initialPanRef.current = { ...pan }
-        setIsDragging(true)
-      } else {
-        // In 1x mode: ready for swipe-down to dismiss
-        isSwipeDownRef.current = false
-        setIsDragging(false)
-      }
+      controller.onPinchStart(dist)
+    } else if (e.touches.length === 1) {
+      controller.onTouchStartOne(e.touches[0].clientX, e.touches[0].clientY)
     }
   }
 
   const handleTouchMove = (e: React.TouchEvent) => {
     if (isClosing || isGlidingOut) return
-
-    // Two-finger pinch-to-zoom handling
-    if (e.touches.length === 2 && initialPinchDistRef.current != null) {
+    if (e.touches.length === 2) {
       const dist = Math.hypot(
         e.touches[0].clientX - e.touches[1].clientX,
         e.touches[0].clientY - e.touches[1].clientY
       )
-      const ratio = dist / initialPinchDistRef.current
-      const nextScale = Math.min(4, Math.max(1, initialPinchScaleRef.current * ratio))
-      setZoomScale(nextScale)
-      if (nextScale <= 1.05) {
-        setPan({ x: 0, y: 0 })
-      }
+      controller.onPinchMove(dist)
       if (e.cancelable) e.preventDefault()
-      return
-    }
-
-    if (e.touches.length === 1) {
-      const currentX = e.touches[0].clientX
-      const currentY = e.touches[0].clientY
-
-      if (zoomScale > 1.05 && panStartRef.current) {
-        // Zoomed in: pan image freely within bounds
-        const deltaX = currentX - panStartRef.current.x
-        const deltaY = currentY - panStartRef.current.y
-        const maxPanX = (window.innerWidth * (zoomScale - 1)) / 1.8
-        const maxPanY = (window.innerHeight * (zoomScale - 1)) / 1.8
-        setPan({
-          x: Math.max(-maxPanX, Math.min(maxPanX, initialPanRef.current.x + deltaX)),
-          y: Math.max(-maxPanY, Math.min(maxPanY, initialPanRef.current.y + deltaY)),
-        })
-        if (e.cancelable) e.preventDefault()
-        return
-      }
-
-      // Not zoomed in: swipe-down to dismiss
-      if (startYRef.current != null && startXRef.current != null) {
-        const res = processSwipeMove(startXRef.current, startYRef.current, currentX, currentY, isSwipeDownRef.current)
-        if (res.active) {
-          isSwipeDownRef.current = true
-          setIsDragging(true)
-          setDragY(res.dragY)
-          if (res.shouldPreventDefault && e.cancelable) e.preventDefault()
-        }
-      }
+    } else if (e.touches.length === 1) {
+      const shouldPrevent = controller.onTouchMoveOne(
+        e.touches[0].clientX,
+        e.touches[0].clientY,
+        typeof window !== 'undefined' ? window.innerWidth : 390,
+        typeof window !== 'undefined' ? window.innerHeight : 844
+      )
+      if (shouldPrevent && e.cancelable) e.preventDefault()
     }
   }
 
   const handleTouchEnd = () => {
     if (isClosing || isGlidingOut) return
-    initialPinchDistRef.current = null
-    panStartRef.current = null
-
-    if (zoomScale <= 1.05 && isSwipeDownRef.current && shouldDismissOnRelease(dragY)) {
-      dismissViaSwipeDown(dragY)
-      return
-    }
-
-    setIsDragging(false)
-    setDragY(0)
-    startYRef.current = null
-    startXRef.current = null
-    isSwipeDownRef.current = false
+    controller.onTouchEnd(prefersReducedMotion())
   }
 
   const handleTouchCancel = () => {
     if (isClosing || isGlidingOut) return
-    initialPinchDistRef.current = null
-    panStartRef.current = null
-    setIsDragging(false)
-    setDragY(0)
-    startYRef.current = null
-    startXRef.current = null
-    isSwipeDownRef.current = false
+    controller.onTouchCancel(prefersReducedMotion())
   }
 
   const { backdropOpacity, scale } = computeSwipeTransform(dragY, isDragging)
@@ -749,7 +687,11 @@ export function ImageLightbox({
     <div
       className={backdropClass}
       style={backdropStyle}
-      onClick={dismiss}
+      onClick={e => {
+        if (e.target === e.currentTarget) {
+          controller.onBackdropClick(true)
+        }
+      }}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
@@ -782,12 +724,20 @@ export function ImageLightbox({
       <div
         className={stageClass}
         style={stageStyle}
+        onClick={e => {
+          if (e.target === e.currentTarget) {
+            controller.onBackdropClick(true)
+          }
+        }}
       >
         <img
           className="image-lightbox-img"
           src={src}
           alt={alt || fileName}
-          onClick={toggleZoom}
+          onDoubleClick={() => controller.toggleZoom()}
+          onClick={e => {
+            e.stopPropagation()
+          }}
         />
       </div>
     </div>
@@ -811,7 +761,6 @@ export function ChatImage({
 }) {
   const [loaded, setLoaded] = useState(false)
   const [failed, setFailed] = useState(false)
-  const [copied, setCopied] = useState(false)
   const [lightboxOpen, setLightboxOpen] = useState(false)
 
   const effectivePath = rawPath || src || ''
@@ -873,14 +822,6 @@ export function ChatImage({
   const fileName = rawPath
     ? (rawPath.split(/[/\\]/).filter(Boolean).pop() || rawPath)
     : alt || (isData ? 'Inline Image' : src.split(/[/\\]/).filter(Boolean).pop() || 'image')
-  const ext = fileName.includes('.') ? fileName.split('.').pop()?.toUpperCase() || 'IMG' : 'IMG'
-
-  const copy = async (e: React.MouseEvent) => {
-    e.stopPropagation()
-    await navigator.clipboard.writeText(rawPath || resolvedSrc)
-    setCopied(true)
-    window.setTimeout(() => setCopied(false), 1400)
-  }
 
   if (failed || (!resolvedSrc && !isRemote)) {
     if (isData) {
@@ -904,15 +845,15 @@ export function ChatImage({
 
   return (
     <>
-      <figure className={`chat-image-wrap ${kind} ${loaded && resolvedSrc ? 'is-loaded' : 'is-loading'}`}>
-        <div
-          className="chat-image-media-box"
-          onClick={() => { if (resolvedSrc) setLightboxOpen(true) }}
-          role="button"
-          tabIndex={0}
-          onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && resolvedSrc) { e.preventDefault(); setLightboxOpen(true) } }}
-          aria-label={`View full image: ${fileName}`}
-        >
+      <figure
+        className={`chat-image-wrap ${kind} ${loaded && resolvedSrc ? 'is-loaded' : 'is-loading'}`}
+        onClick={() => { if (resolvedSrc) setLightboxOpen(true) }}
+        role="button"
+        tabIndex={0}
+        onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && resolvedSrc) { e.preventDefault(); setLightboxOpen(true) } }}
+        aria-label={`View full image: ${fileName}`}
+      >
+        <div className="chat-image-media-box">
           {(!loaded || !resolvedSrc) && <div className="chat-image-skeleton" aria-hidden="true" />}
           <img
             className={`chat-image-rendered ${!resolvedSrc ? 'is-resolving' : ''}`}
@@ -923,44 +864,7 @@ export function ChatImage({
             onLoad={() => setLoaded(true)}
             onError={() => { if (resolvedSrc) setFailed(true) }}
           />
-          <button
-            type="button"
-            className="chat-image-zoom-overlay"
-            title="Expand image"
-            aria-label="Expand image"
-            onClick={e => { e.stopPropagation(); if (resolvedSrc) setLightboxOpen(true) }}
-            disabled={!resolvedSrc}
-          >
-            <Maximize2 size={15} />
-          </button>
         </div>
-        <figcaption className="chat-image-caption">
-          <div className="chat-image-info">
-            <span className="chat-image-badge">{ext}</span>
-            <span className="chat-image-filename" title={fileName}>{fileName}</span>
-          </div>
-          <div className="chat-image-actions">
-            <button
-              type="button"
-              className="chat-image-btn"
-              onClick={copy}
-              title="Copy path or URL"
-              aria-label="Copy file path"
-            >
-              {copied ? <Check size={13} /> : <Copy size={13} />}
-            </button>
-            <button
-              type="button"
-              className="chat-image-btn"
-              onClick={e => { e.stopPropagation(); if (resolvedSrc) setLightboxOpen(true) }}
-              title="Expand image"
-              aria-label="Expand image"
-              disabled={!resolvedSrc}
-            >
-              <Maximize2 size={13} />
-            </button>
-          </div>
-        </figcaption>
       </figure>
       {lightboxOpen && resolvedSrc && (
         <ImageLightbox
@@ -1340,7 +1244,7 @@ export const MarkdownContent = memo(function MarkdownContent({
         const hasMath = hasMathContent(seg.content)
         const hasCode = hasCodeContent(seg.content)
         const withMentionLinks = seg.content.includes('@')
-          ? seg.content.replace(/(^|\s)(@[a-zA-Z0-9][\w-]*)\b/g, '$1[$2](hermes-mention:$2)')
+          ? seg.content.replace(/(^|\s)(@[a-zA-Z0-9][\w-]*)\b(?!:)/g, '$1[$2](hermes-mention:$2)')
           : seg.content
         const withHtmlImages = normalizeHtmlImages(withMentionLinks)
         const withSingleLineImages = normalizeMultilineImages(withHtmlImages)

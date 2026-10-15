@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { renderToString } from 'react-dom/server'
 
-import { MarkdownContent, cacheImageDataUrl } from './components/MarkdownContent'
+import { MarkdownContent, cacheImageDataUrl, parseFileReference } from './components/MarkdownContent'
 
 describe('Media and Attachment parsing in MarkdownContent', () => {
   it('renders MEDIA: file path as an interactive attachment card with filename and badge', () => {
@@ -41,9 +41,9 @@ describe('Media and Attachment parsing in MarkdownContent', () => {
 
     expect(html).toContain('chat-image-wrap media')
     expect(html).toContain('chat-image-rendered')
-    expect(html).toContain('network_traffic.png')
-    expect(html).toContain('PNG')
-    expect(html).toContain('chat-image-zoom-overlay')
+    expect(html).not.toContain('chat-image-badge')
+    expect(html).not.toContain('chat-image-zoom-overlay')
+    expect(html).not.toContain('chat-image-caption')
   })
 
   it('renders user Attached: image files directly with resolved data URLs', () => {
@@ -54,18 +54,25 @@ describe('Media and Attachment parsing in MarkdownContent', () => {
     expect(html).toContain('chat-image-wrap attachment')
     expect(html).toContain('chat-image-rendered')
     expect(html).toContain('src="data:image/jpeg;base64,fakebytes"')
-    expect(html).toContain('my_screenshot.jpg')
-    expect(html).toContain('JPG')
+    expect(html).toContain('role="button"')
+    expect(html).toContain('tabindex="0"')
+    expect(html).toContain('aria-label="View full image: my_screenshot.jpg"')
+    expect(html).not.toContain('chat-image-badge')
+    expect(html).not.toContain('chat-image-zoom-overlay')
+    expect(html).not.toContain('chat-image-caption')
   })
 
-  it('renders standard Markdown images with ChatImage component', () => {
+  it('renders standard Markdown images with ChatImage component without wrapper UI', () => {
     const raw = `Check this image: ![Dashboard Architecture](https://example.com/arch.webp)`
     const html = renderToString(<MarkdownContent>{raw}</MarkdownContent>)
 
     expect(html).toContain('chat-image-wrap markdown')
     expect(html).toContain('chat-image-rendered')
     expect(html).toContain('src="https://example.com/arch.webp"')
-    expect(html).toContain('Dashboard Architecture')
+    expect(html).toContain('role="button"')
+    expect(html).toContain('tabindex="0"')
+    expect(html).not.toContain('chat-image-zoom-overlay')
+    expect(html).not.toContain('chat-image-caption')
   })
 
   it('renders inline Base64 data URIs in Markdown without stripping', () => {
@@ -141,6 +148,99 @@ MEDIA:/home/floydyra/.hermes/cache/scratch/sample_image.png
     expect(html).toContain('chat-image-wrap markdown')
     expect(html).toContain('Generated Icon')
     expect(html).toContain('src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="')
+  })
+
+  it('renders rehydrated unquoted @file: image attachment directly as ChatImage', () => {
+    cacheImageDataUrl(
+      '/home/floydyra/.hermes/attachments/RDT_20261009_1313205661320862993825685.jpg',
+      'data:image/jpeg;base64,mockjpegbytes'
+    )
+    const rehydratedMessage = `@file:/home/floydyra/.hermes/attachments/RDT_20261009_1313205661320862993825685.jpg\n\nWhat do you see in this photo?`
+    const html = renderToString(<MarkdownContent>{rehydratedMessage}</MarkdownContent>)
+
+    // Must render the native ChatImage component without cluttered file extension badges
+    expect(html).toContain('chat-image-wrap attachment')
+    expect(html).toContain('chat-image-rendered')
+    expect(html).toContain('src="data:image/jpeg;base64,mockjpegbytes"')
+    expect(html).toContain('RDT_20261009_1313205661320862993825685.jpg')
+    expect(html).not.toContain('chat-image-badge')
+
+    // Must render the companion prompt text
+    expect(html).toContain('What do you see in this photo?')
+
+    // Must NOT leak the literal raw directive text
+    expect(html).not.toContain('@file:')
+  })
+
+  it('renders unquoted @file: paths with spaces as attachment card', () => {
+    const raw = `@file:/home/floydyra/.hermes/attachments/My Homework Assignment 2026.pdf`
+    const html = renderToString(<MarkdownContent>{raw}</MarkdownContent>)
+
+    expect(html).toContain('media-attachment-card attachment')
+    expect(html).toContain('My Homework Assignment 2026.pdf')
+    expect(html).toContain('PDF')
+    expect(html).not.toContain('@file:')
+  })
+
+  it('keeps @file: inside code blocks as literal code without parsing as attachment', () => {
+    const raw = '```bash\n@file:/home/floydyra/sample.png\n```'
+    const html = renderToString(<MarkdownContent>{raw}</MarkdownContent>)
+
+    expect(html).not.toContain('chat-image-wrap')
+    expect(html).not.toContain('media-attachment-card')
+    expect(html).toContain('@file:/home/floydyra/sample.png')
+  })
+
+  it('preserves normal bot mentions while excluding @file: directives', () => {
+    const textWithMention = 'Hello @homework-manager please help me with @researcher notes'
+    const html = renderToString(<MarkdownContent>{textWithMention}</MarkdownContent>)
+
+    expect(html).toContain('<span class="mention-link">@homework-manager</span>')
+    expect(html).toContain('<span class="mention-link">@researcher</span>')
+    expect(html).not.toContain('class="mention-link">@file')
+  })
+
+  describe('parseFileReference contract coverage', () => {
+    it('accurately parses unquoted, backticked, quoted, and emoji-prefixed paths', () => {
+      // Unquoted standard path
+      expect(parseFileReference('@file:/home/floydyra/image.jpg')).toBe('/home/floydyra/image.jpg')
+
+      // Unquoted path with spaces
+      expect(parseFileReference('@file:/home/user/my vacation photos/beach.jpg')).toBe(
+        '/home/user/my vacation photos/beach.jpg'
+      )
+
+      // Backticked path
+      expect(parseFileReference('@file:`/home/user/my documents/spec.pdf`')).toBe(
+        '/home/user/my documents/spec.pdf'
+      )
+
+      // Double-quoted path
+      expect(parseFileReference('@file:"/home/user/my photos/trip.jpg"')).toBe(
+        '/home/user/my photos/trip.jpg'
+      )
+
+      // Single-quoted path
+      expect(parseFileReference("@file:'/home/user/notes/todo.md'")).toBe(
+        '/home/user/notes/todo.md'
+      )
+
+      // Emoji paperclip prefix (with space)
+      expect(parseFileReference('📎 @file:/home/user/paperclip.png')).toBe('/home/user/paperclip.png')
+
+      // Emoji paperclip prefix with quoted path
+      expect(parseFileReference('📎 @file:"/home/user/quoted paperclip.png"')).toBe(
+        '/home/user/quoted paperclip.png'
+      )
+
+      // Empty or invalid directives return null
+      expect(parseFileReference('@file:')).toBe(null)
+      expect(parseFileReference('@file:   ')).toBe(null)
+      expect(parseFileReference('@file:``')).toBe(null)
+      expect(parseFileReference('@file:""')).toBe(null)
+      expect(parseFileReference('@file:\'\'')).toBe(null)
+      expect(parseFileReference('Just regular text')).toBe(null)
+    })
   })
 
   it('strips backend Attached Context scaffolding and renders @file: as clean attachment card', () => {
