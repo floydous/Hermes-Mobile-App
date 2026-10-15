@@ -46,6 +46,16 @@ fn is_loopback(origin: &str) -> bool {
     origin.contains("127.0.0.1") || origin.contains("localhost") || origin.contains("[::1]")
 }
 
+async fn run_blocking<F, T>(f: F) -> Result<T, String>
+where
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+    T: Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(f)
+        .await
+        .map_err(|e| format!("Task execution error: {e}"))?
+}
+
 fn authenticated_get(app: &tauri::AppHandle, origin: &str, path: &str) -> Result<String, String> {
     let client = &*HTTP_CLIENT;
     let url = format!("{origin}{path}");
@@ -133,18 +143,20 @@ fn authenticated_delete_for_app(
 
 #[tauri::command]
 #[allow(non_snake_case)]
-fn hermes_delete_session(
+async fn hermes_delete_session(
     app: tauri::AppHandle,
     baseUrl: String,
     sessionId: String,
     profile: Option<String>,
 ) -> Result<String, String> {
-    let origin = server_origin(&baseUrl);
-    let path = match profile {
-        Some(p) if !p.trim().is_empty() => format!("/api/sessions/{}?profile={}", urlencoding::encode(&sessionId), urlencoding::encode(p.trim())),
-        _ => format!("/api/sessions/{}", urlencoding::encode(&sessionId)),
-    };
-    authenticated_delete_for_app(&app, &origin, &path)
+    run_blocking(move || {
+        let origin = server_origin(&baseUrl);
+        let path = match profile {
+            Some(p) if !p.trim().is_empty() => format!("/api/sessions/{}?profile={}", urlencoding::encode(&sessionId), urlencoding::encode(p.trim())),
+            _ => format!("/api/sessions/{}", urlencoding::encode(&sessionId)),
+        };
+        authenticated_delete_for_app(&app, &origin, &path)
+    }).await
 }
 
 #[tauri::command]
@@ -153,85 +165,95 @@ fn hermes_saved_endpoint(app: tauri::AppHandle) -> Result<Option<String>, String
 }
 
 #[tauri::command]
-fn hermes_password_sign_in(
+async fn hermes_password_sign_in(
     app: tauri::AppHandle,
     base_url: String,
     username: String,
     password: String,
 ) -> Result<(), String> {
-    remote_auth::password_sign_in(app, server_origin(&base_url), username, password)
+    run_blocking(move || {
+        remote_auth::password_sign_in(app, server_origin(&base_url), username, password)
+    }).await
 }
 
 #[tauri::command]
-fn hermes_native_sign_in(app: tauri::AppHandle, base_url: String) -> Result<(), String> {
-    remote_auth::sign_in(app, server_origin(&base_url))
+async fn hermes_native_sign_in(app: tauri::AppHandle, base_url: String) -> Result<(), String> {
+    run_blocking(move || {
+        remote_auth::sign_in(app, server_origin(&base_url))
+    }).await
 }
 
 #[tauri::command]
-fn hermes_connection_probe(base_url: String) -> Result<String, String> {
-    let origin = server_origin(&base_url);
-    if !(origin.starts_with("https://") || origin.starts_with("http://")) {
-        return Err("Enter a full http:// or https:// Hermes gateway URL".to_string());
-    }
-    let response = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|error| error.to_string())?
-        .get(format!("{origin}/api/status"))
-        .send()
-        .map_err(|error| {
-            format!(
-                "Could not reach this Hermes gateway ({error}). The address is reachable only when Hermes is bound to the Tailscale/LAN interface—not just 127.0.0.1—and its port is allowed by the host firewall."
-            )
-        })?;
-    let status = response.status();
-    let body = response.text().unwrap_or_default();
-    if !status.is_success() {
-        let detail = serde_json::from_str::<serde_json::Value>(&body)
-            .ok()
-            .and_then(|value| {
-                value
-                    .get("detail")
-                    .and_then(|detail| detail.as_str())
-                    .map(str::to_string)
-            })
-            .unwrap_or_else(|| "No diagnostic was returned by the gateway.".to_string());
-        return Err(format!(
-            "Gateway returned HTTP {status}: {detail} Check the URL, Hermes host binding, and reverse-proxy/Tailscale configuration."
-        ));
-    }
-    Ok(body)
+async fn hermes_connection_probe(base_url: String) -> Result<String, String> {
+    run_blocking(move || {
+        let origin = server_origin(&base_url);
+        if !(origin.starts_with("https://") || origin.starts_with("http://")) {
+            return Err("Enter a full http:// or https:// Hermes gateway URL".to_string());
+        }
+        let response = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .map_err(|error| error.to_string())?
+            .get(format!("{origin}/api/status"))
+            .send()
+            .map_err(|error| {
+                format!(
+                    "Could not reach this Hermes gateway ({error}). The address is reachable only when Hermes is bound to the Tailscale/LAN interface—not just 127.0.0.1—and its port is allowed by the host firewall."
+                )
+            })?;
+        let status = response.status();
+        let body = response.text().unwrap_or_default();
+        if !status.is_success() {
+            let detail = serde_json::from_str::<serde_json::Value>(&body)
+                .ok()
+                .and_then(|value| {
+                    value
+                        .get("detail")
+                        .and_then(|detail| detail.as_str())
+                        .map(str::to_string)
+                })
+                .unwrap_or_else(|| "No diagnostic was returned by the gateway.".to_string());
+            return Err(format!(
+                "Gateway returned HTTP {status}: {detail} Check the URL, Hermes host binding, and reverse-proxy/Tailscale configuration."
+            ));
+        }
+        Ok(body)
+    }).await
 }
 
 #[tauri::command]
-fn hermes_snapshot(app: tauri::AppHandle, base_url: String) -> Result<String, String> {
-    let origin = server_origin(&base_url);
-    // Sessions are a REST projection. Bot roster rows are intentionally NOT
-    // read here: the Desktop contract's profiles.list RPC owns canonical
-    // hidden Bot Chat identity, preview, ui_meta, and activity.
-    let sessions = authenticated_get(&app, &origin, "/api/profiles/sessions?limit=100&offset=0&min_messages=1&archived=exclude&order=recent&profile=all&exclude_sources=cron,kanban,tool,oneshot")?;
-    Ok(format!(r#"{{"sessions":{sessions}}}"#))
+async fn hermes_snapshot(app: tauri::AppHandle, base_url: String) -> Result<String, String> {
+    run_blocking(move || {
+        let origin = server_origin(&base_url);
+        // Sessions are a REST projection. Bot roster rows are intentionally NOT
+        // read here: the Desktop contract's profiles.list RPC owns canonical
+        // hidden Bot Chat identity, preview, ui_meta, and activity.
+        let sessions = authenticated_get(&app, &origin, "/api/profiles/sessions?limit=100&offset=0&min_messages=1&archived=exclude&order=recent&profile=all&exclude_sources=cron,kanban,tool,oneshot")?;
+        Ok(format!(r#"{{"sessions":{sessions}}}"#))
+    }).await
 }
 
 #[tauri::command]
-fn hermes_model_options(
+async fn hermes_model_options(
     app: tauri::AppHandle,
     base_url: String,
     profile: String,
 ) -> Result<String, String> {
-    let origin = server_origin(&base_url);
-    authenticated_get(
-        &app,
-        &origin,
-        &format!(
-            "/api/model/options?explicit_only=1&profile={}",
-            urlencoding::encode(&profile)
-        ),
-    )
+    run_blocking(move || {
+        let origin = server_origin(&base_url);
+        authenticated_get(
+            &app,
+            &origin,
+            &format!(
+                "/api/model/options?explicit_only=1&profile={}",
+                urlencoding::encode(&profile)
+            ),
+        )
+    }).await
 }
 
 #[tauri::command]
-fn hermes_session_messages(
+async fn hermes_session_messages(
     app: tauri::AppHandle,
     base_url: String,
     session_id: String,
@@ -239,51 +261,55 @@ fn hermes_session_messages(
     offset: Option<usize>,
     limit: Option<usize>,
 ) -> Result<String, String> {
-    let origin = server_origin(&base_url);
-    let target_profile = if profile.trim().is_empty() { "default" } else { profile.trim() };
-    let page_limit = limit.unwrap_or(100);
-    let page_offset = offset.unwrap_or(0);
-    authenticated_get(
-        &app,
-        &origin,
-        &format!(
-            "/api/sessions/{}/messages?profile={}&limit={}&offset={}&order=latest&include_compacted=true",
-            urlencoding::encode(&session_id),
-            urlencoding::encode(target_profile),
-            page_limit,
-            page_offset
-        ),
-    )
+    run_blocking(move || {
+        let origin = server_origin(&base_url);
+        let target_profile = if profile.trim().is_empty() { "default" } else { profile.trim() };
+        let page_limit = limit.unwrap_or(100);
+        let page_offset = offset.unwrap_or(0);
+        authenticated_get(
+            &app,
+            &origin,
+            &format!(
+                "/api/sessions/{}/messages?profile={}&limit={}&offset={}&order=latest&include_compacted=true",
+                urlencoding::encode(&session_id),
+                urlencoding::encode(target_profile),
+                page_limit,
+                page_offset
+            ),
+        )
+    }).await
 }
 
 #[tauri::command]
-fn hermes_fetch_media(
+async fn hermes_fetch_media(
     app: tauri::AppHandle,
     base_url: String,
     path: String,
 ) -> Result<String, String> {
-    let origin = server_origin(&base_url);
-    // 1. Try GET /api/media?path=...
-    if let Ok(res) = authenticated_get(&app, &origin, &format!("/api/media?path={}", urlencoding::encode(&path))) {
-        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&res) {
-            if let Some(data_url) = val.get("data_url").and_then(|v| v.as_str()) {
-                if !data_url.is_empty() {
-                    return Ok(data_url.to_string());
+    run_blocking(move || {
+        let origin = server_origin(&base_url);
+        // 1. Try GET /api/media?path=...
+        if let Ok(res) = authenticated_get(&app, &origin, &format!("/api/media?path={}", urlencoding::encode(&path))) {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&res) {
+                if let Some(data_url) = val.get("data_url").and_then(|v| v.as_str()) {
+                    if !data_url.is_empty() {
+                        return Ok(data_url.to_string());
+                    }
                 }
             }
         }
-    }
-    // 2. Fallback to GET /api/fs/read-data-url?path=...
-    if let Ok(res) = authenticated_get(&app, &origin, &format!("/api/fs/read-data-url?path={}", urlencoding::encode(&path))) {
-        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&res) {
-            if let Some(data_url) = val.get("dataUrl").or_else(|| val.get("data_url")).and_then(|v| v.as_str()) {
-                if !data_url.is_empty() {
-                    return Ok(data_url.to_string());
+        // 2. Fallback to GET /api/fs/read-data-url?path=...
+        if let Ok(res) = authenticated_get(&app, &origin, &format!("/api/fs/read-data-url?path={}", urlencoding::encode(&path))) {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&res) {
+                if let Some(data_url) = val.get("dataUrl").or_else(|| val.get("data_url")).and_then(|v| v.as_str()) {
+                    if !data_url.is_empty() {
+                        return Ok(data_url.to_string());
+                    }
                 }
             }
         }
-    }
-    Err("Could not load media from remote host".to_string())
+        Err("Could not load media from remote host".to_string())
+    }).await
 }
 
 fn authenticated_post_with_timeout(
@@ -310,20 +336,22 @@ fn authenticated_post_with_timeout(
 }
 
 #[tauri::command]
-fn hermes_transcribe(
+async fn hermes_transcribe(
     app: tauri::AppHandle,
     base_url: String,
     profile: String,
     data_url: String,
     mime_type: String,
 ) -> Result<String, String> {
-    let origin = server_origin(&base_url);
-    authenticated_post_for_app(
-        &app,
-        &origin,
-        &format!("/api/audio/transcribe?profile={profile}"),
-        serde_json::json!({ "data_url": data_url, "mime_type": mime_type }),
-    )
+    run_blocking(move || {
+        let origin = server_origin(&base_url);
+        authenticated_post_for_app(
+            &app,
+            &origin,
+            &format!("/api/audio/transcribe?profile={profile}"),
+            serde_json::json!({ "data_url": data_url, "mime_type": mime_type }),
+        )
+    }).await
 }
 
 fn authenticated_post_for_app(
@@ -421,86 +449,94 @@ fn authenticated_put_for_app(
 }
 
 #[tauri::command]
-fn hermes_cron_jobs(
+async fn hermes_cron_jobs(
     app: tauri::AppHandle,
     base_url: String,
     profile: Option<String>,
 ) -> Result<String, String> {
-    let origin = server_origin(&base_url);
-    let profile_param = profile
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .unwrap_or("all");
-    authenticated_get(
-        &app,
-        &origin,
-        &format!("/api/cron/jobs?profile={}", urlencoding::encode(profile_param)),
-    )
+    run_blocking(move || {
+        let origin = server_origin(&base_url);
+        let profile_param = profile
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("all");
+        authenticated_get(
+            &app,
+            &origin,
+            &format!("/api/cron/jobs?profile={}", urlencoding::encode(profile_param)),
+        )
+    }).await
 }
 
 #[tauri::command]
-fn hermes_cron_job(
+async fn hermes_cron_job(
     app: tauri::AppHandle,
     base_url: String,
     job_id: String,
     profile: String,
 ) -> Result<String, String> {
-    let origin = server_origin(&base_url);
-    let profile_query = if profile.trim().is_empty() { String::new() } else { format!("?profile={}", urlencoding::encode(&profile)) };
-    authenticated_get(&app, &origin, &format!("/api/cron/jobs/{}{}", urlencoding::encode(&job_id), profile_query))
+    run_blocking(move || {
+        let origin = server_origin(&base_url);
+        let profile_query = if profile.trim().is_empty() { String::new() } else { format!("?profile={}", urlencoding::encode(&profile)) };
+        authenticated_get(&app, &origin, &format!("/api/cron/jobs/{}{}", urlencoding::encode(&job_id), profile_query))
+    }).await
 }
 
 #[tauri::command]
-fn hermes_cron_runs(
+async fn hermes_cron_runs(
     app: tauri::AppHandle,
     base_url: String,
     job_id: String,
     profile: String,
 ) -> Result<String, String> {
-    let origin = server_origin(&base_url);
-    let profile_query = if profile.trim().is_empty() {
-        String::new()
-    } else {
-        format!("?profile={}", urlencoding::encode(&profile))
-    };
-    authenticated_get(
-        &app,
-        &origin,
-        &format!(
-            "/api/cron/jobs/{}/runs{}",
-            urlencoding::encode(&job_id),
-            profile_query
-        ),
-    )
+    run_blocking(move || {
+        let origin = server_origin(&base_url);
+        let profile_query = if profile.trim().is_empty() {
+            String::new()
+        } else {
+            format!("?profile={}", urlencoding::encode(&profile))
+        };
+        authenticated_get(
+            &app,
+            &origin,
+            &format!(
+                "/api/cron/jobs/{}/runs{}",
+                urlencoding::encode(&job_id),
+                profile_query
+            ),
+        )
+    }).await
 }
 
 #[tauri::command]
-fn hermes_trigger_cron(
+async fn hermes_trigger_cron(
     app: tauri::AppHandle,
     base_url: String,
     job_id: String,
     profile: String,
 ) -> Result<String, String> {
-    let origin = server_origin(&base_url);
-    let profile_query = if profile.trim().is_empty() {
-        String::new()
-    } else {
-        format!("?profile={}", urlencoding::encode(&profile))
-    };
-    // Desktop deliberately waits for completion here: returning only after the
-    // persisted run result prevents the mobile client from presenting a false success.
-    authenticated_post_for_app_with_timeout(
-        &app,
-        &origin,
-        &format!(
-            "/api/cron/jobs/{}/trigger{}",
-            urlencoding::encode(&job_id),
-            profile_query
-        ),
-        serde_json::json!({}),
-        Duration::from_secs(24 * 60 * 60),
-    )
+    run_blocking(move || {
+        let origin = server_origin(&base_url);
+        let profile_query = if profile.trim().is_empty() {
+            String::new()
+        } else {
+            format!("?profile={}", urlencoding::encode(&profile))
+        };
+        // Desktop deliberately waits for completion here: returning only after the
+        // persisted run result prevents the mobile client from presenting a false success.
+        authenticated_post_for_app_with_timeout(
+            &app,
+            &origin,
+            &format!(
+                "/api/cron/jobs/{}/trigger{}",
+                urlencoding::encode(&job_id),
+                profile_query
+            ),
+            serde_json::json!({}),
+            Duration::from_secs(24 * 60 * 60),
+        )
+    }).await
 }
 
 fn authenticated_put(origin: &str, path: &str, body: serde_json::Value) -> Result<String, String> {
@@ -522,78 +558,88 @@ fn authenticated_put(origin: &str, path: &str, body: serde_json::Value) -> Resul
 }
 
 #[tauri::command]
-fn hermes_update_cron_prompt(
+async fn hermes_update_cron_prompt(
     app: tauri::AppHandle,
     base_url: String,
     job_id: String,
     profile: String,
     prompt: String,
 ) -> Result<String, String> {
-    let origin = server_origin(&base_url);
-    let profile_query = if profile.trim().is_empty() {
-        String::new()
-    } else {
-        format!("?profile={}", urlencoding::encode(&profile))
-    };
-    authenticated_put_for_app(
-        &app,
-        &origin,
-        &format!(
-            "/api/cron/jobs/{}{}",
-            urlencoding::encode(&job_id),
-            profile_query
-        ),
-        serde_json::json!({ "updates": { "prompt": prompt } }),
-    )
+    run_blocking(move || {
+        let origin = server_origin(&base_url);
+        let profile_query = if profile.trim().is_empty() {
+            String::new()
+        } else {
+            format!("?profile={}", urlencoding::encode(&profile))
+        };
+        authenticated_put_for_app(
+            &app,
+            &origin,
+            &format!(
+                "/api/cron/jobs/{}{}",
+                urlencoding::encode(&job_id),
+                profile_query
+            ),
+            serde_json::json!({ "updates": { "prompt": prompt } }),
+        )
+    }).await
 }
 
 #[tauri::command]
-fn hermes_cron_blueprints(app: tauri::AppHandle, base_url: String) -> Result<String, String> {
-    let origin = server_origin(&base_url);
-    authenticated_get(&app, &origin, "/api/cron/blueprints")
+async fn hermes_cron_blueprints(app: tauri::AppHandle, base_url: String) -> Result<String, String> {
+    run_blocking(move || {
+        let origin = server_origin(&base_url);
+        authenticated_get(&app, &origin, "/api/cron/blueprints")
+    }).await
 }
 
 #[tauri::command]
-fn hermes_cron_delivery_targets(app: tauri::AppHandle, base_url: String) -> Result<String, String> {
-    let origin = server_origin(&base_url);
-    authenticated_get(&app, &origin, "/api/cron/delivery-targets")
+async fn hermes_cron_delivery_targets(app: tauri::AppHandle, base_url: String) -> Result<String, String> {
+    run_blocking(move || {
+        let origin = server_origin(&base_url);
+        authenticated_get(&app, &origin, "/api/cron/delivery-targets")
+    }).await
 }
 
 #[tauri::command]
-fn hermes_create_cron(
+async fn hermes_create_cron(
     app: tauri::AppHandle,
     base_url: String,
     profile: String,
     body: serde_json::Value,
 ) -> Result<String, String> {
-    let origin = server_origin(&base_url);
-    let query = if profile.trim().is_empty() {
-        String::new()
-    } else {
-        format!("?profile={}", urlencoding::encode(&profile))
-    };
-    authenticated_post_for_app(&app, &origin, &format!("/api/cron/jobs{}", query), body)
+    run_blocking(move || {
+        let origin = server_origin(&base_url);
+        let query = if profile.trim().is_empty() {
+            String::new()
+        } else {
+            format!("?profile={}", urlencoding::encode(&profile))
+        };
+        authenticated_post_for_app(&app, &origin, &format!("/api/cron/jobs{}", query), body)
+    }).await
 }
 
 #[tauri::command]
-fn hermes_instantiate_cron_blueprint(
+async fn hermes_instantiate_cron_blueprint(
     app: tauri::AppHandle,
     base_url: String,
     profile: String,
     body: serde_json::Value,
 ) -> Result<String, String> {
-    let origin = server_origin(&base_url);
-    let query = if profile.trim().is_empty() {
-        String::new()
-    } else {
-        format!("?profile={}", urlencoding::encode(&profile))
-    };
-    authenticated_post_for_app(
-        &app,
-        &origin,
-        &format!("/api/cron/blueprints/instantiate{}", query),
-        body,
-    )
+    run_blocking(move || {
+        let origin = server_origin(&base_url);
+        let query = if profile.trim().is_empty() {
+            String::new()
+        } else {
+            format!("?profile={}", urlencoding::encode(&profile))
+        };
+        authenticated_post_for_app(
+            &app,
+            &origin,
+            &format!("/api/cron/blueprints/instantiate{}", query),
+            body,
+        )
+    }).await
 }
 
 #[tauri::command]
@@ -627,26 +673,28 @@ fn open_microphone_settings() -> Result<(), String> {
 }
 
 #[tauri::command]
-fn hermes_ws_url(app: tauri::AppHandle, base_url: String) -> Result<String, String> {
-    let origin = server_origin(&base_url);
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|error| error.to_string())?;
-    let ws_origin = origin
-        .replacen("https://", "wss://", 1)
-        .replacen("http://", "ws://", 1);
-    let value = if is_loopback(&origin) {
-        session_token(&client, &origin)?
-    } else {
-        remote_auth::ws_ticket(&app, &origin)?
-    };
-    let query_key = if is_loopback(&origin) {
-        "token"
-    } else {
-        "ticket"
-    };
-    Ok(format!("{ws_origin}/api/ws?{query_key}={value}"))
+async fn hermes_ws_url(app: tauri::AppHandle, base_url: String) -> Result<String, String> {
+    run_blocking(move || {
+        let origin = server_origin(&base_url);
+        let client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .map_err(|error| error.to_string())?;
+        let ws_origin = origin
+            .replacen("https://", "wss://", 1)
+            .replacen("http://", "ws://", 1);
+        let value = if is_loopback(&origin) {
+            session_token(&client, &origin)?
+        } else {
+            remote_auth::ws_ticket(&app, &origin)?
+        };
+        let query_key = if is_loopback(&origin) {
+            "token"
+        } else {
+            "ticket"
+        };
+        Ok(format!("{ws_origin}/api/ws?{query_key}={value}"))
+    }).await
 }
 
 #[tauri::command]
