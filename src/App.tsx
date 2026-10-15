@@ -45,7 +45,10 @@ import {
   parseLastReadTimestamp,
   removeCachedSessionMessages,
   resolveLatestSessionPreview,
+  scheduleDeferredSessionPersistence,
+  flushDeferredSessionPersistence,
   setCachedSessionMessages,
+  MAX_CACHED_SESSIONS,
 } from './session-cache'
 import {
   finishPerformanceTrace,
@@ -296,16 +299,18 @@ export default function App() {
     persistActiveTurnsSnapshot()
   }, [activeTurns, persistActiveTurnsSnapshot])
 
-  // Flush in-flight turn snapshots immediately on pagehide/beforeunload so backgrounding the app retains state
+  // Flush in-flight turn snapshots and deferred transcript persistence immediately on pagehide/beforeunload so backgrounding the app retains state
   useEffect(() => {
     const handleFlush = () => {
       persistActiveTurnsSnapshot()
+      flushDeferredSessionPersistence()
     }
     window.addEventListener('beforeunload', handleFlush)
     window.addEventListener('pagehide', handleFlush)
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {
         persistActiveTurnsSnapshot()
+        flushDeferredSessionPersistence()
       }
     }
     document.addEventListener('visibilitychange', handleVisibilityChange)
@@ -790,7 +795,7 @@ export default function App() {
       // Post-mount cache warmup: pre-populate in-memory caches from localStorage safely
       try {
         const index = parseCachedSessionIndex(localStorage.getItem('hermes-msgs-v1:__index__'))
-        for (const sid of index.slice(0, 15)) {
+        for (const sid of index.slice(0, MAX_CACHED_SESSIONS)) {
           const msgs = getCachedSessionMessages(sid)
           if (msgs) messageCacheRef.current.set(sid, msgs)
         }
@@ -1130,11 +1135,8 @@ export default function App() {
           for (const cid of uniqueAliasIds) {
             messageCacheRef.current.set(cid, resolvedLoaded)
           }
-          setTimeout(() => {
-            for (const cid of uniqueAliasIds) {
-              setCachedSessionMessages(cid, resolvedLoaded)
-            }
-          }, 0)
+          // Coalesce and defer writing the canonical transcript and candidate aliases to disk in idle time
+          scheduleDeferredSessionPersistence(uniqueAliasIds, resolvedLoaded)
         }
 
         const currentActive = Object.values(activeTurnsRef.current).find(t =>

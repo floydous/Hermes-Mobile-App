@@ -127,7 +127,8 @@ export function areMessageListsEqual(
 export const areMessageListsShallowEqual = areMessageListsEqual
 
 const STORAGE_PREFIX = 'hermes-msgs-v1:'
-const MAX_CACHED_SESSIONS = 15
+export const MAX_CACHED_SESSIONS = 35
+export const MAX_MESSAGES_PER_CACHED_SESSION = 80
 
 /**
  * Loads cached session messages from localStorage for instant 0ms restoration.
@@ -151,12 +152,33 @@ export function getCachedSessionMessages(sessionId: string): LiveMessage[] | nul
 export function setCachedSessionMessages(sessionId: string, messages: LiveMessage[]): void {
   if (typeof window === 'undefined' || !window.localStorage || !sessionId) return
   if (!Array.isArray(messages) || messages.length === 0) return
+  PENDING_PERSISTENCE_WRITES.delete(sessionId)
   try {
     const perfStart = isPerformanceDiagnosticsEnabled() && typeof performance !== 'undefined' ? performance.now() : 0
-    // Cache up to 250 latest messages per session for instant deep scrollback restoration
-    const compactMessages = messages.length > 250 ? messages.slice(messages.length - 250) : messages
+    // Cache up to 80 latest messages per session for instant deep scrollback restoration
+    const compactMessages = messages.length > MAX_MESSAGES_PER_CACHED_SESSION ? messages.slice(messages.length - MAX_MESSAGES_PER_CACHED_SESSION) : messages
     const serialized = JSON.stringify(compactMessages)
-    localStorage.setItem(`${STORAGE_PREFIX}${sessionId}`, serialized)
+
+    try {
+      localStorage.setItem(`${STORAGE_PREFIX}${sessionId}`, serialized)
+    } catch {
+      // QuotaExceededError recovery: evict oldest half of cached sessions to free space
+      try {
+        const indexKey = `${STORAGE_PREFIX}__index__`
+        const rawIndex = localStorage.getItem(indexKey)
+        let index: string[] = rawIndex ? JSON.parse(rawIndex) : []
+        if (index.length > 2) {
+          const evictCount = Math.ceil(index.length / 2)
+          const toEvict = index.slice(-evictCount)
+          index = index.slice(0, -evictCount)
+          for (const oldId of toEvict) {
+            localStorage.removeItem(`${STORAGE_PREFIX}${oldId}`)
+          }
+          localStorage.setItem(indexKey, JSON.stringify(index))
+          localStorage.setItem(`${STORAGE_PREFIX}${sessionId}`, serialized)
+        }
+      } catch {}
+    }
 
     // Manage index of cached session keys
     const indexKey = `${STORAGE_PREFIX}__index__`
@@ -189,11 +211,66 @@ export function setCachedSessionMessages(sessionId: string, messages: LiveMessag
   } catch {}
 }
 
+const PENDING_PERSISTENCE_WRITES = new Map<string, LiveMessage[]>()
+let persistenceSchedulerId: any = null
+
+/**
+ * Coalesces and defers session persistence to idle time so large JSON serialization
+ * and SQLite disk writes never collide with React rendering or user touch gestures.
+ */
+export function scheduleDeferredSessionPersistence(
+  sessionIds: string | string[],
+  messages: LiveMessage[]
+): void {
+  if (!sessionIds || !Array.isArray(messages) || messages.length === 0) return
+  const ids = Array.isArray(sessionIds) ? sessionIds : [sessionIds]
+  for (const id of ids) {
+    if (id) PENDING_PERSISTENCE_WRITES.set(id, messages)
+  }
+
+  if (persistenceSchedulerId != null) return
+
+  const flush = () => {
+    persistenceSchedulerId = null
+    const entries = Array.from(PENDING_PERSISTENCE_WRITES.entries())
+    PENDING_PERSISTENCE_WRITES.clear()
+    for (const [sid, msgs] of entries) {
+      setCachedSessionMessages(sid, msgs)
+    }
+  }
+
+  if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+    persistenceSchedulerId = (window as any).requestIdleCallback(flush, { timeout: 1000 })
+  } else {
+    persistenceSchedulerId = globalThis.setTimeout(flush, 250)
+  }
+}
+
+/**
+ * Immediately flushes any pending deferred session persistence writes (e.g. before unload).
+ */
+export function flushDeferredSessionPersistence(): void {
+  if (persistenceSchedulerId != null) {
+    if (typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
+      (window as any).cancelIdleCallback(persistenceSchedulerId)
+    } else {
+      globalThis.clearTimeout(persistenceSchedulerId)
+    }
+    persistenceSchedulerId = null
+  }
+  const entries = Array.from(PENDING_PERSISTENCE_WRITES.entries())
+  PENDING_PERSISTENCE_WRITES.clear()
+  for (const [sid, msgs] of entries) {
+    setCachedSessionMessages(sid, msgs)
+  }
+}
+
 /**
  * Removes cached messages for a specific session.
  */
 export function removeCachedSessionMessages(sessionId: string): void {
   if (typeof window === 'undefined' || !window.localStorage || !sessionId) return
+  PENDING_PERSISTENCE_WRITES.delete(sessionId)
   try {
     localStorage.removeItem(`${STORAGE_PREFIX}${sessionId}`)
     const indexKey = `${STORAGE_PREFIX}__index__`

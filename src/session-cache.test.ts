@@ -11,7 +11,11 @@ import {
   parseLastReadTimestamp,
   removeCachedSessionMessages,
   resolveLatestSessionPreview,
+  scheduleDeferredSessionPersistence,
+  flushDeferredSessionPersistence,
   setCachedSessionMessages,
+  MAX_CACHED_SESSIONS,
+  MAX_MESSAGES_PER_CACHED_SESSION,
 } from './session-cache'
 import { areActiveTurnsEqual, type ActiveBotTurn } from './chat-turn'
 import type { LiveMessage, LiveProfile, LiveSession } from './hermes'
@@ -57,8 +61,8 @@ describe('session-cache message caching and eviction', () => {
     expect(getCachedSessionMessages('session-to-del')).toBeNull()
   })
 
-  it('bounds cached messages to latest 250 items per session', () => {
-    const msgs: LiveMessage[] = Array.from({ length: 300 }, (_, i) => ({
+  it(`bounds cached messages to latest ${MAX_MESSAGES_PER_CACHED_SESSION} items per session`, () => {
+    const msgs: LiveMessage[] = Array.from({ length: 120 }, (_, i) => ({
       id: i + 1,
       role: 'user',
       content: `msg-${i + 1}`,
@@ -66,22 +70,87 @@ describe('session-cache message caching and eviction', () => {
 
     setCachedSessionMessages('long-session', msgs)
     const cached = getCachedSessionMessages('long-session')
-    expect(cached).toHaveLength(250)
-    expect(cached?.[0].content).toBe('msg-51')
-    expect(cached?.[249].content).toBe('msg-300')
+    expect(cached).toHaveLength(MAX_MESSAGES_PER_CACHED_SESSION)
+    expect(cached?.[0].content).toBe('msg-41')
+    expect(cached?.[MAX_MESSAGES_PER_CACHED_SESSION - 1].content).toBe('msg-120')
+  })
+
+  it('coalesces and defers session persistence to idle time, flushing on demand', () => {
+    const msgs1: LiveMessage[] = [{ id: 1, role: 'user', content: 'hello' }]
+    const msgs2: LiveMessage[] = [
+      { id: 1, role: 'user', content: 'hello' },
+      { id: 2, role: 'assistant', content: 'world' },
+    ]
+
+    // Schedule write for session-defer
+    scheduleDeferredSessionPersistence('session-defer', msgs1)
+    // Overwrite with newer transcript before flush
+    scheduleDeferredSessionPersistence('session-defer', msgs2)
+
+    // Storage should not have it yet before flush
+    expect(getCachedSessionMessages('session-defer')).toBeNull()
+
+    // Flush immediately
+    flushDeferredSessionPersistence()
+
+    // Now storage must have the newest coalesced transcript!
+    const persisted = getCachedSessionMessages('session-defer')
+    expect(persisted).toEqual(msgs2)
+  })
+
+  it('cancels pending deferred writes upon removeCachedSessionMessages, preventing resurrection of cleared sessions', () => {
+    const msgs: LiveMessage[] = [{ id: 1, role: 'user', content: 'to-be-deleted' }]
+    scheduleDeferredSessionPersistence('session-cancel', msgs)
+
+    // Remove before flush
+    removeCachedSessionMessages('session-cancel')
+
+    // Flush should NOT resurrect the deleted session
+    flushDeferredSessionPersistence()
+    expect(getCachedSessionMessages('session-cancel')).toBeNull()
+  })
+
+  it('recovers from QuotaExceededError by evicting older sessions when storage quota is reached', () => {
+    // Populate 4 sessions
+    for (let i = 1; i <= 4; i++) {
+      setCachedSessionMessages(`s-${i}`, [{ id: i, role: 'user', content: `msg-${i}` }])
+    }
+
+    // Mock storage setItem to throw QuotaExceededError on the first attempt of a new session
+    const origSetItem = mockStorage.setItem
+    let threwOnce = false
+    mockStorage.setItem = (key: string, val: string) => {
+      if (!threwOnce && key === 'hermes-msgs-v1:quota-session') {
+        threwOnce = true
+        throw new Error('QuotaExceededError')
+      }
+      origSetItem(key, val)
+    }
+
+    try {
+      setCachedSessionMessages('quota-session', [{ id: 99, role: 'user', content: 'quota-msg' }])
+      // quota-session should have succeeded after evicting older sessions
+      expect(getCachedSessionMessages('quota-session')).toHaveLength(1)
+      expect(getCachedSessionMessages('quota-session')?.[0].content).toBe('quota-msg')
+      // Oldest sessions s-1 and s-2 were evicted
+      expect(getCachedSessionMessages('s-1')).toBeNull()
+    } finally {
+      mockStorage.setItem = origSetItem
+    }
   })
 
   it('evicts oldest sessions when exceeding MAX_CACHED_SESSIONS', () => {
-    for (let i = 1; i <= 17; i++) {
+    const total = MAX_CACHED_SESSIONS + 2
+    for (let i = 1; i <= total; i++) {
       setCachedSessionMessages(`session-${i}`, [{ id: i, role: 'user', content: `text-${i}` }])
     }
 
-    // Sessions 1 and 2 should have been evicted (limit is 15)
+    // Sessions 1 and 2 should have been evicted
     expect(getCachedSessionMessages('session-1')).toBeNull()
     expect(getCachedSessionMessages('session-2')).toBeNull()
     // Recent sessions should still be cached
-    expect(getCachedSessionMessages('session-17')).toHaveLength(1)
-    expect(getCachedSessionMessages('session-16')).toHaveLength(1)
+    expect(getCachedSessionMessages(`session-${total}`)).toHaveLength(1)
+    expect(getCachedSessionMessages(`session-${total - 1}`)).toHaveLength(1)
   })
 
   it('identifies human chat sessions vs automated task and cron runs via isHumanChatSession', () => {
