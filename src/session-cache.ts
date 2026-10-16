@@ -512,6 +512,186 @@ export function extractCompactedUserAsk(content: string): string | null {
   return null
 }
 
+export function normalizeTimestampToMs(raw: number | undefined | null): number {
+  if (!raw || !Number.isFinite(raw)) return 0
+  return raw > 1e11 ? raw : raw * 1000
+}
+
+export function getEndpointStorageKey(endpoint: string): string {
+  return (endpoint || '').trim().replace(/\/$/, '').toLowerCase()
+}
+
+export function hasInitializedUnreadBaseline(
+  endpoint: string,
+  storage: Storage | null = typeof localStorage !== 'undefined' ? localStorage : null
+): boolean {
+  if (!storage || !endpoint) return false
+  const key = `hermes-unread-baseline:${getEndpointStorageKey(endpoint)}`
+  try {
+    return storage.getItem(key) === 'true'
+  } catch {
+    return false
+  }
+}
+
+export function isExistingInstallWithReadKeys(
+  endpoint: string,
+  storage: Storage | null = typeof localStorage !== 'undefined' ? localStorage : null
+): boolean {
+  if (!storage) return false
+  const endpointKey = getEndpointStorageKey(endpoint)
+  const scopedPrefix = `hermes-last-read:${endpointKey}:`
+  try {
+    for (let i = 0; i < storage.length; i++) {
+      const k = storage.key(i)
+      if (k) {
+        if (k.startsWith(scopedPrefix)) return true
+        // Legacy unqualified key before endpoint-scoping
+        if (k.startsWith('hermes-last-read:') && !k.slice('hermes-last-read:'.length).includes(':')) {
+          return true
+        }
+      }
+    }
+  } catch {}
+  return false
+}
+
+export function hasAnyUnreadBaselineMarker(
+  storage: Storage | null = typeof localStorage !== 'undefined' ? localStorage : null
+): boolean {
+  if (!storage) return false
+  try {
+    for (let i = 0; i < storage.length; i++) {
+      const k = storage.key(i)
+      if (k && k.startsWith('hermes-unread-baseline:')) {
+        return true
+      }
+    }
+  } catch {}
+  return false
+}
+
+export function shouldSeedBaselineForEndpoint(
+  endpoint: string,
+  storage: Storage | null = typeof localStorage !== 'undefined' ? localStorage : null
+): 'seed' | 'upgrade-skip' | 'already-initialized' {
+  if (!storage || !endpoint) return 'already-initialized'
+  if (hasInitializedUnreadBaseline(endpoint, storage)) {
+    return 'already-initialized'
+  }
+  const hasAnyBaseline = hasAnyUnreadBaselineMarker(storage)
+  const hasExistingReadKeys = isExistingInstallWithReadKeys(endpoint, storage)
+
+  // If no baseline marker exists anywhere, but old read keys exist: this is an upgrade from an older app version.
+  if (!hasAnyBaseline && hasExistingReadKeys) {
+    return 'upgrade-skip'
+  }
+
+  // Otherwise (fresh install, or new endpoint on an install that already tracks baselines): seed baseline!
+  return 'seed'
+}
+
+export function seedUnreadBaselineIfNeeded(
+  endpoint: string,
+  sessions: Array<{ id: string; last_active?: number; resolved_id?: string }>,
+  profiles: Array<{
+    name: string
+    canonical_session?: { id: string; last_active?: number; resolved_id?: string } | null
+    last_session?: { id: string; last_active?: number; resolved_id?: string } | null
+  }>,
+  inMemoryLastReadMap?: Map<string, number> | null,
+  storage: Storage | null = typeof localStorage !== 'undefined' ? localStorage : null
+): { seeded: boolean; sessionCount: number } {
+  if (!storage || !endpoint) return { seeded: false, sessionCount: 0 }
+
+  const endpointKey = getEndpointStorageKey(endpoint)
+  const action = shouldSeedBaselineForEndpoint(endpoint, storage)
+
+  if (action === 'already-initialized') {
+    return { seeded: false, sessionCount: 0 }
+  }
+
+  if (action === 'upgrade-skip') {
+    try {
+      storage.setItem(`hermes-unread-baseline:${endpointKey}`, 'true')
+    } catch {}
+    return { seeded: false, sessionCount: 0 }
+  }
+
+  // Truly fresh installation / clean data: seed baseline timestamps for all known sessions
+  // so pre-existing history on the server does NOT show up as unread badges.
+  const checkpoints = new Map<string, number>()
+
+  for (const s of sessions) {
+    if (!s?.id) continue
+    const ms = normalizeTimestampToMs(s.last_active) || Date.now()
+    checkpoints.set(s.id, ms)
+    if (s.resolved_id) {
+      checkpoints.set(s.resolved_id, ms)
+    }
+  }
+
+  for (const p of profiles) {
+    if (p?.canonical_session?.id) {
+      const ms = normalizeTimestampToMs(p.canonical_session.last_active) || Date.now()
+      checkpoints.set(p.canonical_session.id, ms)
+      if (p.canonical_session.resolved_id) {
+        checkpoints.set(p.canonical_session.resolved_id, ms)
+      }
+    }
+    if (p?.last_session?.id) {
+      const ms = normalizeTimestampToMs(p.last_session.last_active) || Date.now()
+      checkpoints.set(p.last_session.id, ms)
+      if (p.last_session.resolved_id) {
+        checkpoints.set(p.last_session.resolved_id, ms)
+      }
+    }
+  }
+
+  // Stage writes: only write sessions that don't already have a higher/existing checkpoint
+  const storageWrites: Array<[string, string]> = []
+  const committedCheckpoints: Array<[string, string, number]> = [] // [scopedKey, rawSid, ts]
+
+  for (const [sid, ts] of checkpoints.entries()) {
+    const scopedKey = `${endpointKey}:${sid}`
+    const existingRaw = storage.getItem(`hermes-last-read:${scopedKey}`) || storage.getItem(`hermes-last-read:${sid}`)
+    const existingTs = existingRaw ? parseLastReadTimestamp(existingRaw) : null
+
+    // Do not overwrite an existing higher checkpoint if one was already saved
+    const effectiveTs = existingTs != null && existingTs > ts ? existingTs : ts
+    storageWrites.push([`hermes-last-read:${scopedKey}`, String(effectiveTs)])
+    storageWrites.push([`hermes-last-read:${sid}`, String(effectiveTs)])
+    committedCheckpoints.push([scopedKey, sid, effectiveTs])
+  }
+
+  // Atomic storage guard: if any storage.setItem throws (e.g. quota exceeded),
+  // do not write the marker and do not corrupt the in-memory map, so it can cleanly retry.
+  const rolledBackKeys: string[] = []
+  try {
+    for (const [key, val] of storageWrites) {
+      storage.setItem(key, val)
+      rolledBackKeys.push(key)
+    }
+    storage.setItem(`hermes-unread-baseline:${endpointKey}`, 'true')
+  } catch {
+    // Attempt rollback of any keys written during the failed batch
+    for (const key of rolledBackKeys) {
+      try { storage.removeItem(key) } catch {}
+    }
+    return { seeded: false, sessionCount: 0 }
+  }
+
+  // Storage successfully committed: now safely update in-memory cache
+  if (inMemoryLastReadMap) {
+    for (const [scopedKey, sid, effectiveTs] of committedCheckpoints) {
+      inMemoryLastReadMap.set(scopedKey, effectiveTs)
+      inMemoryLastReadMap.set(sid, effectiveTs)
+    }
+  }
+
+  return { seeded: true, sessionCount: checkpoints.size }
+}
+
 /**
  * Calculates whether a session is unread and the exact numeric unread count.
  * Prevents the sent message race condition: user messages (role: 'user') NEVER

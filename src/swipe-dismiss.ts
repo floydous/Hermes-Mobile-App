@@ -157,6 +157,7 @@ export class LightboxGestureController {
   private clickSuppressTimer: number | null = null
   private clickSuppressToken = 0
 
+  private lastTouchDoubleTapTime = 0
   private disposed = false
 
   constructor(scheduler: Partial<LightboxScheduler> = {}) {
@@ -211,6 +212,7 @@ export class LightboxGestureController {
     const tapResult = classifyDoubleTap(this.lastTapTime, now)
     this.lastTapTime = tapResult.nextTapTime
     if (tapResult.isDoubleTap) {
+      this.lastTouchDoubleTapTime = now
       this.toggleZoom()
       return
     }
@@ -348,6 +350,16 @@ export class LightboxGestureController {
     this.clearSpringBack()
     this.clearClickSuppress()
     this.emit()
+    return true
+  }
+
+  public onDoubleClick(time?: number): boolean {
+    if (this.disposed || this.isDismissed) return false
+    const now = time ?? this.scheduler.now()
+    if (now - this.lastTouchDoubleTapTime < 500) {
+      return false
+    }
+    this.toggleZoom()
     return true
   }
 

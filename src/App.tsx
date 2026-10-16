@@ -40,6 +40,7 @@ import {
   calculateUnreadState,
   deduplicateConsecutiveMessages,
   getCachedSessionMessages,
+  getEndpointStorageKey,
   isHumanChatSession,
   parseCachedSessionIndex,
   parseLastReadTimestamp,
@@ -47,6 +48,7 @@ import {
   resolveLatestSessionPreview,
   scheduleDeferredSessionPersistence,
   flushDeferredSessionPersistence,
+  seedUnreadBaselineIfNeeded,
   setCachedSessionMessages,
   MAX_CACHED_SESSIONS,
 } from './session-cache'
@@ -433,6 +435,10 @@ export default function App() {
     try {
       const data = await loadSnapshot(endpoint)
       if (!refreshEpochRef.current.isCurrent(epoch)) return null
+      if (!lastReadCacheRef.current) {
+        lastReadCacheRef.current = initializeLastReadMap()
+      }
+      seedUnreadBaselineIfNeeded(endpoint, data.sessions, data.profiles, lastReadCacheRef.current)
       setProfiles(prevProfiles => {
         const next = data.profiles.map(p => {
           const prev = prevProfiles.find(old => old.name === p.name)
@@ -859,7 +865,13 @@ export default function App() {
     if (!lastReadCacheRef.current) {
       lastReadCacheRef.current = initializeLastReadMap()
     }
-    return lastReadCacheRef.current.get(sid) ?? 0
+    const endpointKey = getEndpointStorageKey(activeEndpointRef.current)
+    const scopedKey = `${endpointKey}:${sid}`
+    return (
+      lastReadCacheRef.current.get(scopedKey) ??
+      lastReadCacheRef.current.get(sid) ??
+      0
+    )
   }, [])
   const pendingLastReadTimersRef = useRef<Map<string, number>>(new Map())
   const setLastReadTime = useCallback((sid: string, val: number) => {
@@ -867,14 +879,21 @@ export default function App() {
     if (!lastReadCacheRef.current) {
       lastReadCacheRef.current = initializeLastReadMap()
     }
+    const endpointKey = getEndpointStorageKey(activeEndpointRef.current)
+    const scopedKey = `${endpointKey}:${sid}`
+    lastReadCacheRef.current.set(scopedKey, val)
     lastReadCacheRef.current.set(sid, val)
-    const existing = pendingLastReadTimersRef.current.get(sid)
+
+    const existing = pendingLastReadTimersRef.current.get(scopedKey)
     if (existing != null) globalThis.clearTimeout(existing)
     const timer = globalThis.setTimeout(() => {
-      pendingLastReadTimersRef.current.delete(sid)
-      try { localStorage.setItem(`hermes-last-read:${sid}`, String(val)) } catch {}
+      pendingLastReadTimersRef.current.delete(scopedKey)
+      try {
+        localStorage.setItem(`hermes-last-read:${scopedKey}`, String(val))
+        localStorage.setItem(`hermes-last-read:${sid}`, String(val))
+      } catch {}
     }, 100) as unknown as number
-    pendingLastReadTimersRef.current.set(sid, timer)
+    pendingLastReadTimersRef.current.set(scopedKey, timer)
   }, [])
 
   useEffect(() => {
@@ -2059,6 +2078,10 @@ export default function App() {
         } : p))
       }
       setSessions(prev => [fresh, ...prev.filter(s => s.id !== session.id && !extraIds.includes(s.id))])
+      setLastReadTime(fresh.id, Date.now())
+      if (isCanonical && botProfile?.canonical_session?.id) {
+        setLastReadTime(botProfile.canonical_session.id, Date.now())
+      }
       void refresh()
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not clear chat history.')

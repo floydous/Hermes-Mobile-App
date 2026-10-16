@@ -762,7 +762,7 @@ export function ImageLightbox({
           className="image-lightbox-img"
           src={src}
           alt={alt || fileName}
-          onDoubleClick={() => controller.toggleZoom()}
+          onDoubleClick={() => controller.onDoubleClick()}
           onClick={e => {
             e.stopPropagation()
           }}

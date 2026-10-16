@@ -465,6 +465,59 @@ describe('ImageLightbox Discord-style preview', () => {
       controller.dispose()
     })
 
+    it('suppresses synthetic onDoubleClick after touch double-tap to prevent fast zoom in and out phenomenon', () => {
+      const env = createTestScheduler()
+      const controller = new LightboxGestureController(env.scheduler)
+
+      // Initial state: 1.0x
+      expect(controller.getSnapshot().zoomScale).toBe(1)
+
+      // User double-taps on mobile screen (tap 1 at t=1000, tap 2 at t=1200)
+      controller.onTouchStartOne(200, 200, 1000)
+      controller.onTouchStartOne(200, 200, 1200)
+      expect(controller.getSnapshot().zoomScale).toBe(2.5)
+
+      // Mobile browser emits synthetic dblclick event 60ms later at t=1260
+      const syntheticDblClickResult = controller.onDoubleClick(1260)
+      // Must be suppressed!
+      expect(syntheticDblClickResult).toBe(false)
+      // Zoom must REMAIN at 2.5x (NOT zoom right back out to 1.0x!)
+      expect(controller.getSnapshot().zoomScale).toBe(2.5)
+
+      // User later double-taps to zoom out (tap 3 at t=3000, tap 4 at t=3200)
+      controller.onTouchStartOne(200, 200, 3000)
+      controller.onTouchStartOne(200, 200, 3200)
+      expect(controller.getSnapshot().zoomScale).toBe(1)
+
+      // Mobile browser emits synthetic dblclick event 60ms later at t=3260
+      const syntheticDblClickOut = controller.onDoubleClick(3260)
+      expect(syntheticDblClickOut).toBe(false)
+      // Zoom must REMAIN at 1.0x (NOT zoom right back in!)
+      expect(controller.getSnapshot().zoomScale).toBe(1)
+
+      controller.dispose()
+    })
+
+    it('allows normal desktop mouse double-click to toggle zoom cleanly without touch events', () => {
+      const env = createTestScheduler()
+      const controller = new LightboxGestureController(env.scheduler)
+
+      // Initial: 1.0x
+      expect(controller.getSnapshot().zoomScale).toBe(1)
+
+      // Desktop user double-clicks with mouse at t=1000
+      const firstClick = controller.onDoubleClick(1000)
+      expect(firstClick).toBe(true)
+      expect(controller.getSnapshot().zoomScale).toBe(2.5)
+
+      // Desktop user double-clicks with mouse again at t=2000
+      const secondClick = controller.onDoubleClick(2000)
+      expect(secondClick).toBe(true)
+      expect(controller.getSnapshot().zoomScale).toBe(1)
+
+      controller.dispose()
+    })
+
     it('dismisses via swipe when downward drag exceeds the 80px threshold on release', () => {
       const env = createTestScheduler()
       const controller = new LightboxGestureController(env.scheduler)
