@@ -3153,8 +3153,11 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
 
 .image-lightbox-stage.is-closing {
   animation: lightbox-stage-exit 0.20s cubic-bezier(0.2, 0, 0, 1) both !important;
+  pointer-events: none !important;
 }
 
+.image-lightbox-backdrop.is-closing,
+.image-lightbox-top-bar.is-closing,
 .image-lightbox-stage.is-gliding-out,
 .image-lightbox-backdrop.is-gliding-out {
   pointer-events: none !important;

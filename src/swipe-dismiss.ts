@@ -67,6 +67,43 @@ export function classifyDoubleTap(
   return { isDoubleTap: false, nextTapTime: now }
 }
 
+export class LightboxDismissCoordinator {
+  private closeTimer: number | null = null
+  private isDismissing = false
+
+  constructor(
+    private readonly getDelay: () => number,
+    private readonly onClosed: () => void,
+    private readonly scheduler: LightboxScheduler = defaultLightboxScheduler
+  ) {}
+
+  public dismiss(immediate = false): { delay: number; scheduled: boolean } {
+    if (this.isDismissing) return { delay: 0, scheduled: false }
+    this.isDismissing = true
+    const delay = immediate ? 0 : this.getDelay()
+    if (delay === 0) {
+      this.onClosed()
+      return { delay: 0, scheduled: false }
+    }
+    this.closeTimer = this.scheduler.setTimer(() => {
+      this.closeTimer = null
+      this.onClosed()
+    }, delay)
+    return { delay, scheduled: true }
+  }
+
+  public isDismissed(): boolean {
+    return this.isDismissing
+  }
+
+  public dispose(): void {
+    if (this.closeTimer != null) {
+      this.scheduler.clearTimer(this.closeTimer)
+      this.closeTimer = null
+    }
+  }
+}
+
 export interface LightboxScheduler {
   now: () => number
   requestFrame: (cb: () => void) => number

@@ -5,6 +5,7 @@ import {
   classifyDoubleTap,
   computeDismissDelay,
   computeSwipeTransform,
+  LightboxDismissCoordinator,
   LightboxGestureController,
   type LightboxScheduler,
   processSwipeMove,
@@ -531,6 +532,87 @@ describe('ImageLightbox Discord-style preview', () => {
       expect(phase2Snap.isDragging).toBe(false)
 
       controller.dispose()
+    })
+
+    it('ensures explicit dismissal marks controller as dismissed and survives state updates without timer cancellation', () => {
+      const env = createTestScheduler()
+      const controller = new LightboxGestureController(env.scheduler)
+
+      let dismissedEmitted = false
+      controller.subscribe(snap => {
+        if (snap.isDismissed) dismissedEmitted = true
+      })
+
+      // User triggers dismissal (e.g. clicks X button)
+      controller.onExplicitDismiss()
+      expect(controller.getSnapshot().isDismissed).toBe(true)
+      expect(dismissedEmitted).toBe(true)
+
+      // Subsequent gestures must be completely ignored once dismissed
+      controller.onTouchStartOne(100, 100)
+      expect(controller.getSnapshot().isDragging).toBe(false)
+      expect(controller.getSnapshot().dragY).toBe(0)
+
+      controller.dispose()
+    })
+
+    describe('LightboxDismissCoordinator timer lifecycle', () => {
+      it('schedules dismissal and calls onClosed exactly once after delay', () => {
+        const env = createTestScheduler()
+        const onClosed = vi.fn()
+        const coordinator = new LightboxDismissCoordinator(() => 200, onClosed, env.scheduler)
+
+        // Trigger dismissal
+        const res = coordinator.dismiss()
+        expect(res.scheduled).toBe(true)
+        expect(res.delay).toBe(200)
+        expect(onClosed).not.toHaveBeenCalled()
+        expect(coordinator.isDismissed()).toBe(true)
+
+        // Second dismissal call while in progress must be ignored
+        const secondRes = coordinator.dismiss()
+        expect(secondRes.scheduled).toBe(false)
+        expect(onClosed).not.toHaveBeenCalled()
+
+        // Advance 100ms -> still pending
+        env.advanceTimers(100)
+        expect(onClosed).not.toHaveBeenCalled()
+
+        // Advance past 200ms -> onClosed called exactly once!
+        env.advanceTimers(100)
+        expect(onClosed).toHaveBeenCalledTimes(1)
+
+        coordinator.dispose()
+      })
+
+      it('cancels pending dismissal timer if dispose() is called before delay expires', () => {
+        const env = createTestScheduler()
+        const onClosed = vi.fn()
+        const coordinator = new LightboxDismissCoordinator(() => 200, onClosed, env.scheduler)
+
+        coordinator.dismiss()
+        expect(env.getPendingTimerCount()).toBe(1)
+
+        coordinator.dispose()
+        expect(env.getPendingTimerCount()).toBe(0)
+
+        env.advanceTimers(300)
+        expect(onClosed).not.toHaveBeenCalled()
+      })
+
+      it('executes onClosed immediately (0ms) when reduced motion or immediate flag is active', () => {
+        const env = createTestScheduler()
+        const onClosed = vi.fn()
+        const coordinator = new LightboxDismissCoordinator(() => 0, onClosed, env.scheduler)
+
+        const res = coordinator.dismiss(true)
+        expect(res.scheduled).toBe(false)
+        expect(res.delay).toBe(0)
+        expect(onClosed).toHaveBeenCalledTimes(1)
+        expect(env.getPendingTimerCount()).toBe(0)
+
+        coordinator.dispose()
+      })
     })
   })
 })

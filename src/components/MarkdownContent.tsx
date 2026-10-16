@@ -476,7 +476,11 @@ export function ImageLightbox({
   const [zoomScale, setZoomScale] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
 
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+  const priorOverflowRef = useRef<string | null>(null)
   const closeTimerRef = useRef<number | null>(null)
+  const isDismissingRef = useRef(false)
   const controllerRef = useRef<LightboxGestureController | null>(null)
   if (!controllerRef.current) {
     controllerRef.current = new LightboxGestureController()
@@ -497,29 +501,41 @@ export function ImageLightbox({
     }
   }
 
-  // Dismissal from top-bar X button or Escape key (subtle scale-down exit)
+  const restoreBodyOverflow = () => {
+    if (typeof document !== 'undefined' && document.body) {
+      document.body.style.overflow = priorOverflowRef.current ?? ''
+    }
+  }
+
+  // Safe dismissal callback
   const dismiss = useCallback(() => {
-    if (isClosing || isGlidingOut) return
+    if (isDismissingRef.current) return
+    isDismissingRef.current = true
     controller.onExplicitDismiss()
     const delay = computeDismissDelay(prefersReducedMotion())
     if (delay === 0) {
-      onClose()
+      restoreBodyOverflow()
+      onCloseRef.current()
       return
     }
     setIsClosing(true)
     setIsEntering(false)
     if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
     closeTimerRef.current = window.setTimeout(() => {
-      onClose()
+      closeTimerRef.current = null
+      restoreBodyOverflow()
+      onCloseRef.current()
     }, delay)
-  }, [controller, isClosing, isGlidingOut, onClose])
+  }, [controller])
 
   // Dismissal from swipe-down gesture: continues gliding smoothly downwards off-screen
   const dismissViaSwipeDown = useCallback((finalDragY: number) => {
-    if (isClosing || isGlidingOut) return
+    if (isDismissingRef.current) return
+    isDismissingRef.current = true
     const delay = computeDismissDelay(prefersReducedMotion())
     if (delay === 0) {
-      onClose()
+      restoreBodyOverflow()
+      onCloseRef.current()
       return
     }
     setIsGlidingOut(true)
@@ -528,9 +544,16 @@ export function ImageLightbox({
     setDragY(finalDragY + 600)
     if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
     closeTimerRef.current = window.setTimeout(() => {
-      onClose()
+      closeTimerRef.current = null
+      restoreBodyOverflow()
+      onCloseRef.current()
     }, delay)
-  }, [isClosing, isGlidingOut, onClose])
+  }, [])
+
+  const dismissRef = useRef(dismiss)
+  dismissRef.current = dismiss
+  const dismissViaSwipeDownRef = useRef(dismissViaSwipeDown)
+  dismissViaSwipeDownRef.current = dismissViaSwipeDown
 
   // Unconditional unmount cleanup for dismissal timers and animations
   useEffect(() => {
@@ -539,20 +562,23 @@ export function ImageLightbox({
       setIsDragging(snap.isDragging)
       setZoomScale(snap.zoomScale)
       setPan(snap.pan)
-      if (snap.isDismissed && !isClosing && !isGlidingOut) {
+      if (snap.isDismissed && !isDismissingRef.current) {
         if (snap.dragY > 0) {
-          dismissViaSwipeDown(snap.dragY)
+          dismissViaSwipeDownRef.current(snap.dragY)
         } else {
-          dismiss()
+          dismissRef.current()
         }
       }
     })
     return () => {
       unsub()
       controller.dispose()
-      if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
+      if (closeTimerRef.current) {
+        clearTimeout(closeTimerRef.current)
+        closeTimerRef.current = null
+      }
     }
-  }, [controller, dismiss, dismissViaSwipeDown, isClosing, isGlidingOut])
+  }, [controller])
 
   useEffect(() => {
     if (prefersReducedMotion()) {
@@ -567,16 +593,18 @@ export function ImageLightbox({
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') dismiss()
+      if (e.key === 'Escape') dismissRef.current()
     }
-    const origOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
+    if (typeof document !== 'undefined' && document.body) {
+      priorOverflowRef.current = document.body.style.overflow
+      document.body.style.overflow = 'hidden'
+    }
     window.addEventListener('keydown', handleKeyDown)
     return () => {
-      document.body.style.overflow = origOverflow
+      restoreBodyOverflow()
       window.removeEventListener('keydown', handleKeyDown)
     }
-  }, [dismiss])
+  }, [])
 
   const handleDownload = async (e: React.MouseEvent) => {
     e.stopPropagation()
