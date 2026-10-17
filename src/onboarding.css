@@ -360,7 +360,7 @@
 .onboarding-hero-composition {
   position: relative;
   width: 100%;
-  margin: 0 auto;
+  margin: clamp(40px, 7vh, 68px) auto 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -391,7 +391,7 @@
 /* Monumental background words: centered horizontally across all resolutions */
 .onboarding-bg-word-top {
   position: absolute;
-  top: -50px; /* Shifts up so 50% is visible above head, 50% covered by head */
+  top: -48px; /* Shifts up so 50% is visible above head, 50% covered by head */
   left: 0;
   right: 0;
   width: 100%;
@@ -402,12 +402,14 @@
   user-select: none;
   z-index: 1; /* Sits behind the sculpture figure */
   overflow: visible;
+  padding: 0 8vw; /* 8% side margin on each side */
+  box-sizing: border-box;
 }
 
 .onboarding-bg-word-top .onboarding-bg-title-word {
   text-align: center;
-  font-size: clamp(124px, 30vw, 164px);
-  line-height: 0.88;
+  font-size: clamp(98px, 26vw, 132px);
+  line-height: 0.86;
   letter-spacing: -0.04em;
   margin: 0 auto;
   overflow: visible;
@@ -426,12 +428,14 @@
   user-select: none;
   z-index: 1; /* Sits behind the sculpture figure */
   overflow: visible;
+  padding: 0 8vw; /* 8% side margin on each side */
+  box-sizing: border-box;
 }
 
 .onboarding-bg-word-bottom .onboarding-bg-title-word {
   text-align: center;
-  font-size: clamp(134px, 34vw, 174px);
-  line-height: 0.88;
+  font-size: clamp(112px, 30.5vw, 150px);
+  line-height: 0.86;
   letter-spacing: -0.04em;
   margin: 0 auto;
   overflow: visible;
@@ -508,7 +512,7 @@
 .onboarding-welcome-slogan {
   position: relative;
   z-index: 3;
-  margin-top: 48px;
+  margin-top: 44px;
   margin-bottom: 0;
   padding: 0 16px;
   font-size: 15px;
