@@ -31,6 +31,7 @@
 }
 
 .onboarding-screen {
+  --onboarding-footer-height: clamp(180px, 32vh, 280px);
   position: fixed;
   inset: 0;
   width: 100%;
@@ -60,7 +61,7 @@
   left: 0;
   right: 0;
   width: 100%;
-  height: clamp(180px, 32vh, 280px);
+  height: var(--onboarding-footer-height);
   pointer-events: none;
   user-select: none;
   z-index: 1;
@@ -286,18 +287,9 @@
   box-sizing: border-box;
 }
 
-.onboarding-welcome-stage {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  padding: 0;
-  box-sizing: border-box;
-}
-
 .onboarding-welcome-stage .onboarding-actions {
-  position: absolute;
-  bottom: calc(24px + env(safe-area-inset-bottom));
+  position: fixed;
+  bottom: calc(20px + env(safe-area-inset-bottom));
   left: 0;
   right: 0;
   width: 100%;
@@ -305,7 +297,7 @@
   margin: 0 auto;
   padding: 0 24px;
   box-sizing: border-box;
-  z-index: 4;
+  z-index: 10;
 }
 
 .onboarding-choice-stage,
@@ -354,20 +346,23 @@
 }
 
 /* --------------------------------------------------------------------------
-   STEP 1: WELCOME SCREEN (Fixed Composition — Identical Across All Resolutions)
+   STEP 1: WELCOME SCREEN (Centered in Screen Height - Footer Image Height)
    -------------------------------------------------------------------------- */
-.onboarding-welcome-stage {
+.onboarding-screen .onboarding-welcome-stage {
   position: absolute;
-  inset: 0;
+  top: 0;
+  left: 0;
+  right: 0;
   width: 100%;
-  height: 100%;
+  height: calc(100% - var(--onboarding-footer-height));
+  max-height: calc(100% - var(--onboarding-footer-height));
   overflow: hidden;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding-bottom: calc(36px + env(safe-area-inset-bottom));
+  z-index: 2;
 }
 
 .onboarding-hero-composition {
