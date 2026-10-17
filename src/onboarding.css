@@ -363,18 +363,21 @@
   height: 100%;
   overflow: hidden;
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding-bottom: calc(36px + env(safe-area-inset-bottom));
 }
 
 .onboarding-hero-composition {
-  position: absolute;
-  top: clamp(28px, 5vh, 44px);
-  left: 0;
-  right: 0;
+  position: relative;
   width: min(400px, 100%);
   margin: 0 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   pointer-events: none;
   user-select: none;
   z-index: 2;
@@ -559,9 +562,6 @@
 }
 
 @media (max-height: 640px) {
-  .onboarding-hero-composition {
-    top: 20px;
-  }
   .onboarding-hero-figure-wrap {
     height: 230px;
   }
