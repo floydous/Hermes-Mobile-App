@@ -360,7 +360,7 @@
 .onboarding-hero-composition {
   position: relative;
   width: 100%;
-  margin: 22px auto 0;
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -373,9 +373,9 @@
 
 .onboarding-hero-figure-wrap {
   position: relative;
-  width: 100vw;
+  width: 100%;
+  aspect-ratio: 720 / 540;
   max-width: 100%;
-  height: clamp(290px, 42vh, 360px);
   display: grid;
   grid-template-areas: 'figure';
   justify-items: center;
@@ -391,7 +391,7 @@
 /* Monumental background words: centered horizontally across all resolutions */
 .onboarding-bg-word-top {
   position: absolute;
-  top: -62px; /* Shifts up so 50% is visible above head, 50% covered by head */
+  top: -50px; /* Shifts up so 50% is visible above head, 50% covered by head */
   left: 0;
   right: 0;
   width: 100%;
@@ -406,7 +406,7 @@
 
 .onboarding-bg-word-top .onboarding-bg-title-word {
   text-align: center;
-  font-size: clamp(134px, 32.2vw, 178px);
+  font-size: clamp(124px, 30vw, 164px);
   line-height: 0.88;
   letter-spacing: -0.04em;
   margin: 0 auto;
@@ -415,7 +415,7 @@
 
 .onboarding-bg-word-bottom {
   position: absolute;
-  bottom: -40px; /* Shifts down so 50% is covered by torso, 50% visible below */
+  bottom: -36px; /* Shifts down so 50% is covered by torso, 50% visible below */
   left: 0;
   right: 0;
   width: 100%;
@@ -430,7 +430,7 @@
 
 .onboarding-bg-word-bottom .onboarding-bg-title-word {
   text-align: center;
-  font-size: clamp(140px, 36vw, 185px);
+  font-size: clamp(134px, 34vw, 174px);
   line-height: 0.88;
   letter-spacing: -0.04em;
   margin: 0 auto;
@@ -473,7 +473,7 @@
   width: 100%;
   height: 100%;
   aspect-ratio: 720 / 540;
-  object-fit: contain;
+  object-fit: cover;
   object-position: center center;
   display: block;
   margin: 0 auto;
@@ -508,7 +508,7 @@
 .onboarding-welcome-slogan {
   position: relative;
   z-index: 3;
-  margin-top: 54px;
+  margin-top: 48px;
   margin-bottom: 0;
   padding: 0 16px;
   font-size: 15px;
