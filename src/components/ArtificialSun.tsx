@@ -204,6 +204,8 @@ export function ArtificialSun({
 
   const angleRef = useRef<number>(THEME_ANGLES[theme] ?? 0)
   const velocityRef = useRef<number>(0)
+  const isPointerDownRef = useRef<boolean>(false)
+  const isDragConfirmedRef = useRef<boolean>(false)
   const isDraggingRef = useRef<boolean>(false)
   const dragStartPointerAngleRef = useRef<number>(0)
   const dragStartWheelAngleRef = useRef<number>(0)
@@ -302,12 +304,8 @@ export function ArtificialSun({
   }
 
   function handlePointerDown(e: React.PointerEvent<HTMLButtonElement>) {
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId)
-    } catch {
-      // Ignore
-    }
-    isDraggingRef.current = true
+    isPointerDownRef.current = true
+    isDragConfirmedRef.current = false
     snappingTargetRef.current = null
     velocityRef.current = 0
 
@@ -320,7 +318,30 @@ export function ArtificialSun({
   }
 
   function handlePointerMove(e: React.PointerEvent<HTMLButtonElement>) {
-    if (!isDraggingRef.current) return
+    if (!isPointerDownRef.current) return
+
+    const dx = e.clientX - dragStartPosRef.current.x
+    const dy = e.clientY - dragStartPosRef.current.y
+    const dist = Math.hypot(dx, dy)
+
+    // Gesture discrimination: require 6px horizontal movement to confirm spin intent
+    if (!isDragConfirmedRef.current) {
+      if (Math.abs(dy) > Math.abs(dx) * 1.3 && Math.abs(dy) >= 12) {
+        // Vertical scroll intent: yield to vertical scrolling
+        isPointerDownRef.current = false
+        return
+      }
+      if (dist >= 6) {
+        isDragConfirmedRef.current = true
+        isDraggingRef.current = true
+        try {
+          e.currentTarget.setPointerCapture(e.pointerId)
+        } catch {}
+      } else {
+        return
+      }
+    }
+
     const now = performance.now()
     const pointerAngle = getPointerAngle(e.clientX, e.clientY)
 
@@ -361,16 +382,17 @@ export function ArtificialSun({
   }
 
   function endDrag(e: React.PointerEvent<HTMLButtonElement>) {
-    if (!isDraggingRef.current) return
+    if (!isPointerDownRef.current && !isDraggingRef.current) return
+    const wasConfirmedDrag = isDragConfirmedRef.current
+    isPointerDownRef.current = false
+    isDragConfirmedRef.current = false
     isDraggingRef.current = false
 
     try {
       if (e.currentTarget.hasPointerCapture(e.pointerId)) {
         e.currentTarget.releasePointerCapture(e.pointerId)
       }
-    } catch {
-      // Ignore
-    }
+    } catch {}
 
     const dist = Math.hypot(
       e.clientX - dragStartPosRef.current.x,
@@ -378,12 +400,11 @@ export function ArtificialSun({
     )
 
     // Tap detected -> cycle forward by exactly +120 deg (White -> Grey -> Black -> White)
-    if (dist < 8) {
+    if (!wasConfirmedDrag || dist < 8) {
       const currentTh = themeRef.current
       const nextTheme: 'light' | 'grey' | 'dark' =
         currentTh === 'light' ? 'grey' : currentTh === 'grey' ? 'dark' : 'light'
 
-      // Always step forward by +120 deg
       snappingTargetRef.current = angleRef.current + 120
       currentSectorRef.current = nextTheme
 
