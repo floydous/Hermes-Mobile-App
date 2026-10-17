@@ -604,7 +604,7 @@
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
-  padding-top: clamp(24px, 6vh, 48px);
+  padding-top: calc(76px + env(safe-area-inset-top));
   gap: 32px;
 }
 
@@ -711,7 +711,7 @@
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
-  padding-top: clamp(20px, 5vh, 40px);
+  padding-top: calc(76px + env(safe-area-inset-top));
   gap: 24px;
 }
 
@@ -852,7 +852,7 @@
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
-  padding-top: clamp(24px, 6vh, 48px);
+  padding-top: calc(76px + env(safe-area-inset-top));
   gap: 24px;
 }
 
