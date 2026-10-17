@@ -17,7 +17,7 @@
 @font-face {
   font-family: 'Rules Gothic Condensed';
   font-style: normal;
-  font-weight: 500;
+  font-weight: 100 900;
   src: url('./assets/fonts/RulesGothicCnd-Medium.woff2') format('woff2');
   font-display: swap;
 }
@@ -382,8 +382,9 @@
 
 .onboarding-hero-figure-wrap {
   position: relative;
-  width: 100%;
-  height: clamp(280px, 40vh, 340px);
+  width: 100vw;
+  max-width: 100%;
+  height: clamp(290px, 42vh, 360px);
   display: grid;
   grid-template-areas: 'figure';
   justify-items: center;
@@ -412,7 +413,7 @@
 
 .onboarding-bg-word-top .onboarding-bg-title-word {
   text-align: center;
-  font-size: clamp(124px, 33vw, 140px);
+  font-size: clamp(134px, 32.2vw, 178px);
   line-height: 0.82;
   letter-spacing: -0.04em;
   margin: 0 auto;
@@ -434,7 +435,7 @@
 
 .onboarding-bg-word-bottom .onboarding-bg-title-word {
   text-align: center;
-  font-size: clamp(132px, 35vw, 148px);
+  font-size: clamp(154px, 38.5vw, 196px);
   line-height: 0.82;
   letter-spacing: -0.04em;
   margin: 0 auto;
@@ -442,11 +443,10 @@
 
 .onboarding-bg-title-word {
   display: block;
-  font-family: 'Rules Gothic Condensed', 'Rules Variable', -apple-system, sans-serif;
-  font-weight: 700;
+  font-family: 'Rules Gothic Condensed', 'Rules Gothic Compressed', 'Rules Variable', sans-serif;
+  font-weight: 600;
   line-height: 0.82;
   text-transform: uppercase;
-  /* Black / OLED Dark: calibrated to the hero bust's signature fountain pen ink blue (#5f65b7) */
   color: #5f65b7;
   opacity: 0.28;
   white-space: nowrap;
@@ -470,15 +470,16 @@
 .onboarding-hero-figure {
   grid-area: figure;
   position: absolute;
-  top: 12px;
+  top: 10px;
   left: 0;
   right: 0;
   bottom: 0;
-  width: 100%;
+  width: 100vw;
+  max-width: 100%;
   height: 100%;
   aspect-ratio: 720 / 540;
-  object-fit: contain;
-  object-position: center center;
+  object-fit: cover;
+  object-position: center top;
   display: block;
   margin: 0 auto;
   transform: none;
