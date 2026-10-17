@@ -203,6 +203,9 @@ async fn hermes_connection_probe(base_url: String) -> Result<String, String> {
             })?;
         let status = response.status();
         let body = response.text().unwrap_or_default();
+        if body.trim().starts_with('<') {
+            return Err("The address returned an HTML web page instead of the Hermes gateway API. Check that you entered the Hermes gateway port (typically 9119, not the web app port 1420).".to_string());
+        }
         if !status.is_success() {
             let detail = serde_json::from_str::<serde_json::Value>(&body)
                 .ok()

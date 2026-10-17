@@ -18,6 +18,33 @@ export function supportsBasicAuth(providers: unknown[] | undefined): boolean {
   )) === true
 }
 
+export interface OnboardingBootstrapState {
+  needsOnboarding: boolean
+  configuredEndpoint: string | null
+  endpointToActivate: string
+}
+
+export function decideOnboardingBootstrapState(
+  nativeEndpoint: string | null | undefined,
+  localEndpoint: string | null | undefined,
+  dismissed: boolean,
+  defaultFallback = 'http://127.0.0.1:9119'
+): OnboardingBootstrapState {
+  const configured = (nativeEndpoint && nativeEndpoint.trim()) || (localEndpoint && localEndpoint.trim()) || null
+  if (!configured && !dismissed) {
+    return {
+      needsOnboarding: true,
+      configuredEndpoint: null,
+      endpointToActivate: defaultFallback,
+    }
+  }
+  return {
+    needsOnboarding: false,
+    configuredEndpoint: configured,
+    endpointToActivate: selectRestoredEndpoint(nativeEndpoint, localEndpoint, defaultFallback),
+  }
+}
+
 export class RequestEpoch {
   private value = 0
 

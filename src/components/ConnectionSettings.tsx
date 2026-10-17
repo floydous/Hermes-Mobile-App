@@ -20,7 +20,7 @@ import {
 
 const HermesMobileLogo = HermesAgentAppIcon
 
-type Theme = 'dark' | 'light' | 'grey' | 'aurora'
+type Theme = 'dark' | 'light' | 'grey'
 type Page = 'root' | 'pairing' | 'about' | 'appearance' | 'diagnostics'
 
 type Props = {
@@ -39,10 +39,9 @@ type Props = {
 }
 
 const themes: Array<{ id: Theme; label: string; description: string }> = [
-  { id: 'dark', label: 'OLED dark', description: 'Deep black with violet accents' },
-  { id: 'light', label: 'Light', description: 'Cool, layered blue-gray surfaces' },
-  { id: 'grey', label: 'Graphite', description: 'Neutral grey with cool surfaces' },
-  { id: 'aurora', label: 'Aurora', description: 'Midnight navy with teal-violet glow' },
+  { id: 'light', label: 'White', description: 'Clean white canvas & daylight contrast' },
+  { id: 'grey', label: 'Grey', description: 'Refined charcoal & graphite monochrome' },
+  { id: 'dark', label: 'Black / OLED Dark', description: 'Deep obsidian & OLED true black' },
 ]
 
 const external = (href: string) => ({ href, onClick: (event: React.MouseEvent<HTMLAnchorElement>) => { event.preventDefault(); void invoke('open_external_url', { url: href }).catch(() => window.open(href, '_blank', 'noopener,noreferrer')) } })

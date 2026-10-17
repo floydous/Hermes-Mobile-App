@@ -12,5 +12,9 @@ SOUL.md
 CLAUDE.md
 .pi/
 .opencode/
+.agents/
+.taste-skill/
+skills-lock.json
+hermes-caduceus-themes.html
 android-debug*.log
 scripts/__pycache__/

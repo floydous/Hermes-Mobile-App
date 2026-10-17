@@ -7,10 +7,12 @@ import { BotAppearancePicker } from './components/BotAppearancePicker'
 import { BotProfileSheet } from './components/BotProfileSheet'
 import { TasksView, preloadTaskJobs } from './components/TasksView'
 import { ConnectionSettings } from './components/ConnectionSettings'
+import { OnboardingLanding } from './components/OnboardingLanding'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import HermesHostIcon from './assets/hermes-agent-icon-transparent.svg'
 import { onBackButtonPress } from '@tauri-apps/api/app'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { isTauri } from '@tauri-apps/api/core'
 import { buildAttachmentPrompt, attachmentSummary } from './attachment-routing'
 import { buildBotRows, cleanPreviewSnippet, resolveCanonicalSessionId, type RosterProfile } from './live-model'
 import { getInitialSpinnerPhrase, getProgressiveSpinnerPhrase } from './spinner-phrases'
@@ -31,7 +33,7 @@ import {
   type ActiveBotTurn,
   type ToolActivity,
 } from './chat-turn'
-import { errorMessage, RequestEpoch, selectRestoredEndpoint } from './connection-state'
+import { decideOnboardingBootstrapState, errorMessage, RequestEpoch, selectRestoredEndpoint } from './connection-state'
 import {
   areMessageListsEqual,
   areMessageListsShallowEqual,
@@ -98,7 +100,13 @@ import {
 
 import { classifyInteractiveRowGesture, computeNextSwipeTab, isHorizontalSwipeIntent, type Tab } from './tab-swipe'
 type DraftBot = { role: string; name: string; description: string; soul: string; model: string; provider: string; shape: string }
-type Theme = 'dark' | 'light' | 'grey' | 'aurora'
+type Theme = 'dark' | 'light' | 'grey'
+
+export function normalizeTheme(val: string | null | undefined): Theme {
+  if (val === 'dark' || val === 'grey' || val === 'light') return val
+  if (val === 'aurora') return 'dark' // Graceful fallback for legacy aurora preference
+  return 'light'
+}
 type SettledAssistantResponse = { sessionId: string; profile: string; content: string; usage?: LiveUsage }
 
 const titleize = (value?: string | null) => (value || '').split(/[-_]+/).filter(Boolean).map(part => (part[0] ? part[0].toUpperCase() + part.slice(1) : '')).join(' ') || 'Bot'
@@ -182,6 +190,9 @@ export function resetLastReadMapForTesting(): void {
   memoizedLastReadMap = null
 }
 
+// DEV OVERRIDE: forces onboarding landing page on open for iteration. Set false for production.
+export const DEV_FORCE_LANDING_PAGE = false
+
 export default function App() {
   const [tab, setTab] = useState<Tab>('bots')
   const [slideDirection, setSlideDirection] = useState<'forward' | 'backward'>('forward')
@@ -231,6 +242,13 @@ export default function App() {
   messagesRef.current = messages
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [needsOnboarding, setNeedsOnboarding] = useState<boolean>(() => {
+    if (DEV_FORCE_LANDING_PAGE) return true
+    if (typeof localStorage === 'undefined') return false
+    const dismissed = localStorage.getItem('hermes-mobile-onboarding-dismissed') === 'true'
+    const stored = localStorage.getItem('hermes-mobile-active-endpoint')
+    return decideOnboardingBootstrapState(null, stored, dismissed).needsOnboarding
+  })
   const [activeEndpoint, setActiveEndpoint] = useState(() => {
     const initial = selectRestoredEndpoint(null, localStorage.getItem('hermes-mobile-active-endpoint'), 'http://127.0.0.1:9119')
     setActiveHermesEndpoint(initial)
@@ -341,7 +359,7 @@ export default function App() {
     soul: 'You are a pragmatic software engineer. Read surrounding code before changing it, keep diffs focused, and verify your work by running it.',
     model: '', provider: '', shape: 'blobatar',
   })
-  const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem('hermes-mobile-theme') as Theme | null) || 'light')
+  const [theme, setTheme] = useState<Theme>(() => normalizeTheme(localStorage.getItem('hermes-mobile-theme')))
   const [uiScale, setUiScale] = useState<number>(() => {
     const saved = localStorage.getItem('hermes-mobile-ui-scale')
     const parsed = saved ? parseFloat(saved) : 1.15
@@ -402,12 +420,14 @@ export default function App() {
       if (navigation.tab !== 'bots') { switchTab('bots'); return true }
       return false
     }
-    void getCurrentWindow().onCloseRequested(async event => {
-      if (await handleBack()) event.preventDefault()
-    }).then(remove => { if (disposed) remove(); else unlisten = remove }).catch(() => {})
-    void onBackButtonPress(async () => {
-      if (!(await handleBack()) && !disposed) await getCurrentWindow().close()
-    }).then(listener => { if (disposed) void listener.unregister(); else unlistenAndroidBack = listener }).catch(() => {})
+    if (isTauri()) {
+      void getCurrentWindow().onCloseRequested(async event => {
+        if (await handleBack()) event.preventDefault()
+      }).then(remove => { if (disposed) remove(); else unlisten = remove }).catch(() => {})
+      void onBackButtonPress(async () => {
+        if (!(await handleBack()) && !disposed) await getCurrentWindow().close()
+      }).then(listener => { if (disposed) void listener.unregister(); else unlistenAndroidBack = listener }).catch(() => {})
+    }
     return () => { disposed = true; unlisten?.(); void unlistenAndroidBack?.unregister() }
   }, [])
 
@@ -823,11 +843,36 @@ export default function App() {
         lastReadCacheRef.current = initializeLastReadMap()
       }
 
+      if (DEV_FORCE_LANDING_PAGE) {
+        if (active) {
+          setNeedsOnboarding(true)
+          setLoading(false)
+        }
+        return
+      }
+
       let nativeEndpoint: string | null = null
       try { nativeEndpoint = await savedHermesEndpoint() }
       catch (reason) { if (active) setError(errorMessage(reason, 'Could not restore the saved Hermes host.')) }
       if (!active) return
-      const endpoint = activateEndpoint(selectRestoredEndpoint(nativeEndpoint, localStorage.getItem('hermes-mobile-active-endpoint'), 'http://127.0.0.1:9119'))
+
+      const localEndpoint = typeof localStorage !== 'undefined' ? localStorage.getItem('hermes-mobile-active-endpoint') : null
+      const dismissed = typeof localStorage !== 'undefined' && localStorage.getItem('hermes-mobile-onboarding-dismissed') === 'true'
+
+      const decision = decideOnboardingBootstrapState(nativeEndpoint, localEndpoint, dismissed)
+      if (decision.needsOnboarding) {
+        if (active) {
+          setNeedsOnboarding(true)
+          setLoading(false)
+        }
+        return
+      }
+
+      if (active) {
+        setNeedsOnboarding(false)
+      }
+
+      const endpoint = activateEndpoint(decision.endpointToActivate)
       await refresh(endpoint, true, true)
       if (active) timer = window.setInterval(() => {
         if (document.visibilityState !== 'visible') return
@@ -2275,6 +2320,30 @@ export default function App() {
     swipeStartYRef.current = null
   }
 
+  if (needsOnboarding) {
+    return (
+      <OnboardingLanding
+        theme={theme}
+        setTheme={setTheme}
+        onPaired={async (endpoint: string) => {
+          const normalized = activateEndpoint(endpoint)
+          try {
+            localStorage.setItem('hermes-mobile-active-endpoint', normalized)
+            localStorage.setItem('hermes-mobile-onboarding-completed', 'true')
+          } catch {}
+          setNeedsOnboarding(false)
+          const data = await refresh(normalized, true)
+          if (!data) {
+            throw new Error(
+              lastConnectionErrorRef.current ||
+                'Signed in, but authenticated Hermes verification failed.'
+            )
+          }
+        }}
+      />
+    )
+  }
+
   if (createOpen) return <CreateWizard step={createStep} setStep={setCreateStep} draft={botDraft} setDraft={setBotDraft} creating={creating} error={error} close={() => { setCreateOpen(false); setCreateStep(0); setError('') }} finish={() => void finishCreate()}/>
   if (settings) return <ConnectionSettings profiles={profiles.length} sessions={sessions.length} connected={connectionStatus === 'connected'} endpoint={activeEndpoint !== 'http://127.0.0.1:9119' ? activeEndpoint : undefined} theme={theme} setTheme={setTheme} uiScale={uiScale} setUiScale={setUiScale} close={() => setSettings(false)} refresh={() => refresh()} onPairingBusy={setPairingBusyState} onPaired={async endpoint => { const normalized = activateEndpoint(endpoint); const data = await refresh(normalized, true); if (!data) throw new Error(lastConnectionErrorRef.current || 'Signed in, but authenticated Hermes REST or live WebSocket verification failed.'); localStorage.setItem('hermes-mobile-active-endpoint', normalized) }}/>
   if (selected && profileSheet) return <BotProfileSheet profile={profiles.find(profile => profile.name === selected.profile)} session={selected} onClose={() => setProfileSheet(false)} onUpdated={() => void refresh()}/>
@@ -2714,10 +2783,9 @@ function Skeleton() { return <div className="skeletons">{[1, 2, 3, 4, 5, 6].map(
 function LegacyConnectionSettings({ profiles, sessions, theme, setTheme, close, refresh }: { profiles: number; sessions: number; theme: Theme; setTheme: (theme: Theme) => void; close: () => void; refresh: () => void }) {
   const [showThemes, setShowThemes] = useState(false)
   const themes: Array<{ id: Theme; label: string; description: string }> = [
-    { id: 'dark', label: 'OLED dark', description: 'Deep black with violet accents' },
-    { id: 'light', label: 'Light', description: 'Bright canvas with soft blue accents' },
-    { id: 'grey', label: 'Graphite', description: 'Neutral grey with cool surfaces' },
-    { id: 'aurora', label: 'Aurora', description: 'Midnight navy with teal-violet glow' },
+    { id: 'light', label: 'White', description: 'Clean white canvas & daylight contrast' },
+    { id: 'grey', label: 'Grey', description: 'Refined charcoal & graphite monochrome' },
+    { id: 'dark', label: 'Black / OLED Dark', description: 'Deep obsidian & OLED true black' },
   ]
   return <main className="app panel"><header className="panel-head"><button className="back-button" onClick={close}>‹</button><div><h2>Connection</h2><p>Hermes Desktop host</p></div></header><section className="connection-card"><span className="status-pill">● Connected</span><h3>This Windows PC</h3><code>127.0.0.1:9119</code><div className="stats"><span><b>{profiles}</b>Bots</span><span><b>{sessions}</b>Sessions</span></div><button className="primary wide" onClick={refresh}>Sync now</button></section><section className="menu-list"><button>Notifications <span>›</span></button><button onClick={() => setShowThemes(value => !value)}>Appearance <span>{themes.find(item => item.id === theme)?.label} ›</span></button>{showThemes && <div className="theme-picker">{themes.map(item => <button className={item.id === theme ? 'selected' : ''} onClick={() => setTheme(item.id)} key={item.id}><span className={`theme-swatch theme-${item.id}`}/><span><b>{item.label}</b><small>{item.description}</small></span><i>{item.id === theme ? '✓' : ''}</i></button>)}</div>}<button>Security & pairing <span>›</span></button><button>About Hermes Mobile <span>0.1.0 ›</span></button></section><p className="fine">The host owns models, credentials, tools, memory, skills, and approvals. This client is the control surface.</p></main>
 }

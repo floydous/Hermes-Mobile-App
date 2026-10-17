@@ -90,7 +90,19 @@ export async function rpcCall<T>(method: string, params: Record<string, unknown>
 
 export async function probeHermesGateway(baseUrl: string): Promise<{ version?: string; auth_required?: boolean; auth_flows?: string[]; auth_providers?: unknown[]; [key: string]: unknown }> {
   const raw = await invoke<string>('hermes_connection_probe', { baseUrl })
-  return JSON.parse(raw) as { version?: string; auth_required?: boolean; auth_flows?: string[]; auth_providers?: unknown[]; [key: string]: unknown }
+  const trimmed = (raw || '').trim()
+  if (trimmed.startsWith('<') || !trimmed.startsWith('{')) {
+    throw new Error(
+      'The specified address returned a web page (HTML) instead of the Hermes gateway API. Check that you entered the Hermes gateway port (typically :9119, not the web app port :1420).'
+    )
+  }
+  try {
+    return JSON.parse(trimmed) as { version?: string; auth_required?: boolean; auth_flows?: string[]; auth_providers?: unknown[]; [key: string]: unknown }
+  } catch {
+    throw new Error(
+      'The gateway response could not be parsed as JSON. Ensure the address points to a valid Hermes Agent Gateway.'
+    )
+  }
 }
 
 export async function savedHermesEndpoint(): Promise<string | null> {

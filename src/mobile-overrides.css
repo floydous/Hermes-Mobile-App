@@ -1933,34 +1933,6 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
   border-color: rgba(255, 255, 255, 0.08);
 }
 
-[data-theme='aurora'] .user-bubble {
-  background: #18283d !important;
-  color: #f3f7ff !important;
-  border-color: rgba(116, 215, 194, 0.2) !important;
-}
-
-[data-theme='aurora'] .user-bubble .markdown-body,
-[data-theme='aurora'] .user-bubble .markdown-body p,
-[data-theme='aurora'] .user-bubble .markdown-body li,
-[data-theme='aurora'] .user-bubble .markdown-body span,
-[data-theme='aurora'] .user-bubble .markdown-body strong,
-[data-theme='aurora'] .user-bubble .markdown-body b {
-  color: #f3f7ff !important;
-}
-
-[data-theme='aurora'] .assistant-bubble {
-  background: #0f1929;
-  border-color: rgba(116, 215, 194, 0.14);
-}
-
-[data-theme='aurora'] .typing-dots .dot {
-  background: #74d7c2;
-}
-
-[data-theme='aurora'] .typing-status {
-  color: #74d7c2;
-}
-
 /* ==========================================================================
    Bots & Sessions Roster: Live In-Progress Work Indicator
    ========================================================================== */
@@ -2072,20 +2044,6 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
 
 [data-theme='grey'] .bot-status-pip {
   border-color: #202124;
-}
-
-[data-theme='aurora'] .bot-status-pip {
-  background: #74d7c2;
-  border-color: #070d18;
-  box-shadow: 0 0 8px rgba(116, 215, 194, 0.55);
-}
-
-[data-theme='aurora'] .live-wave i {
-  background: #74d7c2;
-}
-
-[data-theme='aurora'] .bot-in-progress {
-  color: #74d7c2 !important;
 }
 
 /* Chat header actions: Clear chat & refresh */
