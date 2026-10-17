@@ -391,7 +391,7 @@
 /* Monumental background words: centered horizontally across all resolutions */
 .onboarding-bg-word-top {
   position: absolute;
-  top: 0;
+  top: -62px; /* Shifts up so 50% is visible above head, 50% covered by head */
   left: 0;
   right: 0;
   width: 100%;
@@ -401,19 +401,21 @@
   pointer-events: none;
   user-select: none;
   z-index: 1; /* Sits behind the sculpture figure */
+  overflow: visible;
 }
 
 .onboarding-bg-word-top .onboarding-bg-title-word {
   text-align: center;
   font-size: clamp(134px, 32.2vw, 178px);
-  line-height: 0.82;
+  line-height: 0.88;
   letter-spacing: -0.04em;
   margin: 0 auto;
+  overflow: visible;
 }
 
 .onboarding-bg-word-bottom {
   position: absolute;
-  bottom: -54px;
+  bottom: -40px; /* Shifts down so 50% is covered by torso, 50% visible below */
   left: 0;
   right: 0;
   width: 100%;
@@ -422,14 +424,14 @@
   justify-content: center;
   pointer-events: none;
   user-select: none;
-  z-index: 3; /* Elevated so AGENT is never buried behind hero.webp */
+  z-index: 1; /* Sits behind the sculpture figure */
   overflow: visible;
 }
 
 .onboarding-bg-word-bottom .onboarding-bg-title-word {
   text-align: center;
   font-size: clamp(140px, 36vw, 185px);
-  line-height: 0.95;
+  line-height: 0.88;
   letter-spacing: -0.04em;
   margin: 0 auto;
   overflow: visible;
@@ -505,8 +507,8 @@
 
 .onboarding-welcome-slogan {
   position: relative;
-  z-index: 4;
-  margin-top: 68px;
+  z-index: 3;
+  margin-top: 54px;
   margin-bottom: 0;
   padding: 0 16px;
   font-size: 15px;
@@ -523,6 +525,12 @@
 @media (max-height: 640px) {
   .onboarding-hero-figure-wrap {
     height: 230px;
+  }
+  .onboarding-bg-word-top {
+    top: -46px;
+  }
+  .onboarding-bg-word-bottom {
+    bottom: -32px;
   }
   .onboarding-bg-word-top .onboarding-bg-title-word {
     font-size: 104px;
