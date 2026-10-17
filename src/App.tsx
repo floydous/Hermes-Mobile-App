@@ -190,8 +190,8 @@ export function resetLastReadMapForTesting(): void {
   memoizedLastReadMap = null
 }
 
-// DEV OVERRIDE: forces onboarding landing page on open for iteration. Set false for production.
-export const DEV_FORCE_LANDING_PAGE = false
+// DEV OVERRIDE: forces onboarding landing page on open for iteration.
+export const DEV_FORCE_LANDING_PAGE = true
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('bots')
