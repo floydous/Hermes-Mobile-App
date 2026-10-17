@@ -31,10 +31,11 @@
 }
 
 .onboarding-screen {
-  min-height: 100dvh;
+  height: 100dvh;
+  max-height: 100dvh;
   max-width: 500px;
   margin: 0 auto;
-  padding: calc(16px + env(safe-area-inset-top)) 24px calc(24px + env(safe-area-inset-bottom));
+  padding: calc(12px + env(safe-area-inset-top)) 24px calc(20px + env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -42,7 +43,7 @@
   color: var(--text);
   box-sizing: border-box;
   position: relative;
-  overflow-x: hidden;
+  overflow: hidden;
   transition: background-color 0.4s cubic-bezier(0.16, 1, 0.3, 1),
               color 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -275,10 +276,25 @@
   position: relative;
   z-index: 3;
   flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   padding: 6px 0 12px;
+}
+
+.onboarding-welcome-stage {
+  overflow: hidden;
+}
+
+.onboarding-choice-stage,
+.onboarding-remote-stage,
+.onboarding-termux-stage {
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  padding-right: 2px;
 }
 
 .step-slide-forward {
@@ -328,31 +344,36 @@
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
+  align-items: center;
   justify-content: center;
-  margin-top: -20px;
-  margin-bottom: 8px;
+  width: 100%;
+  margin: -10px auto 4px;
 }
 
 .onboarding-hero-figure-wrap {
   position: relative;
   width: 100%;
+  max-width: 440px;
   display: grid;
   grid-template-areas: 'figure';
-  justify-content: flex-start;
+  justify-items: center;
+  align-items: center;
   pointer-events: none;
   user-select: none;
   z-index: 2;
+  margin: 0 auto;
   animation: onboarding-hero-in 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 /* Monumental background words: positioned with subtle overlap and centered */
 .onboarding-bg-word-top {
   position: absolute;
-  top: -9%;
+  top: -8%;
   left: 0;
   right: 0;
   width: 100%;
   display: flex;
+  align-items: center;
   justify-content: center;
   pointer-events: none;
   user-select: none;
@@ -361,17 +382,19 @@
 
 .onboarding-bg-word-top .onboarding-bg-title-word {
   text-align: center;
-  font-size: clamp(112px, 30.5vw, 178px);
+  font-size: clamp(96px, 26vw, 150px);
   letter-spacing: -0.04em;
+  margin: 0 auto;
 }
 
 .onboarding-bg-word-bottom {
   position: absolute;
-  bottom: -7%;
+  bottom: -6%;
   left: 0;
   right: 0;
   width: 100%;
   display: flex;
+  align-items: center;
   justify-content: center;
   pointer-events: none;
   user-select: none;
@@ -380,8 +403,9 @@
 
 .onboarding-bg-word-bottom .onboarding-bg-title-word {
   text-align: center;
-  font-size: clamp(120px, 33vw, 192px);
+  font-size: clamp(100px, 28vw, 160px);
   letter-spacing: -0.04em;
+  margin: 0 auto;
 }
 
 .onboarding-bg-title-word {
@@ -413,19 +437,22 @@
 
 .onboarding-hero-figure {
   grid-area: figure;
-  width: clamp(390px, 114vw, 560px);
-  max-height: 58vh;
+  width: 100%;
+  max-width: clamp(260px, 78vw, 380px);
+  max-height: clamp(180px, 34vh, 300px);
   height: auto;
   aspect-ratio: 720 / 540;
   object-fit: contain;
-  object-position: left top;
+  object-position: center center;
   display: block;
-  transform: translate(-38px, -18px);
+  margin: 0 auto;
+  transform: none;
   position: relative;
   z-index: 2; /* Sits in FRONT of the words! */
   opacity: 0;
   transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1);
   will-change: opacity;
+  pointer-events: none;
   /* Smooth vertical edge fade: dissolves top and bottom cut-off edges softly */
   mask-image: linear-gradient(
     to bottom,
@@ -483,7 +510,7 @@
 .onboarding-welcome-slogan {
   position: relative;
   z-index: 3;
-  margin-top: clamp(28px, 6vh, 44px);
+  margin-top: clamp(12px, 2.5vh, 20px);
   margin-bottom: 0;
   font-size: 15px;
   font-weight: 550;
