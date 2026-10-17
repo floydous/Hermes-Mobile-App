@@ -348,7 +348,7 @@
   width: 100%;
   height: calc(100% - var(--onboarding-footer-height));
   max-height: calc(100% - var(--onboarding-footer-height));
-  overflow: hidden;
+  overflow: visible;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -368,6 +368,7 @@
   pointer-events: none;
   user-select: none;
   z-index: 2;
+  overflow: visible;
 }
 
 .onboarding-hero-figure-wrap {
@@ -383,22 +384,8 @@
   user-select: none;
   z-index: 2;
   margin: 0 auto;
+  overflow: visible;
   animation: onboarding-hero-in 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
-  /* Reduced edge fade: keeps typography solid, crisp, and fully readable */
-  mask-image: linear-gradient(
-    to bottom,
-    rgba(0, 0, 0, 0.85) 0%,
-    black 3%,
-    black 97%,
-    rgba(0, 0, 0, 0.85) 100%
-  );
-  -webkit-mask-image: linear-gradient(
-    to bottom,
-    rgba(0, 0, 0, 0.85) 0%,
-    black 3%,
-    black 97%,
-    rgba(0, 0, 0, 0.85) 100%
-  );
 }
 
 /* Monumental background words: centered horizontally across all resolutions */
@@ -436,14 +423,16 @@
   pointer-events: none;
   user-select: none;
   z-index: 3; /* Elevated so AGENT is never buried behind hero.webp */
+  overflow: visible;
 }
 
 .onboarding-bg-word-bottom .onboarding-bg-title-word {
   text-align: center;
-  font-size: clamp(154px, 38.5vw, 196px);
-  line-height: 0.82;
+  font-size: clamp(140px, 36vw, 185px);
+  line-height: 0.95;
   letter-spacing: -0.04em;
   margin: 0 auto;
+  overflow: visible;
 }
 
 .onboarding-bg-title-word {
