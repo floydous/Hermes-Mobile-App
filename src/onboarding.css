@@ -542,7 +542,7 @@
 .onboarding-welcome-slogan {
   position: relative;
   z-index: 3;
-  margin-top: 36px;
+  margin-top: clamp(54px, 8vh, 68px);
   margin-bottom: 0;
   padding: 0 16px;
   font-size: 15px;
@@ -565,6 +565,9 @@
   }
   .onboarding-bg-word-bottom .onboarding-bg-title-word {
     font-size: 112px;
+  }
+  .onboarding-welcome-slogan {
+    margin-top: 40px;
   }
 }
 
