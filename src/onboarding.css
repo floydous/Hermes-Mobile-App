@@ -296,11 +296,16 @@
 }
 
 .onboarding-welcome-stage .onboarding-actions {
+  position: absolute;
+  bottom: calc(24px + env(safe-area-inset-bottom));
+  left: 0;
+  right: 0;
   width: 100%;
   max-width: 440px;
   margin: 0 auto;
-  padding: 0 24px calc(24px + env(safe-area-inset-bottom));
+  padding: 0 24px;
   box-sizing: border-box;
+  z-index: 4;
 }
 
 .onboarding-choice-stage,
@@ -349,37 +354,39 @@
 }
 
 /* --------------------------------------------------------------------------
-   STEP 1: WELCOME SCREEN (Asymmetrical Large Hero with Text Overlap)
+   STEP 1: WELCOME SCREEN (Fixed Composition — Identical Across All Resolutions)
    -------------------------------------------------------------------------- */
 .onboarding-welcome-stage {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  flex: 1 1 auto;
-  position: relative;
-  z-index: 2;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .onboarding-hero-composition {
-  position: relative;
+  position: absolute;
+  top: clamp(28px, 5vh, 44px);
+  left: 0;
+  right: 0;
+  width: min(400px, 100%);
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
-  flex: 1 1 auto;
   align-items: center;
-  justify-content: center;
-  width: 100%;
-  max-width: 600px;
-  margin: auto auto;
+  pointer-events: none;
+  user-select: none;
+  z-index: 2;
 }
 
 .onboarding-hero-figure-wrap {
   position: relative;
-  width: 100%;
-  max-width: clamp(280px, min(86vw, 48vh), 460px);
-  display: grid;
-  grid-template-areas: 'figure';
-  justify-items: center;
+  width: min(400px, 100vw);
+  height: clamp(260px, 38vh, 320px);
+  display: flex;
   align-items: center;
+  justify-content: center;
   pointer-events: none;
   user-select: none;
   z-index: 2;
@@ -387,10 +394,10 @@
   animation: onboarding-hero-in 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-/* Monumental background words: responsive dual-axis scaling */
+/* Monumental background words: centered horizontally across all resolutions */
 .onboarding-bg-word-top {
   position: absolute;
-  top: -8%;
+  top: 0;
   left: 0;
   right: 0;
   width: 100%;
@@ -404,14 +411,15 @@
 
 .onboarding-bg-word-top .onboarding-bg-title-word {
   text-align: center;
-  font-size: clamp(84px, min(24vw, 16vh), 154px);
+  font-size: clamp(96px, 32vw, 146px);
+  line-height: 0.82;
   letter-spacing: -0.04em;
   margin: 0 auto;
 }
 
 .onboarding-bg-word-bottom {
   position: absolute;
-  bottom: -6%;
+  bottom: 0;
   left: 0;
   right: 0;
   width: 100%;
@@ -425,7 +433,8 @@
 
 .onboarding-bg-word-bottom .onboarding-bg-title-word {
   text-align: center;
-  font-size: clamp(88px, min(25vw, 17vh), 162px);
+  font-size: clamp(102px, 34vw, 154px);
+  line-height: 0.82;
   letter-spacing: -0.04em;
   margin: 0 auto;
 }
@@ -436,7 +445,7 @@
   font-weight: 700;
   line-height: 0.82;
   text-transform: uppercase;
-  /* Black / OLED Dark: calibrated to the hero bust's signature fountain pen ink blue (#5f65b7, Hue 235.6deg) */
+  /* Black / OLED Dark: calibrated to the hero bust's signature fountain pen ink blue (#5f65b7) */
   color: #5f65b7;
   opacity: 0.28;
   white-space: nowrap;
@@ -459,8 +468,9 @@
 
 .onboarding-hero-figure {
   grid-area: figure;
-  width: 100%;
+  width: min(400px, 100vw);
   height: auto;
+  max-height: 100%;
   aspect-ratio: 720 / 540;
   object-fit: contain;
   object-position: center center;
@@ -530,8 +540,9 @@
 .onboarding-welcome-slogan {
   position: relative;
   z-index: 3;
-  margin-top: clamp(12px, 2.5vh, 20px);
+  margin-top: 14px;
   margin-bottom: 0;
+  padding: 0 16px;
   font-size: 15px;
   font-weight: 550;
   letter-spacing: -0.15px;
@@ -541,6 +552,21 @@
   color: rgba(255, 255, 255, 0.52);
   transition: color 0.25s ease;
   animation: onboarding-slogan-in 0.24s cubic-bezier(0.16, 1, 0.3, 1) 0.08s both;
+}
+
+@media (max-height: 640px) {
+  .onboarding-hero-composition {
+    top: 20px;
+  }
+  .onboarding-hero-figure-wrap {
+    height: 230px;
+  }
+  .onboarding-bg-word-top .onboarding-bg-title-word {
+    font-size: 104px;
+  }
+  .onboarding-bg-word-bottom .onboarding-bg-title-word {
+    font-size: 112px;
+  }
 }
 
 [data-theme='dark'] .onboarding-welcome-slogan,
