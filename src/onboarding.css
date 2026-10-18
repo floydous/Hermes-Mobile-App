@@ -392,11 +392,9 @@
 .onboarding-bg-word-top {
   position: absolute;
   top: -52px; /* Shifts up so 50% is visible above head, 50% covered by head */
-  left: 8vw;
-  right: 8vw;
-  width: 84vw;
-  max-width: 84vw;
-  margin: 0 auto;
+  left: 0;
+  right: 0;
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -404,26 +402,24 @@
   user-select: none;
   z-index: 1; /* Sits behind the sculpture figure */
   overflow: visible;
-  box-sizing: border-box;
 }
 
 .onboarding-bg-word-top .onboarding-bg-title-word {
   text-align: center;
-  font-size: clamp(118px, 29.5vw, 156px);
+  font-size: clamp(128px, 32.5vw, 172px);
   line-height: 0.85;
   letter-spacing: -0.04em;
   margin: 0 auto;
   overflow: visible;
+  white-space: nowrap;
 }
 
 .onboarding-bg-word-bottom {
   position: absolute;
   bottom: -40px; /* Shifts down so 50% is covered by torso, 50% visible below */
-  left: 8vw;
-  right: 8vw;
-  width: 84vw;
-  max-width: 84vw;
-  margin: 0 auto;
+  left: 0;
+  right: 0;
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -431,16 +427,16 @@
   user-select: none;
   z-index: 1; /* Sits behind the sculpture figure */
   overflow: visible;
-  box-sizing: border-box;
 }
 
 .onboarding-bg-word-bottom .onboarding-bg-title-word {
   text-align: center;
-  font-size: clamp(140px, 35vw, 186px);
+  font-size: clamp(152px, 38.5vw, 204px);
   line-height: 0.85;
   letter-spacing: -0.04em;
   margin: 0 auto;
   overflow: visible;
+  white-space: nowrap;
 }
 
 .onboarding-bg-title-word {
