@@ -163,9 +163,9 @@
   top: 0;
   left: 50%;
   transform: translateX(-50%);
-  width: 140px;
-  height: 70px;
-  border-radius: 0 0 70px 70px;
+  width: min(340px, 86vw);
+  height: 160px;
+  border-radius: 0 0 170px 170px;
   background: transparent;
   border: none;
   cursor: grab;

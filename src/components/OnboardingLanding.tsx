@@ -479,7 +479,7 @@ export function OnboardingLanding({
       </div>
 
       <header className="onboarding-header">
-        <ArtificialSun theme={theme} setTheme={setTheme} onCycle={cycleTheme} />
+        <ArtificialSun theme={theme} setTheme={setTheme} onCycle={cycleTheme} interactive={step === 'welcome'} />
       </header>
 
       {/* STEP 1: WELCOME SCREEN */}

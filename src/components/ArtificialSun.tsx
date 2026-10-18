@@ -5,6 +5,7 @@ export interface ArtificialSunProps {
   setTheme?: (theme: 'light' | 'grey' | 'dark') => void
   onCycle?: () => void
   className?: string
+  interactive?: boolean
 }
 
 interface RayDef {
@@ -201,6 +202,7 @@ export function ArtificialSun({
   setTheme,
   onCycle,
   className = '',
+  interactive = true,
 }: ArtificialSunProps) {
   const { xc, yc, rCore, rays, ticks, coreSpokes } = useMemo(() => STATIC_SUN_DATA, [])
 
@@ -233,34 +235,37 @@ export function ArtificialSun({
   useEffect(() => {
     let raf = 0
     let lastTime = performance.now()
-    const prefersReducedMotion =
-      typeof window !== 'undefined' &&
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    let isPaused = false
 
-    const ambientSpeed = 0 // Locked stationary: only user spin gestures rotate the sun
+    const motionQuery =
+      typeof window !== 'undefined'
+        ? window.matchMedia('(prefers-reduced-motion: reduce)')
+        : null
+    let prefersReducedMotion = motionQuery?.matches ?? false
 
-    function updateThemeFromDragAngle(angle: number) {
-      const norm = ((angle % 360) + 360) % 360
-      let sector: 'light' | 'grey' | 'dark'
-      if (norm >= 300 || norm < 60) {
-        sector = 'light' // Day
-      } else if (norm >= 60 && norm < 180) {
-        sector = 'grey' // Dusk
+    const handleMotionChange = (e: MediaQueryListEvent) => {
+      prefersReducedMotion = e.matches
+    }
+    motionQuery?.addEventListener?.('change', handleMotionChange)
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        isPaused = true
+        cancelAnimationFrame(raf)
       } else {
-        sector = 'dark' // Night
-      }
-
-      if (sector !== currentSectorRef.current) {
-        currentSectorRef.current = sector
-        if (setThemeRef.current) {
-          setThemeRef.current(sector)
-        }
+        isPaused = false
+        lastTime = performance.now()
+        raf = requestAnimationFrame(tick)
       }
     }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
 
     function tick(now: number) {
+      if (isPaused) return
       const dt = Math.min(0.05, (now - lastTime) / 1000)
       lastTime = now
+
+      const ambientSpeed = prefersReducedMotion ? 0 : 2.4 // deg/sec slow pace ambient spin
 
       if (!isDraggingRef.current) {
         if (snappingTargetRef.current !== null) {
@@ -273,8 +278,6 @@ export function ArtificialSun({
             // Smooth ease-out into target angle
             angleRef.current += diff * Math.min(1, dt * 9)
           }
-          // IMPORTANT: Do NOT call updateThemeFromDragAngle during programmatic snap!
-          // Doing so would prematurely overwrite the requested theme as the angle traverses sectors.
         } else if (Math.abs(velocityRef.current) > 0.1) {
           angleRef.current += velocityRef.current * dt
           velocityRef.current *= Math.pow(0.88, dt * 60)
@@ -295,7 +298,11 @@ export function ArtificialSun({
     }
 
     raf = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf)
+    return () => {
+      cancelAnimationFrame(raf)
+      motionQuery?.removeEventListener?.('change', handleMotionChange)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
   }, [])
 
   // Sync if theme changes externally: calculate shortest path without backward flip
@@ -589,19 +596,21 @@ export function ArtificialSun({
         </svg>
       </div>
 
-      {/* 2. Elevated interactive wheel spinner & theme switcher touch target over the shrunken speedbump */}
-      <button
-        type="button"
-        className="artificial-sun-touch-target"
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={endDrag}
-        onPointerCancel={endDrag}
-        onLostPointerCapture={endDrag}
-        onKeyDown={handleKeyDown}
-        aria-label={`Solar chronometer: Spin wheel or tap to cycle daytime (${theme === 'light' ? 'Day (Helios)' : theme === 'grey' ? 'Dusk (Hesperus)' : 'Night (Selene)'}).`}
-        title="Spin the wheel or tap to cycle Day (Helios), Dusk (Hesperus), Night (Selene)"
-      />
+      {/* 2. Elevated interactive wheel spinner & theme switcher touch target over the speedbump */}
+      {interactive && (
+        <button
+          type="button"
+          className="artificial-sun-touch-target"
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={endDrag}
+          onPointerCancel={endDrag}
+          onLostPointerCapture={endDrag}
+          onKeyDown={handleKeyDown}
+          aria-label={`Solar chronometer: Spin wheel to cycle daytime (${theme === 'light' ? 'Day (Helios)' : theme === 'grey' ? 'Dusk (Hesperus)' : 'Night (Selene)'}).`}
+          title="Spin the wheel to cycle Day (Helios), Dusk (Hesperus), Night (Selene)"
+        />
+      )}
     </>
   )
 }
