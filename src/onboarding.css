@@ -156,21 +156,21 @@
 
 .artificial-sun-rotating-wheel {
   will-change: transform;
-  transform-origin: 400px 400px;
 }
 
 .artificial-sun-touch-target {
-  position: fixed;
+  position: absolute;
   top: 0;
-  left: 0;
-  right: 0;
-  width: 100%;
-  height: clamp(340px, 45vh, 420px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 140px;
+  height: 70px;
+  border-radius: 0 0 70px 70px;
   background: transparent;
   border: none;
   cursor: grab;
-  touch-action: pan-y;
-  z-index: 10;
+  touch-action: none;
+  z-index: 5;
   pointer-events: auto;
   outline: none;
   -webkit-tap-highlight-color: transparent;

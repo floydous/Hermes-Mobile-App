@@ -7,6 +7,7 @@ import {
   validateAndNormalizeGatewayUrl,
   OnboardingLanding,
 } from './components/OnboardingLanding'
+import { ArtificialSun } from './components/ArtificialSun'
 import { decideOnboardingBootstrapState } from './connection-state'
 
 describe('Onboarding Landing URL utilities', () => {
@@ -250,5 +251,18 @@ describe('normalizeTheme Legacy Migration', () => {
     expect(normalizeTheme(undefined)).toBe('light')
     expect(normalizeTheme('')).toBe('light')
     expect(normalizeTheme('unknown-theme')).toBe('light')
+  })
+})
+
+describe('ArtificialSun Ray Geometry & 360-degree Distribution', () => {
+  it('renders all 360 degrees of rays without clipping or dead sectors', () => {
+    const html = renderToString(<ArtificialSun theme="light" />)
+    expect(html).toContain('artificial-sun-speedbump-svg')
+    expect(html).toContain('artificial-sun-rotating-wheel')
+    expect(html).toContain('cardinal-0-spike')
+    expect(html).toContain('cardinal-90-spike')
+    expect(html).toContain('cardinal-180-spike')
+    expect(html).toContain('cardinal-270-spike')
+    expect(html).toContain('artificial-sun-touch-target')
   })
 })

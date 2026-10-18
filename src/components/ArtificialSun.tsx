@@ -50,43 +50,57 @@ function generateStaticRayData() {
   const tickList: CrossTickDef[] = []
   const spokeList: RayDef[] = []
 
-  // Central Tall Spike at 90 deg (shooting 390px straight down)
-  const tallSpikeLen = 390
-  rayList.push({
-    id: 'center-tall-spike',
-    x1: xc,
-    y1: yc + rCore,
-    x2: xc,
-    y2: yc + rCore + tallSpikeLen,
-    isSpike: true,
-    strokeWidth: 2.2,
-    opacity: 1,
-  })
+  // Add 3 prominent cardinal spikes corresponding to the 3 daytime sectors:
+  // 1. Day / Helios Spike at 90 deg (shooting 380px straight down when theme is Day)
+  const addThemedSpike = (id: string, angleDeg: number, length: number, strokeWidth = 2.0) => {
+    // Keep max spike length inside 340px so endpoints remain well within the 800x800 viewBox (radius 386px < 400px)
+    const clampedLength = Math.min(340, length)
+    const rad = (angleDeg * Math.PI) / 180
+    const cos = Math.cos(rad)
+    const sin = Math.sin(rad)
+    const x1 = Number((xc + rCore * cos).toFixed(2))
+    const y1 = Number((yc + rCore * sin).toFixed(2))
+    const x2 = Number((xc + (rCore + clampedLength) * cos).toFixed(2))
+    const y2 = Number((yc + (rCore + clampedLength) * sin).toFixed(2))
 
-  // Technical crossbar ticks on the tall spike
-  const spikeTickYs = [110, 190, 270, 350]
-  spikeTickYs.forEach((offset, i) => {
-    const half = 6.5 - i * 1.1
-    tickList.push({
-      id: `spike-tick-${i}`,
-      x1: xc - half,
-      y1: yc + rCore + offset,
-      x2: xc + half,
-      y2: yc + rCore + offset,
-      strokeWidth: 1.0,
-      opacity: 0.85,
+    rayList.push({
+      id: `${id}-spike`,
+      x1,
+      y1,
+      x2,
+      y2,
+      isSpike: true,
+      strokeWidth,
+      opacity: 1,
     })
-  })
 
-  // Opposite Spike at 270 deg (shooting upward for 360-degree radial balance)
-  rayList.push({
-    id: 'opposite-tall-spike',
-    x1: xc,
-    y1: yc - rCore,
-    x2: xc,
-    y2: yc - rCore - 280,
-    strokeWidth: 1.8,
-    opacity: 0.9,
+    // Technical crossbar ticks along the spike
+    const tickOffsets = [length * 0.28, length * 0.5, length * 0.72, length * 0.92]
+    tickOffsets.forEach((offset, i) => {
+      const half = 6.0 - i * 1.0
+      const tx = xc + (rCore + offset) * cos
+      const ty = yc + (rCore + offset) * sin
+      const perpCos = -sin
+      const perpSin = cos
+      tickList.push({
+        id: `${id}-tick-${i}`,
+        x1: Number((tx - half * perpCos).toFixed(2)),
+        y1: Number((ty - half * perpSin).toFixed(2)),
+        x2: Number((tx + half * perpCos).toFixed(2)),
+        y2: Number((ty + half * perpSin).toFixed(2)),
+        strokeWidth: 1.0,
+        opacity: 0.85,
+      })
+    })
+  }
+
+  // 12 Prominent Cardinal & Intercardinal Spikes (one every 30 degrees around the full 360-degree circle)
+  const cardinalAngles = [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330]
+  cardinalAngles.forEach(angleDeg => {
+    const isMajor = angleDeg % 90 === 0
+    const spikeLen = isMajor ? 335 : 285
+    const strokeWidth = isMajor ? 2.2 : 1.7
+    addThemedSpike(`cardinal-${angleDeg}`, angleDeg, spikeLen, strokeWidth)
   })
 
   // Dense array of radiating straight lines covering the FULL 360 DEGREES
@@ -95,30 +109,30 @@ function generateStaticRayData() {
 
   for (let i = 0; i < totalRays; i++) {
     const angleDeg = i * angleStep
-    // Skip angles very close to the prominent cardinal spikes
-    if (Math.abs(angleDeg - 90) < 1.4 || Math.abs(angleDeg - 270) < 1.4) continue
+    // Skip angles very close to prominent cardinal spikes
+    if (cardinalAngles.some(ca => Math.abs(angleDeg - ca) < 1.6)) continue
 
     const rad = (angleDeg * Math.PI) / 180
     const cos = Math.cos(rad)
     const sin = Math.sin(rad)
 
-    // Randomized length distribution across the full circle
+    // Rich, well-proportioned length distribution with zero invisible stubs
     const randVal = random()
     let len: number
 
-    if (randVal > 0.88) {
-      len = 250 + random() * 85
-    } else if (randVal > 0.65) {
-      len = 175 + random() * 65
+    if (randVal > 0.85) {
+      len = 260 + random() * 80
+    } else if (randVal > 0.6) {
+      len = 195 + random() * 65
     } else if (randVal > 0.3) {
-      len = 100 + random() * 65
+      len = 145 + random() * 50
     } else {
-      len = 45 + random() * 45
+      len = 105 + random() * 40
     }
 
-    // Add angular noise so lengths feel completely wild, jagged, and non-deterministic
-    const jitter = (random() - 0.5) * 32
-    len = Math.max(40, len + jitter)
+    // Add gentle organic variation while keeping rays distinctly visible
+    const jitter = (random() - 0.5) * 24
+    len = Math.max(90, len + jitter)
 
     const startR = rCore + 3 + random() * 6
     const endR = startR + len
@@ -223,7 +237,7 @@ export function ArtificialSun({
       typeof window !== 'undefined' &&
       window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
-    const ambientSpeed = prefersReducedMotion ? 0 : 3.0 // deg/sec slow pace
+    const ambientSpeed = 0 // Locked stationary: only user spin gestures rotate the sun
 
     function updateThemeFromDragAngle(angle: number) {
       const norm = ((angle % 360) + 360) % 360
@@ -269,9 +283,12 @@ export function ArtificialSun({
         }
       }
 
-      // Direct 60fps DOM rotation around exact center (400px, 400px)
+      // Direct 60fps native SVG rotation around exact viewBox center (400, 400)
       if (wheelGroupRef.current) {
-        wheelGroupRef.current.style.transform = `rotate(${angleRef.current.toFixed(2)}deg)`
+        wheelGroupRef.current.setAttribute(
+          'transform',
+          `rotate(${angleRef.current.toFixed(2)}, 400, 400)`
+        )
       }
 
       raf = requestAnimationFrame(tick)
@@ -293,10 +310,18 @@ export function ArtificialSun({
     currentSectorRef.current = theme
   }, [theme])
 
-  // Interactive Drag / Spin Gesture Handling
+  // Interactive Drag / Spin Gesture Handling - measure pivot dynamically from container bounding rect
   function getPointerAngle(clientX: number, clientY: number): number {
-    const pivotX = typeof window !== 'undefined' ? window.innerWidth / 2 : 400
-    const pivotY = 0 // Exactly at top edge of viewport
+    let pivotX = 0
+    let pivotY = 0
+    if (containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect()
+      pivotX = rect.left + rect.width / 2
+      pivotY = rect.top + rect.height / 2
+    } else {
+      pivotX = typeof window !== 'undefined' ? window.innerWidth / 2 : 400
+      pivotY = 0
+    }
     const dx = clientX - pivotX
     const dy = clientY - pivotY
     return (Math.atan2(dy, dx) * 180) / Math.PI
@@ -380,20 +405,8 @@ export function ArtificialSun({
       e.clientY - dragStartPosRef.current.y
     )
 
-    // Tap detected -> cycle forward by exactly +120 deg (White -> Grey -> Black -> White)
-    if (!wasConfirmedDrag || dist < 8) {
-      const currentTh = themeRef.current
-      const nextTheme: 'light' | 'grey' | 'dark' =
-        currentTh === 'light' ? 'grey' : currentTh === 'grey' ? 'dark' : 'light'
-
-      snappingTargetRef.current = angleRef.current + 120
-      currentSectorRef.current = nextTheme
-
-      if (onCycleRef.current) {
-        onCycleRef.current()
-      } else if (setThemeRef.current) {
-        setThemeRef.current(nextTheme)
-      }
+    // Regular click or tap: DO NOT switch theme. Only deliberate spinning (drag > 10px) switches theme!
+    if (!wasConfirmedDrag || dist < 10) {
       return
     }
 
@@ -449,13 +462,13 @@ export function ArtificialSun({
           <g
             className="artificial-sun-rotating-wheel"
             ref={wheelGroupRef}
-            style={{ transformOrigin: '400px 400px' }}
           >
             {/* Full 360-degree randomized straight rays */}
             <g className="artificial-sun-rays-group">
               {rays.map(ray => (
                 <line
                   key={ray.id}
+                  id={ray.id}
                   x1={ray.x1}
                   y1={ray.y1}
                   x2={ray.x2}
