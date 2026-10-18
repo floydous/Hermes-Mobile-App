@@ -52,15 +52,16 @@ interface ActiveTrace {
 
 const activeTraces = new Map<string, ActiveTrace>()
 
-// Initialize settings from localStorage safely (fail-closed if malformed or unavailable)
+// Initialize settings from localStorage safely (default to enabled on fresh installs so diagnostics work immediately)
 try {
   if (typeof localStorage !== 'undefined') {
-    isPerformanceEnabled = localStorage.getItem(STORAGE_KEY_PERF_ENABLED) === 'true'
+    const stored = localStorage.getItem(STORAGE_KEY_PERF_ENABLED)
+    isPerformanceEnabled = stored !== 'false'
     authToken = localStorage.getItem(STORAGE_KEY_PERF_TOKEN) || null
     customLogHost = localStorage.getItem(STORAGE_KEY_LOG_HOST) || null
   }
 } catch {
-  isPerformanceEnabled = false
+  isPerformanceEnabled = true
 }
 
 /**
@@ -469,7 +470,7 @@ export function remoteLog(level: 'DEBUG' | 'INFO' | 'WARN' | 'ERROR', tag: strin
     stringFlushTimer = setTimeout(() => {
       stringFlushTimer = null
       void flushStringLogs()
-    }, 1000)
+    }, 50)
   }
 }
 

@@ -160,6 +160,101 @@ export function OnboardingLanding({
     return () => window.removeEventListener('popstate', handlePopState)
   }, [step])
 
+  useEffect(() => {
+    if (step !== 'welcome') return
+    let isMounted = true
+
+    const sendDiagnostics = () => {
+      if (!isMounted) return
+      try {
+        const candidateUrls = [
+          'http://100.117.86.67:8765/log',
+          'http://192.168.100.37:8765/log',
+        ]
+        const topWordEl = document.querySelector('.onboarding-bg-word-top .onboarding-bg-title-word') as HTMLElement | null
+        const bottomWordEl = document.querySelector('.onboarding-bg-word-bottom .onboarding-bg-title-word') as HTMLElement | null
+        const heroWrapEl = document.querySelector('.onboarding-hero-figure-wrap') as HTMLElement | null
+        const heroFigEl = document.querySelector('.onboarding-hero-figure.is-active') as HTMLElement | null
+        const screenEl = document.querySelector('.onboarding-screen') as HTMLElement | null
+        const stageEl = document.querySelector('.onboarding-welcome-stage') as HTMLElement | null
+
+        const docEl = document.documentElement
+        const rootComputed = window.getComputedStyle(docEl)
+
+        const topRect = topWordEl?.getBoundingClientRect()
+        const bottomRect = bottomWordEl?.getBoundingClientRect()
+        const heroWrapRect = heroWrapEl?.getBoundingClientRect()
+        const heroFigRect = heroFigEl?.getBoundingClientRect()
+        const screenRect = screenEl?.getBoundingClientRect()
+        const stageRect = stageEl?.getBoundingClientRect()
+
+        const topStyle = topWordEl ? window.getComputedStyle(topWordEl) : null
+        const bottomStyle = bottomWordEl ? window.getComputedStyle(bottomWordEl) : null
+
+        const fontCheck = {
+          rulesGothicCondensed: document.fonts?.check('16px "Rules Gothic Condensed"'),
+          rulesGothicCompressed: document.fonts?.check('16px "Rules Gothic Compressed"'),
+          rulesVariable: document.fonts?.check('16px "Rules Variable"'),
+        }
+
+        const payload = [
+          `=== ONBOARDING DIAGNOSTICS (${new Date().toISOString()}) ===`,
+          `Viewport: innerWidth=${window.innerWidth}, innerHeight=${window.innerHeight}, dpr=${window.devicePixelRatio}`,
+          `Screen: availWidth=${window.screen.availWidth}, availHeight=${window.screen.availHeight}, width=${window.screen.width}, height=${window.screen.height}`,
+          `Zoom & Scale: document.documentElement.style.zoom="${docEl.style.zoom}", --ui-scale="${rootComputed.getPropertyValue('--ui-scale')}"`,
+          `Font Load Status: ${JSON.stringify(fontCheck)}`,
+          `Screen Rect: ${JSON.stringify(screenRect)}`,
+          `Welcome Stage Rect: ${JSON.stringify(stageRect)}`,
+          `Hero Wrap Rect: ${JSON.stringify(heroWrapRect)}`,
+          `Hero Figure Rect: ${JSON.stringify(heroFigRect)}`,
+          `HERMES Element:`,
+          `  - Bounding Rect: left=${topRect?.left.toFixed(1)}, right=${topRect?.right.toFixed(1)}, width=${topRect?.width.toFixed(1)}, height=${topRect?.height.toFixed(1)}`,
+          `  - Margins: leftEmpty=${topRect?.left.toFixed(1)}px (${((topRect?.left ?? 0) / window.innerWidth * 100).toFixed(1)}%), rightEmpty=${((window.innerWidth - (topRect?.right ?? 0))).toFixed(1)}px (${(((window.innerWidth - (topRect?.right ?? 0))) / window.innerWidth * 100).toFixed(1)}%)`,
+          `  - Computed: fontSize="${topStyle?.fontSize}", fontFamily="${topStyle?.fontFamily}", lineHeight="${topStyle?.lineHeight}", letterSpacing="${topStyle?.letterSpacing}"`,
+          `AGENT Element:`,
+          `  - Bounding Rect: left=${bottomRect?.left.toFixed(1)}, right=${bottomRect?.right.toFixed(1)}, width=${bottomRect?.width.toFixed(1)}, height=${bottomRect?.height.toFixed(1)}`,
+          `  - Margins: leftEmpty=${bottomRect?.left.toFixed(1)}px (${((bottomRect?.left ?? 0) / window.innerWidth * 100).toFixed(1)}%), rightEmpty=${((window.innerWidth - (bottomRect?.right ?? 0))).toFixed(1)}px (${(((window.innerWidth - (bottomRect?.right ?? 0))) / window.innerWidth * 100).toFixed(1)}%)`,
+          `  - Computed: fontSize="${bottomStyle?.fontSize}", fontFamily="${bottomStyle?.fontFamily}", lineHeight="${bottomStyle?.lineHeight}", letterSpacing="${bottomStyle?.letterSpacing}"`,
+          `============================================================`,
+        ].join('\n')
+
+        for (const targetUrl of candidateUrls) {
+          const controller = typeof AbortController !== 'undefined' ? new AbortController() : null
+          const timer = controller ? setTimeout(() => controller.abort(), 3500) : null
+          fetch(targetUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain' },
+            body: payload,
+            signal: controller ? controller.signal : undefined,
+          })
+            .then(res => {
+              if (res.ok) console.log(`[Diagnostics] Sent successfully to ${targetUrl}`)
+            })
+            .catch(() => {})
+            .finally(() => {
+              if (timer) clearTimeout(timer)
+            })
+        }
+      } catch {}
+    }
+
+    const timer1 = setTimeout(sendDiagnostics, 300)
+    const timer2 = setTimeout(sendDiagnostics, 1200)
+    if (document.fonts?.ready) {
+      document.fonts.ready
+        .then(() => {
+          if (isMounted) sendDiagnostics()
+        })
+        .catch(() => {})
+    }
+
+    return () => {
+      isMounted = false
+      clearTimeout(timer1)
+      clearTimeout(timer2)
+    }
+  }, [step, theme])
+
   const cycleTheme = () => {
     const themes: Theme[] = ['light', 'grey', 'dark']
     const next = themes[(themes.indexOf(theme) + 1) % themes.length]

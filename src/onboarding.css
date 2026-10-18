@@ -105,7 +105,7 @@
   object-position: center bottom;
   display: block;
   opacity: 0;
-  transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1);
   will-change: opacity;
 }
 
@@ -388,13 +388,15 @@
   animation: onboarding-hero-in 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-/* Monumental background words: centered horizontally across all resolutions */
+/* Monumental background words: centered horizontally with exact 8% side margin */
 .onboarding-bg-word-top {
   position: absolute;
-  top: -48px; /* Shifts up so 50% is visible above head, 50% covered by head */
-  left: 0;
-  right: 0;
-  width: 100%;
+  top: -52px; /* Shifts up so 50% is visible above head, 50% covered by head */
+  left: 8vw;
+  right: 8vw;
+  width: 84vw;
+  max-width: 84vw;
+  margin: 0 auto;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -402,14 +404,13 @@
   user-select: none;
   z-index: 1; /* Sits behind the sculpture figure */
   overflow: visible;
-  padding: 0 8vw; /* 8% side margin on each side */
   box-sizing: border-box;
 }
 
 .onboarding-bg-word-top .onboarding-bg-title-word {
   text-align: center;
-  font-size: clamp(98px, 26vw, 132px);
-  line-height: 0.86;
+  font-size: clamp(118px, 29.5vw, 156px);
+  line-height: 0.85;
   letter-spacing: -0.04em;
   margin: 0 auto;
   overflow: visible;
@@ -417,10 +418,12 @@
 
 .onboarding-bg-word-bottom {
   position: absolute;
-  bottom: -36px; /* Shifts down so 50% is covered by torso, 50% visible below */
-  left: 0;
-  right: 0;
-  width: 100%;
+  bottom: -40px; /* Shifts down so 50% is covered by torso, 50% visible below */
+  left: 8vw;
+  right: 8vw;
+  width: 84vw;
+  max-width: 84vw;
+  margin: 0 auto;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -428,14 +431,13 @@
   user-select: none;
   z-index: 1; /* Sits behind the sculpture figure */
   overflow: visible;
-  padding: 0 8vw; /* 8% side margin on each side */
   box-sizing: border-box;
 }
 
 .onboarding-bg-word-bottom .onboarding-bg-title-word {
   text-align: center;
-  font-size: clamp(112px, 30.5vw, 150px);
-  line-height: 0.86;
+  font-size: clamp(140px, 35vw, 186px);
+  line-height: 0.85;
   letter-spacing: -0.04em;
   margin: 0 auto;
   overflow: visible;

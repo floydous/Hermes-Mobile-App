@@ -264,7 +264,6 @@ export function ArtificialSun({
         } else if (Math.abs(velocityRef.current) > 0.1) {
           angleRef.current += velocityRef.current * dt
           velocityRef.current *= Math.pow(0.88, dt * 60)
-          updateThemeFromDragAngle(angleRef.current)
         } else {
           angleRef.current += ambientSpeed * dt
         }
@@ -361,24 +360,6 @@ export function ArtificialSun({
 
     lastPointerAngleRef.current = pointerAngle
     lastPointerTimeRef.current = now
-
-    // Real-time daytime sector updating ONLY while dragging
-    const norm = ((angleRef.current % 360) + 360) % 360
-    let sector: 'light' | 'grey' | 'dark'
-    if (norm >= 300 || norm < 60) {
-      sector = 'light' // Day
-    } else if (norm >= 60 && norm < 180) {
-      sector = 'grey' // Dusk
-    } else {
-      sector = 'dark' // Night
-    }
-
-    if (sector !== currentSectorRef.current) {
-      currentSectorRef.current = sector
-      if (setThemeRef.current) {
-        setThemeRef.current(sector)
-      }
-    }
   }
 
   function endDrag(e: React.PointerEvent<HTMLButtonElement>) {
