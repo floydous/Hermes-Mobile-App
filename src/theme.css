@@ -70,20 +70,15 @@ body,
 [data-theme='light'] .mention-popover small{color:#71717a}
 
 /* Layered light surfaces for connection/settings pages. */
-[data-theme='light'] .connection-card{background:#ffffff;border-color:rgba(0,0,0,.08);box-shadow:0 6px 20px rgba(0,0,0,.04)}
-[data-theme='light'] .connection-card .status-pill{color:#059669}
-[data-theme='light'] .connection-card code{background:#f4f4f5;border:1px solid rgba(0,0,0,.06);color:#09090b}
-[data-theme='light'] .stats span{background:#f4f4f5;border-color:rgba(0,0,0,.06);color:#52525b}
-[data-theme='light'] .stats b{color:#09090b}
 [data-theme='light'] .panel .primary{background:#09090b;border-color:#09090b;color:#ffffff;box-shadow:0 2px 8px rgba(0,0,0,.08)}
 [data-theme='light'] .panel .primary:hover{background:#27272a;border-color:#27272a}
 [data-theme='light'] .panel .primary:active{background:#3f3f46}
 [data-theme='light'] .panel .secondary{background:#ffffff;border-color:rgba(0,0,0,.1);color:#09090b}
 [data-theme='light'] .panel .secondary:hover{background:#f4f4f5}
-[data-theme='light'] .menu-list{background:#ffffff;border-color:rgba(0,0,0,.08);box-shadow:0 1px 3px rgba(0,0,0,.02)}
-[data-theme='light'] .menu-list button{color:#09090b;border-color:rgba(0,0,0,.06)}
-[data-theme='light'] .menu-list button:hover{background:#fafafa}
-[data-theme='light'] .menu-list button span{color:#71717a}
+
+
+
+
 [data-theme='light'] .theme-picker{background:#f4f4f5;border:1px solid rgba(0,0,0,.08);border-radius:14px}
 [data-theme='light'] .theme-picker button{background:#ffffff!important;border-color:rgba(0,0,0,.06)!important;color:#09090b}
 [data-theme='light'] .theme-picker button:hover{background:#fafafa!important;border-color:rgba(0,0,0,.12)!important}

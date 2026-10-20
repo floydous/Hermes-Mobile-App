@@ -3409,66 +3409,6 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
   font-weight: 700 !important;
 }
 
-/* Settings Page Grouped Menu Buttons with Proper Inset & Padding */
-.menu-list {
-  display: flex !important;
-  flex-direction: column !important;
-  margin-top: 24px !important;
-  border-radius: 14px !important;
-  background: var(--surface, #141416) !important;
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.08)) !important;
-  overflow: hidden !important;
-}
-
-.menu-list button {
-  border: 0 !important;
-  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.06)) !important;
-  background: transparent !important;
-  padding: 15px 16px !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: space-between !important;
-  width: 100% !important;
-  font-size: 15px !important;
-  font-weight: 500 !important;
-  color: var(--text, #f4f5f7) !important;
-  text-align: left !important;
-  transition: background 0.15s ease;
-  touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.menu-list button:last-child {
-  border-bottom: none !important;
-}
-
-.menu-list button:active {
-  background: color-mix(in srgb, var(--text, #ffffff) 8%, transparent) !important;
-}
-
-.menu-list button span {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--quiet, #71717a) !important;
-  font-size: 14px;
-}
-
-[data-theme='light'] .menu-list {
-  background: #ffffff !important;
-  border: 1px solid rgba(0, 0, 0, 0.08) !important;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03) !important;
-}
-
-[data-theme='light'] .menu-list button {
-  color: #09090b !important;
-  border-bottom-color: rgba(0, 0, 0, 0.06) !important;
-}
-
-[data-theme='light'] .menu-list button:active {
-  background: rgba(0, 0, 0, 0.04) !important;
-}
-
 .sessions-empty svg {
   color: var(--muted, #94a3b8);
   opacity: 0.7;

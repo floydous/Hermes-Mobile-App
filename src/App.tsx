@@ -190,8 +190,11 @@ export function resetLastReadMapForTesting(): void {
   memoizedLastReadMap = null
 }
 
-// DEV OVERRIDE: forces onboarding landing page on open for iteration.
-export const DEV_FORCE_LANDING_PAGE = true
+// DEV OVERRIDE: forces the onboarding landing page on every open, ignoring any
+// saved gateway. This is a debug switch for iterating on onboarding layout ONLY.
+// It MUST stay false in published builds, otherwise every launch traps the user
+// on the Welcome screen and the saved native endpoint is never restored.
+export const DEV_FORCE_LANDING_PAGE = false
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('bots')
@@ -404,6 +407,7 @@ export default function App() {
       setConversationLoading(false)
 
       const navigation = navigationRef.current
+      if (navigation.settings) { setSettings(false); return true }
       if (navigation.profileSheet) { setProfileSheet(false); return true }
       if (hadPendingIntent) {
         remoteLog('DEBUG', 'Navigation', `Back pressed while opening: cancelled pending open`)
@@ -415,7 +419,6 @@ export default function App() {
         setSelected(null)
         return true
       }
-      if (navigation.settings) { setSettings(false); return true }
       if (navigation.createOpen) { setCreateOpen(false); return true }
       if (navigation.tab !== 'bots') { switchTab('bots'); return true }
       return false
@@ -2345,7 +2348,6 @@ export default function App() {
   }
 
   if (createOpen) return <CreateWizard step={createStep} setStep={setCreateStep} draft={botDraft} setDraft={setBotDraft} creating={creating} error={error} close={() => { setCreateOpen(false); setCreateStep(0); setError('') }} finish={() => void finishCreate()}/>
-  if (settings) return <ConnectionSettings profiles={profiles.length} sessions={sessions.length} connected={connectionStatus === 'connected'} endpoint={activeEndpoint !== 'http://127.0.0.1:9119' ? activeEndpoint : undefined} theme={theme} setTheme={setTheme} uiScale={uiScale} setUiScale={setUiScale} close={() => setSettings(false)} refresh={() => refresh()} onPairingBusy={setPairingBusyState} onPaired={async endpoint => { const normalized = activateEndpoint(endpoint); const data = await refresh(normalized, true); if (!data) throw new Error(lastConnectionErrorRef.current || 'Signed in, but authenticated Hermes REST or live WebSocket verification failed.'); localStorage.setItem('hermes-mobile-active-endpoint', normalized) }}/>
   if (selected && profileSheet) return <BotProfileSheet profile={profiles.find(profile => profile.name === selected.profile)} session={selected} onClose={() => setProfileSheet(false)} onUpdated={() => void refresh()}/>
 
   return (
@@ -2693,6 +2695,28 @@ export default function App() {
       />
     </ErrorBoundary>
   )}
+
+  {settings && (
+    <ConnectionSettings
+      profiles={profiles.length}
+      sessions={sessions.length}
+      connected={connectionStatus === 'connected'}
+      endpoint={activeEndpoint !== 'http://127.0.0.1:9119' ? activeEndpoint : undefined}
+      theme={theme}
+      setTheme={setTheme}
+      uiScale={uiScale}
+      setUiScale={setUiScale}
+      close={() => setSettings(false)}
+      refresh={() => refresh()}
+      onPairingBusy={setPairingBusyState}
+      onPaired={async endpoint => {
+        const normalized = activateEndpoint(endpoint)
+        const data = await refresh(normalized, true)
+        if (!data) throw new Error(lastConnectionErrorRef.current || 'Signed in, but authenticated Hermes REST or live WebSocket verification failed.')
+        localStorage.setItem('hermes-mobile-active-endpoint', normalized)
+      }}
+    />
+  )}
   </>
   )
 }
@@ -2779,16 +2803,6 @@ function Notice({ message, retry }: { message: string; retry: () => void }) {
   return <div className="notice"><b>Connection needs attention</b><span>{message}</span><button onClick={retry}>Try again</button></div>
 }
 function Skeleton() { return <div className="skeletons">{[1, 2, 3, 4, 5, 6].map(item => <i key={item}/>)}</div> }
-
-function LegacyConnectionSettings({ profiles, sessions, theme, setTheme, close, refresh }: { profiles: number; sessions: number; theme: Theme; setTheme: (theme: Theme) => void; close: () => void; refresh: () => void }) {
-  const [showThemes, setShowThemes] = useState(false)
-  const themes: Array<{ id: Theme; label: string; description: string }> = [
-    { id: 'light', label: 'White', description: 'Clean white canvas & daylight contrast' },
-    { id: 'grey', label: 'Grey', description: 'Refined charcoal & graphite monochrome' },
-    { id: 'dark', label: 'Black / OLED Dark', description: 'Deep obsidian & OLED true black' },
-  ]
-  return <main className="app panel"><header className="panel-head"><button className="back-button" onClick={close}>‹</button><div><h2>Connection</h2><p>Hermes Desktop host</p></div></header><section className="connection-card"><span className="status-pill">● Connected</span><h3>This Windows PC</h3><code>127.0.0.1:9119</code><div className="stats"><span><b>{profiles}</b>Bots</span><span><b>{sessions}</b>Sessions</span></div><button className="primary wide" onClick={refresh}>Sync now</button></section><section className="menu-list"><button>Notifications <span>›</span></button><button onClick={() => setShowThemes(value => !value)}>Appearance <span>{themes.find(item => item.id === theme)?.label} ›</span></button>{showThemes && <div className="theme-picker">{themes.map(item => <button className={item.id === theme ? 'selected' : ''} onClick={() => setTheme(item.id)} key={item.id}><span className={`theme-swatch theme-${item.id}`}/><span><b>{item.label}</b><small>{item.description}</small></span><i>{item.id === theme ? '✓' : ''}</i></button>)}</div>}<button>Security & pairing <span>›</span></button><button>About Hermes Mobile <span>0.1.0 ›</span></button></section><p className="fine">The host owns models, credentials, tools, memory, skills, and approvals. This client is the control surface.</p></main>
-}
 
 function CreateWizard({ step, setStep, draft, setDraft, creating, error, close, finish }: { step: number; setStep: (step: number) => void; draft: DraftBot; setDraft: React.Dispatch<React.SetStateAction<DraftBot>>; creating: boolean; error: string; close: () => void; finish: () => void }) {
   const titles = ['Who is this bot?', 'Personality', 'Model', 'Look']

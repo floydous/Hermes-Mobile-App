@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { renderToString } from 'react-dom/server'
-import { normalizeTheme } from './App'
+import { normalizeTheme, DEV_FORCE_LANDING_PAGE } from './App'
 import {
   isLoopbackAddress,
   normalizeGatewayUrl,
@@ -264,5 +264,11 @@ describe('ArtificialSun Ray Geometry & 360-degree Distribution', () => {
     expect(html).toContain('cardinal-180-spike')
     expect(html).toContain('cardinal-270-spike')
     expect(html).toContain('artificial-sun-touch-target')
+  })
+})
+
+describe('DEV_FORCE_LANDING_PAGE dev override guard', () => {
+  it('must stay false so published builds never trap users on the onboarding screen', () => {
+    expect(DEV_FORCE_LANDING_PAGE).toBe(false)
   })
 })

@@ -1,6 +1,12 @@
-.connection-head{min-height:44px;align-items:center}.connection-screen .connection-card .connection-sync-button{display:inline-flex;align-items:center;justify-content:center;gap:8px;transition:transform .16s ease,filter .16s ease,box-shadow .16s ease}.connection-screen .connection-card .connection-sync-button:hover:not(:disabled){filter:brightness(1.12);box-shadow:0 8px 18px color-mix(in srgb,var(--accent) 28%,transparent);transform:translateY(-1px)}.connection-screen .connection-card .connection-sync-button:active:not(:disabled){transform:translateY(0) scale(.985);filter:brightness(.96)}.connection-screen .connection-card .connection-sync-button:disabled{cursor:wait;opacity:.78}.connection-sync-spinner{animation:connection-sync-spin .8s linear infinite}.connection-sync-result{margin:9px 2px 0;font-size:12px;line-height:1.4;color:var(--muted)}.connection-sync-result.success{color:var(--secondary)}.connection-sync-result.error{color:#f18088}.connection-screen .menu-list .connection-attention{color:#f18088;font-weight:700}@keyframes connection-sync-spin{to{transform:rotate(360deg)}}.connection-head.compact{justify-content:flex-start}.connection-head .back-button{font-size:0;line-height:0}.connection-head .back-button svg{display:block;stroke-width:2.35}.connection-screen,.about-screen,.pairing-screen{overflow-y:auto;scrollbar-width:none}.connection-screen,.about-screen,.pairing-screen{padding-bottom:calc(24px + env(safe-area-inset-bottom))}.connection-screen::-webkit-scrollbar,.about-screen::-webkit-scrollbar,.pairing-screen::-webkit-scrollbar{display:none;width:0}.about-hero{display:grid;justify-items:center;text-align:center;margin:12px 0 18px}.about-logo-card{width:208px;height:208px;display:grid;place-items:center;overflow:hidden;border-radius:36px;background:#fff;border:1px solid var(--border);box-shadow:0 12px 30px rgba(0,0,0,.17)}.about-logo-card img{display:block;width:116%;height:116%;max-width:none;object-fit:cover;border-radius:inherit;transform:translateY(-12px)}.about-hero h1{margin:17px 0 3px;font-size:27px;letter-spacing:-.55px}.about-hero p{margin:0;color:var(--muted);font-size:13px}.about-hero>span{max-width:290px;margin-top:13px;color:var(--secondary);font-size:14px;line-height:1.48}.about-story{margin:24px 0 28px;border:1px solid var(--border);border-radius:18px;background:var(--panel);padding:15px 16px;color:var(--secondary);font-size:14px;line-height:1.52}.about-story p{margin:0}.about-story p+p{margin-top:12px}.about-story .about-signoff{margin-top:14px;text-align:right;color:var(--muted);font-size:13px;line-height:1.4;white-space:nowrap}.about-story .about-signoff a{color:var(--accent);text-decoration:none}.about-links{display:grid;border-top:1px solid var(--border)}.about-links>p{margin:20px 0 7px;color:var(--quiet);font-size:11px;font-weight:700;letter-spacing:.9px}.about-links a{display:grid;grid-template-columns:24px minmax(0,1fr) 18px;align-items:center;gap:10px;min-height:57px;padding:9px 3px;border-bottom:1px solid var(--border);color:var(--text);text-decoration:none}.about-links a>svg:first-child{color:var(--accent)}.about-links a>svg:last-child{color:var(--quiet)}.about-links a span{display:grid;gap:2px}.about-links a b{font-size:14px;font-weight:600}.about-links a small{color:var(--muted);font-size:12px}.about-footer{margin:29px 0 0;color:var(--quiet);font-size:11px;line-height:1.5;text-align:center}.pairing-hero{display:grid;grid-template-columns:54px minmax(0,1fr);gap:14px;margin:30px 0 18px;align-items:start}.pairing-icon{display:grid;place-items:center;width:52px;height:52px;border:1px solid rgba(113,112,255,.35);border-radius:18px;background:rgba(113,112,255,.12);color:var(--accent)}.pairing-hero span,.pairing-steps>p{color:var(--accent);font-size:10px;font-weight:750;letter-spacing:1px}.pairing-hero h3{margin:4px 0 5px;font-size:21px;letter-spacing:-.35px}.pairing-hero p{margin:0;color:var(--muted);font-size:13px;line-height:1.48}.pairing-card{border:1px solid var(--border);border-radius:19px;background:var(--panel);padding:16px}.pairing-card-title{display:flex;gap:10px;align-items:flex-start}.pairing-card-title>svg{margin-top:2px;color:var(--accent)}.pairing-card-title div{display:grid;gap:3px}.pairing-card-title b{font-size:14px}.pairing-card-title small{color:var(--muted);font-size:12px;line-height:1.35}.pairing-field{display:grid;gap:7px;margin:17px 0 10px}.pairing-field>span{color:var(--quiet);font-size:10px;font-weight:750;letter-spacing:1px}.pairing-field input{height:45px;width:100%;border:1px solid var(--border);border-radius:12px;background:var(--surface);color:var(--text);outline:0;padding:0 12px;font-size:13px}.pairing-field input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(113,112,255,.14)}.pairing-test{min-height:45px;padding:10px 17px;display:flex;align-items:center;justify-content:center;gap:8px}.pairing-signin{margin:16px auto 0;min-height:45px;display:flex;align-items:center;justify-content:center;text-align:center;gap:8px;width:min(100%,300px)}.pairing-spinner{animation:pairing-spin .82s linear infinite}@keyframes pairing-spin{to{transform:rotate(360deg)}}.pairing-result{display:flex;gap:7px;align-items:flex-start;margin:12px 0 0;border-radius:11px;padding:10px;font-size:12px;line-height:1.4}.pairing-result svg{flex:0 0 auto;margin-top:1px}.pairing-result.success{background:rgba(53,199,89,.11);color:#67cf83}.pairing-result.error{background:rgba(224,82,82,.1);color:#df9292}.pairing-note{margin:12px 0 0;color:var(--quiet);font-size:11px;line-height:1.45}.pairing-note code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--secondary)}.pairing-steps{margin:28px 0 20px}.pairing-steps>p{margin:0 0 9px}.pairing-steps ol{display:grid;gap:12px;margin:0;padding:0;list-style:none}.pairing-steps li{display:grid;grid-template-columns:25px minmax(0,1fr);gap:9px;align-items:start}.pairing-steps li>svg{margin-top:2px;color:var(--accent)}.pairing-steps li span{display:grid;gap:3px}.pairing-steps li b{font-size:14px}.pairing-steps li small{color:var(--muted);font-size:12px;line-height:1.42}.pairing-actions{display:flex;flex-wrap:wrap;gap:9px;margin-top:25px}.pairing-actions .secondary{display:inline-flex;gap:7px;align-items:center;padding:10px 13px;font-size:13px}.pairing-actions a{display:inline-flex;align-items:center;gap:6px;color:var(--accent);font-size:13px;font-weight:600;text-decoration:none;padding:10px 3px}.pairing-disclosure{margin:19px 0 14px;color:var(--quiet);font-size:11px;line-height:1.48}.lan-sharing{margin:28px 0 0;border:1px solid var(--border);border-radius:18px;background:var(--panel);padding:16px}.lan-sharing-head{display:grid;grid-template-columns:25px minmax(0,1fr);gap:9px;align-items:start}.lan-sharing-head>svg{margin-top:3px;color:var(--accent)}.lan-sharing-head span{color:var(--accent);font-size:10px;font-weight:750;letter-spacing:1px}.lan-sharing-head h3{margin:3px 0 0;font-size:17px;letter-spacing:-.2px}.lan-sharing>p{margin:13px 0 0;color:var(--muted);font-size:12px;line-height:1.5}.lan-sharing ol{display:grid;gap:10px;margin:15px 0 0;padding:0;list-style:none;counter-reset:lan-step}.lan-sharing li{counter-increment:lan-step;position:relative;padding-left:27px;color:var(--muted);font-size:12px;line-height:1.48}.lan-sharing li::before{content:counter(lan-step);position:absolute;left:0;top:1px;display:grid;place-items:center;width:18px;height:18px;border-radius:50%;background:rgba(113,112,255,.14);color:var(--accent);font-size:10px;font-weight:700}.lan-sharing li b{color:var(--text);font-weight:650}.lan-sharing code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--secondary);font-size:11px}.lan-sharing-note{display:flex;gap:7px;align-items:flex-start;border-top:1px solid var(--border);padding-top:12px}.lan-sharing-note svg{flex:0 0 auto;margin-top:2px;color:var(--accent)}@media(max-width:390px){.about-logo-card{width:184px;height:184px}.about-hero{margin-top:22px}.pairing-hero{grid-template-columns:46px minmax(0,1fr);gap:11px}.pairing-icon{width:45px;height:45px;border-radius:15px}.pairing-actions{display:grid}.pairing-actions .secondary{justify-content:center}.pairing-actions a{justify-content:center}}[data-theme='light'] .about-logo-card{border-color:#c4cfdd;box-shadow:0 10px 24px rgba(35,56,83,.12)}[data-theme='light'] .about-story,[data-theme='light'] .pairing-card,[data-theme='light'] .lan-sharing{background:#e4eaf2;border-color:#c4cfdd}[data-theme='light'] .pairing-field input{background:#f5f7fa;border-color:#bbc8d8}[data-theme='light'] .pairing-result.success{background:#dff1e8;color:#176f51}[data-theme='light'] .pairing-result.error{background:#f8e4e4;color:#a74646}
+.connection-head{min-height:44px;align-items:center}.connection-sync-spinner{animation:connection-sync-spin .8s linear infinite}.connection-sync-result{margin:9px 2px 0;font-size:12px;line-height:1.4;color:var(--muted)}.connection-sync-result.success{color:var(--secondary)}.connection-sync-result.error{color:#f18088}@keyframes connection-sync-spin{to{transform:rotate(360deg)}}.connection-head.compact{justify-content:flex-start}.connection-head .back-button{font-size:0;line-height:0}.connection-head .back-button svg{display:block;stroke-width:2.35}.connection-screen,.about-screen,.pairing-screen{overflow-y:auto;scrollbar-width:none}.connection-screen,.about-screen,.pairing-screen{padding-bottom:calc(24px + env(safe-area-inset-bottom))}.connection-screen::-webkit-scrollbar,.about-screen::-webkit-scrollbar,.pairing-screen::-webkit-scrollbar{display:none;width:0}.about-hero{display:grid;justify-items:center;text-align:center;margin:12px 0 18px}.about-logo-card{width:208px;height:208px;display:grid;place-items:center;overflow:hidden;border-radius:36px;background:#fff;border:1px solid var(--border);box-shadow:0 12px 30px rgba(0,0,0,.17)}.about-logo-card img{display:block;width:116%;height:116%;max-width:none;object-fit:cover;border-radius:inherit;transform:translateY(-12px)}.about-hero h1{margin:17px 0 3px;font-size:27px;letter-spacing:-.55px}.about-hero p{margin:0;color:var(--muted);font-size:13px}.about-hero>span{max-width:290px;margin-top:13px;color:var(--secondary);font-size:14px;line-height:1.48}.about-story{margin:24px 0 28px;border:1px solid var(--border);border-radius:18px;background:var(--panel);padding:15px 16px;color:var(--secondary);font-size:14px;line-height:1.52}.about-story p{margin:0}.about-story p+p{margin-top:12px}.about-footer{margin:29px 0 0;color:var(--quiet);font-size:11px;line-height:1.5;text-align:center}.pairing-spinner{animation:pairing-spin .82s linear infinite}@keyframes pairing-spin{to{transform:rotate(360deg)}}@media(max-width:390px){.about-logo-card{width:184px;height:184px}.about-hero{margin-top:22px}}[data-theme='light'] .about-logo-card{border-color:#c4cfdd;box-shadow:0 10px 24px rgba(35,56,83,.12)}[data-theme='light'] .about-story{background:#e4eaf2;border-color:#c4cfdd}
 
-/* Appearance sub-page styling */
+/* ==========================================================================
+   iOS GROUPED LIST SYSTEM
+   Inset grouped cells: sentence-case headers, rounded card groups,
+   separators inset to the text column, values in secondary grey,
+   chevrons on the trailing edge, one tone step between surfaces.
+   ========================================================================== */
+
 .appearance-screen {
   overflow-y: auto;
   scrollbar-width: none;
@@ -12,95 +18,444 @@
   display: none;
   width: 0;
 }
-.appearance-group {
-  margin-top: 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+
+/* --- Header (iOS nav bar) ------------------------------------------------ */
+
+.connection-head {
+  gap: 14px;
+  margin-bottom: 4px;
 }
-.appearance-group-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.appearance-group-label {
-  margin: 0;
-  color: var(--quiet);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.9px;
-}
-.appearance-scale-badge {
-  font-size: 11px;
-  font-family: var(--font-mono);
-  font-weight: 600;
-  color: var(--accent);
-  background: rgba(113, 112, 255, 0.1);
-  border: 1px solid rgba(113, 112, 255, 0.22);
-  border-radius: 9999px;
-  padding: 2px 8px;
-}
-.appearance-theme-list {
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  background: var(--panel);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-.appearance-theme-row {
+.connection-head-titles {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) 22px;
+  gap: 1px;
+  min-width: 0;
+}
+.connection-head h2 {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: -0.4px;
+  line-height: 1.2;
+}
+.connection-head p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.3;
+}
+.connection-head .back-button {
+  width: 36px;
+  height: 36px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--text) 11%, transparent);
+  color: var(--text);
+  font-size: 0;
+  line-height: 0;
+}
+.connection-head .back-button:active {
+  background: color-mix(in srgb, var(--text) 20%, transparent);
+}
+.connection-head .back-button svg {
+  display: block;
+  stroke-width: 2.4;
+}
+[data-theme='light'] .connection-head .back-button {
+  background: rgba(0, 0, 0, 0.07);
+}
+
+/* --- Group scaffolding ------------------------------------------------- */
+
+.settings-group {
+  margin-top: 26px;
+}
+.settings-group:first-of-type {
+  margin-top: 14px;
+}
+
+.settings-group-header {
+  margin: 0 0 7px 16px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  text-transform: none;
+}
+
+.settings-group-header-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.settings-group-header-row .settings-group-header {
+  margin-bottom: 7px;
+}
+.settings-group-value {
+  margin-right: 16px;
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-group-body {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+/* --- Cells -------------------------------------------------------------- */
+
+.settings-cell {
+  display: flex;
   align-items: center;
   gap: 12px;
-  padding: 13px 16px;
+  width: 100%;
+  min-height: 44px;
+  padding: 11px 16px;
   border: 0;
-  border-bottom: 1px solid var(--border);
   background: transparent;
-  text-align: left;
   color: var(--text);
+  text-align: left;
+  text-decoration: none;
   transition: background 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
 }
-.appearance-theme-row:last-child {
-  border-bottom: 0;
+.settings-cell + .settings-cell {
+  box-shadow: inset 0 1px 0 var(--border);
 }
-.appearance-theme-row:hover {
-  background: rgba(255, 255, 255, 0.03);
+.settings-cell:active {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
 }
-.appearance-theme-row.selected {
-  background: rgba(113, 112, 255, 0.08);
+
+.settings-cell-label {
+  font-size: 17px;
+  line-height: 1.3;
+  letter-spacing: -0.2px;
+  flex: 1;
+  min-width: 0;
 }
-.appearance-theme-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+.settings-cell-stack {
+  display: grid;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
 }
-.appearance-theme-meta b {
-  font-size: 14px;
+.settings-cell-stack .settings-cell-label {
+  flex: none;
+}
+.settings-cell-detail {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.38;
+}
+.settings-cell-detail.is-alert {
+  color: #f18088;
+}
+.settings-cell-value {
+  color: var(--muted);
+  font-size: 17px;
+  line-height: 1.3;
+  letter-spacing: -0.2px;
+  white-space: nowrap;
+  flex: none;
+}
+.settings-cell-value.is-alert {
+  color: #f18088;
   font-weight: 600;
 }
-.appearance-theme-meta small {
-  font-size: 12px;
+.settings-cell-static {
+  cursor: default;
+}
+.settings-cell-static:active {
+  background: transparent;
+}
+
+.settings-chevron {
+  /* The reference chevron reads at ~5:1 on the card; --quiet is only 3.3:1
+     and reads as barely-there. --muted lands at ~5.9:1. */
   color: var(--muted);
+  flex: none;
 }
-.appearance-theme-check {
+.settings-check {
   color: var(--accent);
-  justify-self: end;
+  flex: none;
 }
-.appearance-scale-card {
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  background: var(--panel);
-  padding: 18px 16px;
+.settings-step-icon {
+  color: var(--muted);
+  flex: none;
+}
+.settings-step-cell {
+  align-items: flex-start;
+  padding-top: 13px;
+  padding-bottom: 13px;
+}
+.settings-step-cell .settings-step-icon {
+  margin-top: 2px;
+}
+
+/* --- Theme rows --------------------------------------------------------- */
+
+.settings-theme-cell {
+  align-items: center;
+  gap: 12px;
+}
+.settings-theme-cell .theme-swatch {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+}
+.settings-theme-cell .theme-swatch.theme-light {
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.22);
+}
+.settings-theme-cell.is-selected {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+/* --- Hero cell (pairing recommendation) --------------------------------- */
+
+.settings-hero-cell {
   display: flex;
-  flex-direction: column;
-  gap: 16px;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+}
+.settings-hero-icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  flex: none;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+
+/* --- Fields ------------------------------------------------------------- */
+
+.settings-field-group {
+  padding: 0;
+}
+.settings-field {
+  display: grid;
+  gap: 6px;
+  padding: 12px 16px;
+}
+.settings-field + .settings-field {
+  box-shadow: inset 0 1px 0 var(--border);
+}
+.settings-field-label {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+.settings-field input {
+  width: 100%;
+  height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--text);
+  outline: 0;
+  padding: 0 12px;
+  font-size: 16px;
+}
+.settings-field input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(113, 112, 255, 0.14);
+}
+.settings-credentials {
+  margin-top: 10px;
+}
+
+/* --- Switch ------------------------------------------------------------- */
+
+.settings-switch {
+  position: relative;
+  width: 51px;
+  height: 31px;
+  flex: none;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 22%, transparent);
+  padding: 0;
+  transition: background 0.2s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.settings-switch.is-on {
+  background: var(--accent);
+}
+.settings-switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 27px;
+  height: 27px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.settings-switch.is-on .settings-switch-knob {
+  transform: translateX(20px);
+}
+
+/* --- Buttons ------------------------------------------------------------ */
+
+.settings-button-row {
+  margin-top: 12px;
+}
+.settings-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 48px;
+  padding: 0 18px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 600;
+  transition: opacity 0.15s ease, background 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.settings-button:active:not(:disabled) {
+  opacity: 0.8;
+}
+.settings-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.settings-button-primary {
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--bg);
+}
+
+/* --- App identity footer ------------------------------------------------ */
+
+.settings-identity {
+  display: grid;
+  justify-items: center;
+  gap: 7px;
+  width: 100%;
+  margin: 34px 0 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  transition: opacity 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.settings-identity:active {
+  opacity: 0.65;
+}
+.settings-identity img {
+  width: 62px;
+  height: 62px;
+  border-radius: 50%;
+  background: #fff;
+  object-fit: cover;
+}
+.settings-identity-name {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+}
+.settings-identity-version {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.settings-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.settings-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: opacity 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.settings-action:active:not(:disabled) {
+  opacity: 0.8;
+}
+.settings-action:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* --- Status + footnotes -------------------------------------------------- */
+
+.settings-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 12px 16px 0;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.settings-status svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+.settings-status.is-good {
+  color: #67cf83;
+}
+.settings-status.is-bad {
+  color: #df9292;
+}
+
+.settings-group-footnote {
+  margin: 8px 16px 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.settings-disclosure {
+  margin: 24px 16px 0;
+  color: var(--quiet);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.settings-group-footnote code {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  color: var(--secondary);
+}
+
+/* --- Scale slider -------------------------------------------------------- */
+
+.settings-scale-body {
+  padding: 14px 16px 16px;
 }
 .scale-slider-row {
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 4px 0;
 }
 .scale-glyph {
   color: var(--muted);
@@ -128,136 +483,625 @@
 .scale-range-slider::-webkit-slider-thumb {
   appearance: none;
   -webkit-appearance: none;
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
-  background: var(--text);
-  border: 2px solid var(--panel);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  background: #ffffff;
+  border: 0;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
   cursor: pointer;
   transition: transform 0.12s ease;
 }
 .scale-range-slider:active::-webkit-slider-thumb {
-  transform: scale(1.18);
+  transform: scale(1.12);
 }
 .scale-range-slider::-moz-range-thumb {
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
-  background: var(--text);
-  border: 2px solid var(--panel);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  background: #ffffff;
+  border: 0;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
   cursor: pointer;
-  transition: transform 0.12s ease;
 }
 .scale-quick-presets {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 6px;
+  margin-top: 16px;
 }
 .scale-preset-pill {
-  border: 1px solid var(--border);
+  border: 0;
   background: var(--surface);
   color: var(--secondary);
   border-radius: 9999px;
-  padding: 7px 0;
-  font-size: 11px;
-  font-weight: 600;
+  padding: 8px 0;
+  font-size: 12px;
+  font-weight: 500;
   text-align: center;
-  transition: all 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
 }
 .scale-preset-pill.active {
   background: var(--text);
   color: var(--bg);
-  border-color: var(--text);
 }
-.scale-reset-button {
-  align-self: center;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 500;
-  padding: 4px 10px;
-  border-radius: 9999px;
-  transition: color 0.15s ease;
-  cursor: pointer;
-}
-.scale-reset-button:hover {
-  color: var(--text);
-}
-.scale-preview-card {
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.015);
-  padding: 14px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 4px;
-}
-.scale-preview-tag {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.8px;
-  color: var(--quiet);
-}
-.scale-preview-bubble {
-  border-radius: 16px;
-  background: var(--surface);
-  border: 1px solid var(--border);
+
+.settings-preview {
+  margin-top: 14px;
   padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--panel);
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
-.scale-preview-sender {
+.settings-preview-sender {
   font-size: 12px;
   font-weight: 600;
   color: var(--accent);
 }
-.scale-preview-bubble p {
+.settings-preview p {
   margin: 0;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.45;
   color: var(--text);
 }
-.appearance-footnote {
-  margin: 6px 2px 0;
-  font-size: 11px;
-  line-height: 1.45;
+
+/* --- Light theme --------------------------------------------------------- */
+
+[data-theme='light'] .settings-group-body {
+  background: #ffffff;
+  border-color: rgba(0, 0, 0, 0.09);
+}
+[data-theme='light'] .settings-cell + .settings-cell {
+  box-shadow: inset 0 1px 0 rgba(0, 0, 0, 0.07);
+}
+[data-theme='light'] .settings-cell:active {
+  background: rgba(0, 0, 0, 0.04);
+}
+[data-theme='light'] .settings-chevron {
+  color: #a8a8ad;
+}
+[data-theme='light'] .settings-field input {
+  background: #f4f4f5;
+  border-color: rgba(0, 0, 0, 0.09);
+}
+[data-theme='light'] .settings-button {
+  background: #ffffff;
+  border-color: rgba(0, 0, 0, 0.1);
+}
+[data-theme='light'] .settings-button-primary {
+  background: #09090b;
+  border-color: #09090b;
+  color: #ffffff;
+}
+[data-theme='light'] .settings-action {
+  background: #ffffff;
+  border-color: rgba(0, 0, 0, 0.1);
+}
+[data-theme='light'] .settings-preview {
+  background: #ffffff;
+}
+[data-theme='light'] .settings-switch {
+  background: #d4d4d8;
+}
+[data-theme='light'] .settings-status.is-good {
+  color: #176f51;
+}
+[data-theme='light'] .settings-status.is-bad {
+  color: #a74646;
+}
+[data-theme='light'] .settings-cell-value.is-alert {
+  color: #c0392b;
+}
+
+
+/* ==========================================================================
+   SETTINGS MODAL OVERLAY & SLIDE-DOWN BOTTOM SHEET
+   ========================================================================== */
+
+.settings-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  pointer-events: auto;
+}
+
+/*
+ * The scrim dims the app behind the sheet.
+ *
+ * It deliberately has NO backdrop-filter. A full-screen blur forces the
+ * browser to re-sample and re-blur the whole viewport on every frame the
+ * sheet moves, which halved the entrance to 30fps (measured: 33.3ms per
+ * frame vs 16.7ms) and made the sheet arrive in coarse steps -- the jump.
+ * Blur radius made no difference; even blur(2px) cost the same.
+ *
+ * The app's other full-screen modal backdrop (.task-modal-backdrop) also
+ * uses a plain scrim, and the blur was barely visible here anyway: the
+ * sheet covers everything except the 79px strip above it, which the scrim
+ * already dims.
+ */
+.settings-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.62);
+  animation: settings-backdrop-in 0.24s ease forwards;
+  will-change: opacity;
+}
+
+.settings-modal-overlay.is-closing .settings-modal-backdrop {
+  animation: settings-backdrop-out 0.22s ease forwards;
+}
+
+/*
+ * The sheet is always full height and its geometry NEVER changes. The
+ * bottom-sheet look lives on the root page instead, inset from the top.
+ *
+ * Resizing the sheet while the pages slid horizontally made the two motions
+ * fight: the root page jumped up by the height difference at the same moment
+ * it slid left, which read as a broken transition. With the sheet constant,
+ * the only motion during a push or pop is horizontal.
+ */
+.settings-modal-sheet {
+  position: relative;
+  width: 100%;
+  height: 100dvh;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  will-change: transform;
+  touch-action: pan-y;
+}
+
+/* How far the root page is inset from the top, i.e. the sheet's own height. */
+.settings-modal-sheet {
+  --settings-root-inset: max(0px, calc(100dvh - min(92dvh, 880px)));
+}
+
+.settings-modal-sheet.is-dragging {
+  transition: none !important;
+  animation: none !important;
+}
+
+/*
+ * The entrance and exit animations run on a dedicated wrapper, never on the
+ * page itself. The page carries an inline transform for the push/pop and
+ * the drag, and an animation on the same element is overridden by that
+ * transform. Worse, toggling a class that removed the animation made a tap
+ * on the grabber restart the keyframes, which showed as the sheet jumping.
+ */
+/*
+ * The sheet enters and leaves with a soft, decelerating curve.
+ *
+ * `cubic-bezier(0.32, 0.72, 0, 1)` is a hard ease-out: measured frame by
+ * frame, it moved the sheet's visible edge 102px, then 81px, then was done
+ * in 33ms — and spent the remaining 300ms creeping sub-pixel. That is what
+ * read as a blink.
+ *
+ * This curve keeps a real start slope and spreads the travel over most of
+ * the duration: the edge moves every frame, 50% of the travel lands at
+ * ~130ms, and the peak speed drops from 10.1k px/s to 4.3k px/s.
+ */
+.settings-sheet-anim {
+  position: absolute;
+  /* `top` is animated by the entrance keyframe, so it cannot also be
+     pinned to 0 by `inset`. The box keeps the stack's full height and
+     slides as a whole. */
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  animation: settings-sheet-up 0.42s cubic-bezier(0.32, 0.6, 0.35, 1) both;
+}
+
+/*
+ * The exit animation lives on the stack, not on the wrapper, so it carries
+ * the root page AND the sub-page. On the wrapper it moved only the root,
+ * and a sub-page that was showing simply vanished when the overlay
+ * unmounted.
+ *
+ * It starts from `--settings-drag-offset` (the distance the sheet was
+ * dragged down) rather than from 0, so releasing the grabber continues
+ * sliding down from the finger. Starting from 0 made the sheet jump back
+ * up by the whole drag distance and then slide away.
+ */
+.settings-page-stack.is-closing {
+  animation: settings-sheet-down 0.26s cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+
+.settings-drag-handle-bar {
+  position: relative;
+  width: 100%;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  touch-action: none;
+  flex-shrink: 0;
+  background: transparent;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.settings-drag-handle-bar:active {
+  cursor: grabbing;
+}
+
+.settings-drag-pill {
+  width: 36px;
+  height: 4.5px;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--text) 22%, transparent);
+  transition: background 0.15s ease, width 0.15s ease;
+}
+
+.settings-drag-handle-bar:active .settings-drag-pill {
+  background: color-mix(in srgb, var(--text) 45%, transparent);
+  width: 44px;
+}
+
+/* ==========================================================================
+   HORIZONTAL PAGE STACK — iOS-style push/pop between Settings pages
+   ========================================================================== */
+
+.settings-page-stack {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+}
+
+.settings-page {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  will-change: transform;
+}
+
+/*
+ * The root page and the sub-page move as one: the sub-page slides in from
+ * the right while the root page slides out to the left behind it.
+ */
+.settings-page-root {
+  z-index: 1;
+}
+.settings-page-sub {
+  z-index: 2;
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.28);
+}
+
+/*
+ * The root page carries the bottom-sheet shape: it is inset from the top by
+ * the sheet's height and has rounded top corners. The sub-page is full
+ * bleed. Keeping the shape on the page (rather than on the sheet) means the
+ * sheet's own geometry never changes, so the push/pop is a pure horizontal
+ * slide with nothing competing against it.
+ */
+.settings-page-root {
+  top: var(--settings-root-inset, 0px);
+  border-radius: 20px 20px 0 0;
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -12px 48px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+/*
+ * While dragging, the page follows the finger exactly. On release it eases
+ * back to rest instead of snapping, which is what made a short drag on the
+ * grabber read as a blink.
+ *
+ * The old curve moved 21.6px in a single frame — nearly half the 46px
+ * return — and then sat still for 100ms. This one moves every frame at a
+ * steady 7px/frame and is done in 17ms of tail, so the sheet visibly
+ * glides back rather than jumping.
+ */
+.settings-page-root.is-dragging {
+  transition: none;
+}
+.settings-page-root.is-settling {
+  transition: transform 240ms cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+/* The transition is armed only after the start position is committed. */
+.settings-page.is-transitioning {
+  transition: transform 300ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-page.is-transitioning {
+    transition: none;
+  }
+  /* The app-wide rule only overrides animation-duration, so the spring-back
+     transition kept running at full length here. */
+  .settings-page-root.is-settling {
+    transition: none;
+  }
+}
+
+.settings-modal-scroll {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior-y: contain;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/*
+ * Content dissolves under the top bar instead of being sliced by it.
+ *
+ * Only applied once the page has been scrolled. With the mask always on, the
+ * first row of an unscrolled page was faded even though nothing was
+ * travelling under the header, which just looked washed out.
+ *
+ * The multi-stop ramp keeps the fade perceptually even — a two-stop linear
+ * mask would show a visible hard step where it starts.
+ */
+.settings-modal-scroll.is-faded-top {
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    rgba(0, 0, 0, 0.06) 10px,
+    rgba(0, 0, 0, 0.2) 22px,
+    rgba(0, 0, 0, 0.42) 34px,
+    rgba(0, 0, 0, 0.66) 46px,
+    rgba(0, 0, 0, 0.85) 58px,
+    rgba(0, 0, 0, 0.95) 70px,
+    #000 84px
+  );
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    rgba(0, 0, 0, 0.06) 10px,
+    rgba(0, 0, 0, 0.2) 22px,
+    rgba(0, 0, 0, 0.42) 34px,
+    rgba(0, 0, 0, 0.66) 46px,
+    rgba(0, 0, 0, 0.85) 58px,
+    rgba(0, 0, 0, 0.95) 70px,
+    #000 84px
+  );
+}
+
+.settings-modal-scroll::-webkit-scrollbar {
+  display: none;
+  width: 0;
+}
+
+.settings-modal-scroll > .app.panel {
+  min-height: auto !important;
+  flex: 1;
+  /* `min-width: 0` lets the panel shrink below its min-content width.
+     Without it the flex item refuses to shrink below the widest row
+     (e.g. the nowrap action buttons), which pushes the whole page
+     sideways and clips the trailing controls. */
+  min-width: 0;
+  width: 100%;
+  max-width: none;
+  /* The sheet owns its own safe-area and bottom spacing. */
+  padding: 0 20px calc(28px + env(safe-area-inset-bottom, 0px));
+}
+
+/*
+ * The sheet is the only scroll container. Sub-panels keep their own
+ * `overflow-y: auto` from the standalone-page styles, which would create a
+ * nested scroller and break the drag-to-dismiss handoff (the drag handler
+ * reads scrollTop from the sheet, not the panel).
+ */
+.settings-modal-scroll > .app.panel {
+  overflow: visible !important;
+}
+
+/* The root sheet has no title header, so its first block starts flush. */
+.settings-modal-scroll > .connection-screen {
+  padding-top: 0;
+}
+
+.settings-modal-scroll > .connection-screen > .connection-card {
+  margin-top: 4px;
+}
+
+/* ==========================================================================
+   HOST CARD — "Type and nothing else": one statement, everything else small.
+   A single filled surface, no inner rules, no nested boxes.
+   ========================================================================== */
+.connection-screen .connection-card {
+  display: grid;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 14px 16px 12px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.connection-screen .connection-card.unpaired {
+  background: color-mix(in srgb, #d59a3a 9%, var(--surface));
+}
+
+.connection-screen .connection-endpoint {
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.2px;
+  line-height: 1.25;
+  color: var(--text);
+  word-break: break-all;
+}
+
+.connection-screen .connection-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.connection-screen .connection-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 600;
+}
+
+.connection-screen .connection-state-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--quiet);
+  flex-shrink: 0;
+}
+
+.connection-screen .connection-state.is-connected {
+  color: #4ade80;
+}
+
+.connection-screen .connection-state.is-connected .connection-state-dot {
+  background: #4ade80;
+}
+
+.connection-screen .connection-state.is-disconnected {
+  color: #d59a3a;
+}
+
+.connection-screen .connection-state.is-disconnected .connection-state-dot {
+  background: #d59a3a;
+}
+
+.connection-screen .connection-sep {
   color: var(--quiet);
 }
-[data-theme='light'] .appearance-theme-list,
-[data-theme='light'] .appearance-scale-card {
+
+.connection-screen .connection-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  justify-self: start;
+  margin-top: 6px;
+  min-height: 44px;
+  padding: 0 18px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 12px;
+}
+
+.connection-screen .connection-action:active:not(:disabled) {
+  opacity: 0.85;
+}
+
+.connection-screen .connection-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.connection-screen .connection-action svg {
+  color: currentColor;
+  opacity: 0.75;
+}
+
+.connection-screen .connection-sync-result {
+  margin: 2px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #f18088;
+}
+
+[data-theme='light'] .connection-screen .connection-card {
   background: #ffffff;
-  border-color: rgba(0, 0, 0, 0.08);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
 }
-[data-theme='light'] .scale-range-slider {
-  background: #e4e4e7;
-  border-color: transparent;
-  accent-color: #09090b;
+
+[data-theme='light'] .connection-screen .connection-card.unpaired {
+  background: #fdf6ec;
 }
-[data-theme='light'] .scale-preset-pill {
-  background: #f4f4f5;
-  border-color: rgba(0, 0, 0, 0.06);
-  color: #52525b;
+
+[data-theme='light'] .connection-screen .connection-state.is-connected {
+  color: #059669;
 }
-[data-theme='light'] .scale-preset-pill.active {
-  background: #09090b;
-  color: #ffffff;
-  border-color: #09090b;
+
+[data-theme='light'] .connection-screen .connection-state.is-connected .connection-state-dot {
+  background: #059669;
 }
-[data-theme='light'] .scale-preview-card {
-  background: #f4f4f5;
-  border-color: rgba(0, 0, 0, 0.06);
+
+[data-theme='light'] .connection-screen .connection-state.is-disconnected {
+  color: #b45309;
 }
-[data-theme='light'] .scale-preview-bubble {
-  background: #ffffff;
-  border-color: rgba(0, 0, 0, 0.08);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+
+[data-theme='light'] .connection-screen .connection-state.is-disconnected .connection-state-dot {
+  background: #b45309;
+}
+
+/*
+ * Sub-pages cover the whole screen and have no grabber row above them, so
+ * they carry their own top padding for the status bar and safe area.
+ */
+.settings-modal-scroll > .appearance-screen,
+.settings-modal-scroll > .pairing-screen,
+.settings-modal-scroll > .about-screen {
+  padding-top: calc(18px + env(safe-area-inset-top, 0px)) !important;
+}
+
+@keyframes settings-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes settings-backdrop-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+/*
+ * The sheet enters by sliding up from the bottom edge.
+ *
+ * It animates `top`, not `transform`. A transform on the wrapper is
+ * composited by the browser, and the composited layer did not follow the
+ * root page's own box: the sheet's visible top edge jumped to the top of
+ * the screen (y=0), sat there for ~50ms, and then snapped back down to its
+ * rest position (y=79). Measured, that was a 79px overshoot -- exactly
+ * the root page's top inset -- on every single open.
+ *
+ * Animating `top` is a layout animation, so the sheet's edge travels
+ * exactly as the box model says: 854 -> 801 -> 730 -> ... -> 79, with no
+ * overshoot and no backward movement. It still runs at 60fps (measured),
+ * because the sheet's subtree is small and the layout is not dirty
+ * otherwise.
+ */
+@keyframes settings-sheet-up {
+  from { top: 100%; }
+  to { top: 0; }
+}
+
+/*
+ * The exit continues from wherever the sheet was when the user let go.
+ *
+ * `--settings-drag-offset` is the distance the sheet was dragged down, set
+ * inline at the moment of dismissal. The keyframe starts from that offset
+ * instead of 0, so the sheet keeps sliding down from the finger rather than
+ * jumping up to the top and then sliding away.
+ */
+@keyframes settings-sheet-down {
+  from { transform: translateY(var(--settings-drag-offset, 0px)); }
+  to { transform: translateY(100%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-modal-backdrop,
+  .settings-modal-sheet {
+    animation: none !important;
+    transition: none !important;
+  }
 }

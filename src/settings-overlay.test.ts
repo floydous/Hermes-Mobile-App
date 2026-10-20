@@ -1,0 +1,199 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { describe, expect, it } from 'vitest'
+
+const settingsSource = readFileSync(resolve(process.cwd(), 'src/components/ConnectionSettings.tsx'), 'utf8')
+const settingsCss = readFileSync(resolve(process.cwd(), 'src/connection-settings.css'), 'utf8')
+const baseCss = readFileSync(resolve(process.cwd(), 'src/styles.css'), 'utf8')
+const themeCss = readFileSync(resolve(process.cwd(), 'src/theme.css'), 'utf8')
+const appSource = readFileSync(resolve(process.cwd(), 'src/App.tsx'), 'utf8')
+
+describe('Settings overlay sheet contract', () => {
+  it('renders the root settings sheet without a title or subtitle header', () => {
+    expect(settingsSource).not.toContain('title="Connection"')
+    expect(settingsSource).not.toContain('subtitle="Hermes Desktop host"')
+  })
+
+  it('closes by dragging the grabber rather than a separate close button', () => {
+    // The grabber pill is the only element in the grabber row. A close
+    // chevron there duplicated the row chevrons and read as two different
+    // ways to leave the screen.
+    expect(settingsSource).toContain('settings-drag-pill')
+    expect(settingsSource).not.toContain('settings-sheet-close')
+    expect(settingsSource).not.toContain('ChevronDown')
+  })
+
+  it('drops the root-only isRoot header variant', () => {
+    expect(settingsSource).not.toContain('isRoot')
+  })
+
+  it('removes the unused close-button styles', () => {
+    expect(settingsCss).not.toContain('.settings-sheet-close')
+  })
+
+  it('removes roster-oriented padding from the sheet content', () => {
+    expect(settingsCss).toMatch(/\.settings-modal-scroll\s*>\s*\.app\.panel\s*\{[^}]*padding:/s)
+  })
+
+  it('keeps the root page trailing the sub-page by one page width', () => {
+    // The root must TRAIL the sub-page, not be mirrored against it.
+    // Mirroring made the two pages separate instead of moving as a pair,
+    // which opened a gap in the middle of the screen and showed the app
+    // behind the sheet -- hit-tested at 120px wide for ~100ms on a pop.
+    // On a push the root also lurched backwards mid-slide (-435px -> 0px).
+    expect(settingsSource).toContain('translateX(calc(${navOffset}px - 100%))')
+    expect(settingsSource).not.toContain('translateX(${-navOffset}px)')
+  })
+
+  it('keeps the full-screen scrim free of backdrop-filter', () => {
+    // A full-screen backdrop-filter forces the browser to re-blur the whole
+    // viewport on every frame the sheet moves. Measured, that halved the
+    // entrance to 30fps (33.3ms/frame vs 16.7ms), which made the sheet
+    // arrive in coarse chunks -- the jump.
+    const rule = settingsCss.match(/\.settings-modal-backdrop\s*\{[^}]*\}/s)
+    expect(rule).toBeTruthy()
+    expect(rule![0]).not.toContain('backdrop-filter')
+  })
+
+  it('enters the sheet by animating top, not a composited transform', () => {
+    // A transform on the wrapper is composited by the browser, and the
+    // composited layer did not follow the root page's box: the sheet's
+    // visible top edge jumped to the top of the screen (y=0), sat there
+    // for ~50ms, then snapped back down to its rest position (y=79).
+    // Measured, that was a 79px overshoot -- exactly the root page's top
+    // inset -- on every single open.
+    //
+    // Animating `top` is a layout animation, so the edge travels exactly
+    // as the box model says (854 -> 801 -> ... -> 79), no overshoot.
+    const rule = settingsCss.match(/@keyframes settings-sheet-up\s*\{[^}]*\}/s)
+    expect(rule).toBeTruthy()
+    expect(rule![0]).toContain('top: 100%')
+    expect(rule![0]).not.toContain('transform')
+  })
+
+  it('lets the entrance animate top instead of pinning it with inset', () => {
+    // `inset: 0` sets top: 0, which would pin the animated property.
+    const rule = settingsCss.match(/\.settings-sheet-anim\s*\{[^}]*\}/s)
+    expect(rule).toBeTruthy()
+    expect(rule![0]).not.toContain('inset: 0')
+    expect(rule![0]).toContain('top: 0')
+  })
+
+  it('exits the sheet from the drag position instead of snapping back up', () => {
+    // Releasing the grabber used to drop the drag offset in the same commit
+    // that started the exit animation, so the sheet jumped back up by the
+    // whole drag distance (measured: 285.7px -> 78.7px) and only then slid
+    // down from zero. The exit now starts from the drag offset.
+    expect(settingsSource).toContain('--settings-drag-offset')
+    expect(settingsCss).toMatch(
+      /@keyframes settings-sheet-down\s*\{\s*from\s*\{\s*transform:\s*translateY\(var\(--settings-drag-offset/s,
+    )
+  })
+
+  it('runs the exit animation on the stack so the sub-page moves too', () => {
+    // The exit animation used to sit on the wrapper, which only contains
+    // the root page. A sub-page that was showing therefore never moved and
+    // simply vanished when the overlay unmounted.
+    expect(settingsCss).toMatch(/\.settings-page-stack\.is-closing\s*\{[^}]*animation:/s)
+    expect(settingsSource).toContain('settings-page-stack ${isClosing')
+  })
+})
+
+describe('Settings sheet motion contract', () => {
+  // The old curves were hard ease-outs: measured frame by frame, the sheet's
+  // visible edge jumped 102px then 81px and was done in 33ms, then crept
+  // sub-pixel for the rest of the duration. That read as a blink.
+  const hardEaseOut = 'cubic-bezier(0.32, 0.72, 0, 1)'
+
+  it('enters on a curve that spreads the travel over the duration', () => {
+    const rule = settingsCss.match(/\.settings-sheet-anim\s*\{[^}]*\}/s)
+    expect(rule).toBeTruthy()
+    expect(rule![0]).not.toContain(hardEaseOut)
+    expect(rule![0]).toContain('cubic-bezier(0.32, 0.6, 0.35, 1)')
+  })
+
+  it('gives the entrance enough time to be seen', () => {
+    const rule = settingsCss.match(/\.settings-sheet-anim\s*\{[^}]*\}/s)
+    expect(rule![0]).toMatch(/0\.4[0-9]s/)
+  })
+
+  it('springs the grabber back on a curve that does not jump', () => {
+    const rule = settingsCss.match(/\.settings-page-root\.is-settling\s*\{[^}]*\}/s)
+    expect(rule).toBeTruthy()
+    expect(rule![0]).not.toContain(hardEaseOut)
+    expect(rule![0]).toContain('cubic-bezier(0.25, 0.1, 0.25, 1)')
+  })
+
+  it('disables the spring-back transition under reduced motion', () => {
+    const rule = settingsCss.match(
+      /\.settings-page-root\.is-settling\s*\{[^}]*transition:\s*none[^}]*\}/s,
+    )
+    expect(rule).toBeTruthy()
+    const reduced = settingsCss.indexOf('@media (prefers-reduced-motion: reduce)')
+    expect(settingsCss.indexOf('.settings-page-root.is-settling', reduced)).toBeGreaterThan(reduced)
+  })
+
+  it('keeps the exit animation mounted long enough to finish', () => {
+    const exitMs = Number(settingsCss.match(/settings-sheet-down 0\.(\d+)s/)?.[1] ?? '0') * 10
+    const unmountMs = Number(
+      settingsSource.match(/closeTimerRef\.current = window\.setTimeout\(\(\) => \{\s*close\(\)\s*\}, (\d+)\)/)?.[1] ?? '0',
+    )
+    expect(exitMs).toBeGreaterThan(0)
+    expect(unmountMs).toBeGreaterThanOrEqual(exitMs)
+  })
+})
+
+describe('Host card design contract', () => {
+  it('uses a slim filled surface rather than an outlined nested-box card', () => {
+    expect(settingsCss).toMatch(/\.connection-screen \.connection-card\s*\{[^}]*border:\s*0/s)
+    expect(settingsCss).toMatch(/\.connection-screen \.connection-card\s*\{[^}]*border-radius:\s*12px/s)
+    expect(settingsCss).toMatch(/\.connection-screen \.connection-card\s*\{[^}]*background:\s*var\(--surface\)/s)
+  })
+
+  it('sets the endpoint as the single statement with no separate title', () => {
+    expect(settingsSource).toContain('connection-endpoint')
+    expect(settingsSource).not.toContain('connection-title')
+    expect(settingsSource).not.toContain('connection-identity')
+  })
+
+  it('drops the description, nested stat boxes and separate metrics row', () => {
+    expect(settingsSource).not.toContain('connection-guidance')
+    expect(settingsSource).not.toContain('connection-metrics')
+    expect(settingsSource).not.toContain('className="stats"')
+  })
+
+  it('keeps only the button as the action', () => {
+    expect(settingsSource).toContain('connection-action')
+    expect(settingsCss).toMatch(/\.connection-screen \.connection-action\s*\{[^}]*justify-self:\s*start/s)
+  })
+
+  it('uses the app-wide primary button shape with a 44px touch target', () => {
+    expect(settingsSource).toContain('className="primary connection-action"')
+    expect(settingsCss).toMatch(/\.connection-screen \.connection-action\s*\{[^}]*min-height:\s*44px/s)
+  })
+
+  it('removes the legacy status pill and nested stat box styles', () => {
+    expect(baseCss).not.toContain('.status-pill{')
+    expect(baseCss).not.toContain('.stats{')
+    expect(themeCss).not.toContain('.connection-card .status-pill')
+  })
+
+  it('drops the unreferenced LegacyConnectionSettings component', () => {
+    expect(appSource).not.toContain('LegacyConnectionSettings')
+  })
+
+  it('sets the endpoint in the sans face, not monospace', () => {
+    const endpointRule = settingsCss.match(/\.connection-screen \.connection-endpoint\s*\{[^}]*\}/s)
+    expect(endpointRule).toBeTruthy()
+    expect(endpointRule![0]).not.toContain('font-mono')
+  })
+
+  it('keeps the host card free of inner hairline rules', () => {
+    const cardBlock = settingsCss.slice(
+      settingsCss.indexOf('HOST CARD'),
+      settingsCss.indexOf('Sub-pages keep their own header'),
+    )
+    expect(cardBlock).not.toMatch(/border-(top|bottom):\s*1px/)
+    expect(cardBlock).not.toMatch(/box-shadow:/)
+  })
+})
