@@ -13,10 +13,10 @@ import {
   FileText,
   Image as ImageIcon,
   Layers,
-  MailOpen,
   Maximize2,
+  MessageSquareDot,
   Pencil,
-  TextSelect,
+  TextCursor,
   WifiOff,
   X,
 } from 'lucide-react'
@@ -1655,15 +1655,15 @@ export const MessageCard = memo(function MessageCard({ message, previousMessage,
           >
             <div className="message-action-grabber-pill" aria-hidden="true" />
           </div>
-          <div className="message-action-body">
-            <div className={`message-action-message ${message.role === 'user' ? 'user' : 'assistant'}`}>
-              <MarkdownContent>{cleanContent}</MarkdownContent>
-            </div>
-          </div>
           {/*
             Two groups, as in the reference design: the thread-affecting
             actions first, then the text actions. Each group is its own
             rounded surface with hairline separators between its rows.
+
+            The reference shows no message preview here, so there is none --
+            the preview made the sheet taller than the screen and pushed the
+            last action row off the bottom. The message body is one tap away
+            behind "Select text".
           */}
           <div className="message-action-groups">
             <div className="message-action-group">
@@ -1675,7 +1675,7 @@ export const MessageCard = memo(function MessageCard({ message, previousMessage,
                   onMarkUnread?.(message.timestamp)
                 }}
               >
-                <MailOpen size={18} />
+                <MessageSquareDot size={20} />
                 <span>Mark as unread</span>
               </button>
               {message.role === 'user' && (
@@ -1687,7 +1687,7 @@ export const MessageCard = memo(function MessageCard({ message, previousMessage,
                     onEdit(cleanContent, message.id)
                   }}
                 >
-                  <Pencil size={18} />
+                  <Pencil size={20} />
                   <span>Edit</span>
                 </button>
               )}
@@ -1698,7 +1698,7 @@ export const MessageCard = memo(function MessageCard({ message, previousMessage,
                 className="message-action-row"
                 onClick={() => void copy()}
               >
-                {copied ? <Check size={18} /> : <Copy size={18} />}
+                {copied ? <Check size={20} /> : <Copy size={20} />}
                 <span>{copied ? 'Copied' : 'Copy'}</span>
               </button>
               <button
@@ -1706,7 +1706,7 @@ export const MessageCard = memo(function MessageCard({ message, previousMessage,
                 className="message-action-row"
                 onClick={() => setRawViewOpen(true)}
               >
-                <TextSelect size={18} />
+                <TextCursor size={20} />
                 <span>Select text</span>
               </button>
             </div>

@@ -35,6 +35,26 @@ describe('Long-press action sheet', () => {
     expect(source).toContain("message.role === 'user'")
   })
 
+  it('shows no message preview in the sheet', () => {
+    // The reference design has none, and with it the sheet grew taller than
+    // the screen and pushed the last action row off the bottom.
+    expect(source).not.toContain('message-action-body')
+    expect(source).not.toContain('message-action-message')
+    expect(css).not.toContain('.message-action-body')
+  })
+
+  it('uses the reference icons for the actions', () => {
+    expect(source).toContain('<TextCursor size={20} />')
+    expect(source).toContain('<MessageSquareDot size={20} />')
+    expect(source).toContain('<Copy size={20} />')
+  })
+
+  it('indents the group separator to the label column', () => {
+    const sepRule = css.match(/\.message-action-row \+ \.message-action-row::before\s*\{[^}]*\}/s)
+    expect(sepRule).toBeTruthy()
+    expect(sepRule![0]).toContain('left: 54px')
+  })
+
   it('groups the action rows into two rounded surfaces', () => {
     expect(source).toContain('message-action-groups')
     expect(source).toContain('message-action-group')
@@ -102,10 +122,10 @@ describe('Long-press action sheet', () => {
     expect(grabberRule![0]).toContain('touch-action: none')
   })
 
-  it('gives every action row a 54px touch target', () => {
+  it('gives every action row a 50px touch target', () => {
     const rowRule = css.match(/\.message-action-row\s*\{[^}]*\}/s)
     expect(rowRule).toBeTruthy()
-    expect(rowRule![0]).toContain('min-height: 54px')
+    expect(rowRule![0]).toContain('min-height: 50px')
   })
 
   it('suppresses the native Android callout on bubbles so it does not race the sheet', () => {

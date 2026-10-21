@@ -4087,7 +4087,6 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
 
 .message-action-sheet {
   pointer-events: auto;
-  max-height: 82dvh;
   display: flex;
   flex-direction: column;
   border-radius: 20px 20px 0 0;
@@ -4130,39 +4129,6 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
   background: color-mix(in srgb, var(--text, #f4f4f5) 45%, transparent);
 }
 
-.message-action-body {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding: 4px 18px 14px;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
-}
-
-.message-action-body::-webkit-scrollbar {
-  display: none;
-  width: 0;
-  height: 0;
-}
-
-.message-action-message {
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  background: #1a1b1e;
-  padding: 12px 14px;
-}
-
-.message-action-message.user {
-  background: #24252a;
-}
-
-.message-action-message .markdown-body {
-  font-size: 14px;
-  line-height: 1.55;
-  color: #e8e9eb;
-}
-
 /*
  * The action rows are grouped into two rounded surfaces, each row separated
  * by a hairline that starts at the icon column rather than the sheet edge.
@@ -4172,28 +4138,28 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 4px 14px calc(14px + env(safe-area-inset-bottom, 0px));
+  gap: 8px;
+  padding: 0 16px calc(16px + env(safe-area-inset-bottom, 0px));
 }
 
 .message-action-group {
-  border-radius: 16px;
+  border-radius: 14px;
   background: #1c1d20;
   overflow: hidden;
 }
 
 .message-action-row {
   width: 100%;
-  min-height: 54px;
-  padding: 0 16px;
+  min-height: 50px;
+  padding: 0 18px;
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 16px;
   border: 0;
   background: transparent;
   color: #e8e9eb;
   font-size: 16px;
-  font-weight: 450;
+  font-weight: 400;
   text-align: left;
   cursor: pointer;
   transition: background 0.12s ease;
@@ -4201,8 +4167,22 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
   -webkit-tap-highlight-color: transparent;
 }
 
+/*
+ * The separator starts at the label, not the sheet edge, so the icon
+ * column reads as a single gutter down the group.
+ */
 .message-action-row + .message-action-row {
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  position: relative;
+}
+
+.message-action-row + .message-action-row::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 54px;
+  right: 0;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .message-action-row:active {
@@ -4220,19 +4200,6 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
   box-shadow: 0 -14px 50px rgba(0, 0, 0, 0.18);
 }
 
-[data-theme='light'] .message-action-message {
-  background: #f4f4f5;
-  border-color: rgba(0, 0, 0, 0.07);
-}
-
-[data-theme='light'] .message-action-message.user {
-  background: #e9e9ec;
-}
-
-[data-theme='light'] .message-action-message .markdown-body {
-  color: #09090b;
-}
-
 [data-theme='light'] .message-action-group {
   background: #f4f4f5;
 }
@@ -4241,8 +4208,8 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
   color: #09090b;
 }
 
-[data-theme='light'] .message-action-row + .message-action-row {
-  border-top-color: rgba(0, 0, 0, 0.07);
+[data-theme='light'] .message-action-row + .message-action-row::before {
+  background: rgba(0, 0, 0, 0.08);
 }
 
 [data-theme='light'] .message-action-row:active {
