@@ -44,6 +44,7 @@ import {
   getCachedSessionMessages,
   getEndpointStorageKey,
   isHumanChatSession,
+  computeUnreadCheckpoint,
   parseCachedSessionIndex,
   parseLastReadTimestamp,
   removeCachedSessionMessages,
@@ -952,6 +953,38 @@ export default function App() {
       pendingLastReadTimersRef.current.clear()
     }
   }, [])
+
+  /**
+   * Marks a session unread by rewinding its lastRead checkpoint.
+   *
+   * Unread is derived client-side from `lastRead` vs message timestamps, so
+   * the only way to flag a session unread is to move the checkpoint back to
+   * just before the target message. The checkpoint is rewound to one
+   * millisecond before the message so the message itself counts as unread
+   * (the comparison is strictly greater-than).
+   */
+  const markSessionUnread = useCallback((sessionId: string, messageTimestamp?: number) => {
+    if (!sessionId) return
+    const checkpoint = computeUnreadCheckpoint(messageTimestamp)
+
+    const ids = new Set<string>([sessionId])
+    const resolved = getResolvedSessionId(sessionId, activeEndpointRef.current)
+    if (resolved) ids.add(resolved)
+
+    // The canonical bot chat is also tracked under the profile's canonical
+    // session id, so both checkpoints have to move or the roster row stays
+    // read.
+    const profileName = selectedRef.current?.profile
+    const matchedProfile = profileName
+      ? profilesRef.current.find(p => p.name === profileName)
+      : undefined
+    if (matchedProfile?.canonical_session?.id) ids.add(matchedProfile.canonical_session.id)
+    if (matchedProfile?.canonical_session?.resolved_id) ids.add(matchedProfile.canonical_session.resolved_id)
+
+    for (const id of ids) {
+      setLastReadTime(id, checkpoint)
+    }
+  }, [setLastReadTime])
 
   const canonicalSessionIds = useMemo(() => {
     const set = new Set<string>()
@@ -2692,6 +2725,10 @@ export default function App() {
         submitVoice={submitVoice}
         stop={stop}
         loadEarlierMessages={loadEarlierMessages}
+        onMarkUnread={messageTimestamp => {
+          if (!selected) return
+          markSessionUnread(selected.id, messageTimestamp)
+        }}
       />
     </ErrorBoundary>
   )}

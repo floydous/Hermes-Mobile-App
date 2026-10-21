@@ -39,6 +39,7 @@ type Props = {
   submitVoice: (text: string) => Promise<boolean>
   stop: () => void
   loadEarlierMessages?: () => Promise<boolean>
+  onMarkUnread?: (messageTimestamp?: number) => void
   perfTraceId?: string
 }
 
@@ -196,7 +197,7 @@ export class FetchEarlierCoordinator {
   }
 }
 
-export function ChatView({ session, conversationLoading, messages, settledAssistant, profiles, streaming, sending, toolActivities, error, back, refresh, clearChat, openProfile, onSessionModelChange, pendingClarify, onAnswerClarify, onSkipClarify, submit, submitVoice, stop, loadEarlierMessages, perfTraceId }: Props) {
+export function ChatView({ session, conversationLoading, messages, settledAssistant, profiles, streaming, sending, toolActivities, error, back, refresh, clearChat, openProfile, onSessionModelChange, pendingClarify, onAnswerClarify, onSkipClarify, submit, submitVoice, stop, loadEarlierMessages, onMarkUnread, perfTraceId }: Props) {
   const mountedRef = useRef(true)
   const coordinatorRef = useRef<FetchEarlierCoordinator>(new FetchEarlierCoordinator(session.id))
 
@@ -672,6 +673,7 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
               activeToolStatus={isLast && sending ? liveStatus : undefined}
               revealTimestamp={message.role === 'assistant' && revealedTimestampId === message.id}
               onRevealTimestamp={handleToggleRevealTimestamp}
+              onMarkUnread={onMarkUnread}
             />
           )
         })}

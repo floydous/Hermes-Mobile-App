@@ -4163,45 +4163,55 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
   color: #e8e9eb;
 }
 
-.message-action-footer {
+/*
+ * The action rows are grouped into two rounded surfaces, each row separated
+ * by a hairline that starts at the icon column rather than the sheet edge.
+ * This mirrors the reference design.
+ */
+.message-action-groups {
   flex: 0 0 auto;
   display: flex;
-  gap: 8px;
-  padding: 10px 18px calc(14px + env(safe-area-inset-bottom, 0px));
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
-  background: #131416;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 14px calc(14px + env(safe-area-inset-bottom, 0px));
 }
 
-.message-action-btn {
-  flex: 1 1 0;
-  min-width: 0;
-  min-height: 44px;
-  padding: 0 12px;
-  display: inline-flex;
+.message-action-group {
+  border-radius: 16px;
+  background: #1c1d20;
+  overflow: hidden;
+}
+
+.message-action-row {
+  width: 100%;
+  min-height: 54px;
+  padding: 0 16px;
+  display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 7px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.11);
-  background: rgba(255, 255, 255, 0.045);
+  gap: 14px;
+  border: 0;
+  background: transparent;
   color: #e8e9eb;
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 16px;
+  font-weight: 450;
+  text-align: left;
   cursor: pointer;
-  transition: transform 0.12s ease, background 0.12s ease;
+  transition: background 0.12s ease;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
 }
 
-.message-action-btn:active {
-  transform: scale(0.97);
-  background: rgba(255, 255, 255, 0.09);
+.message-action-row + .message-action-row {
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
 }
 
-.message-action-btn span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.message-action-row:active {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.message-action-row svg {
+  flex: 0 0 auto;
+  color: #a3a6ad;
 }
 
 [data-theme='light'] .message-action-sheet {
@@ -4223,19 +4233,24 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
   color: #09090b;
 }
 
-[data-theme='light'] .message-action-footer {
-  background: #ffffff;
-  border-top-color: rgba(0, 0, 0, 0.07);
+[data-theme='light'] .message-action-group {
+  background: #f4f4f5;
 }
 
-[data-theme='light'] .message-action-btn {
-  background: rgba(0, 0, 0, 0.04);
-  border-color: rgba(0, 0, 0, 0.1);
+[data-theme='light'] .message-action-row {
   color: #09090b;
 }
 
-[data-theme='light'] .message-action-btn:active {
-  background: rgba(0, 0, 0, 0.08);
+[data-theme='light'] .message-action-row + .message-action-row {
+  border-top-color: rgba(0, 0, 0, 0.07);
+}
+
+[data-theme='light'] .message-action-row:active {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+[data-theme='light'] .message-action-row svg {
+  color: #71717a;
 }
 
 /*
@@ -4248,64 +4263,100 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
   z-index: 122;
   display: flex;
   flex-direction: column;
-  background: var(--bg, #030405);
+  padding: 12px 10px calc(12px + env(safe-area-inset-bottom, 0px));
+  background: rgba(0, 0, 0, 0.55);
   /* The view is portaled to <body>, so it cannot inherit the chat shell's
      colour -- set it from the theme token instead. */
   color: var(--text, #f4f5f7);
   animation: message-raw-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+.message-raw-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: #17181b;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
 .message-raw-head {
   flex: 0 0 auto;
-  height: calc(52px + env(safe-area-inset-top, 0px));
-  padding: env(safe-area-inset-top, 0px) 12px 0;
+  height: 56px;
+  padding: 0 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08));
-  background: var(--bg, #030405);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
 }
 
 .message-raw-head b {
-  font-size: 14px;
+  font-size: 17px;
   font-weight: 590;
+  letter-spacing: -0.2px;
 }
 
 .message-raw-head button {
-  width: 40px;
-  height: 40px;
+  width: 38px;
+  height: 38px;
   display: grid;
   place-items: center;
   border: 0;
   border-radius: 50%;
-  background: transparent;
+  background: rgba(255, 255, 255, 0.07);
   color: inherit;
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .message-raw-head button:active {
-  background: rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.14);
 }
 
 .message-raw-text {
   flex: 1 1 auto;
   min-height: 0;
   margin: 0;
-  padding: 16px 18px calc(28px + env(safe-area-inset-bottom, 0px));
+  padding: 16px 18px 24px;
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 13px;
-  line-height: 1.62;
-  color: var(--text, #e8e9eb);
+  font-family: var(--font-sans, ui-sans-serif, system-ui, sans-serif);
+  font-size: 15px;
+  line-height: 1.55;
+  color: #e8e9eb;
   white-space: pre-wrap;
   word-break: break-word;
   /* The one place in the app where text selection is allowed. */
   -webkit-user-select: text;
   user-select: text;
   -webkit-touch-callout: default;
+}
+
+[data-theme='light'] .message-raw-view {
+  background: rgba(0, 0, 0, 0.35);
+}
+
+[data-theme='light'] .message-raw-panel {
+  background: #ffffff;
+  border-color: rgba(0, 0, 0, 0.09);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.18);
+}
+
+[data-theme='light'] .message-raw-head {
+  border-bottom-color: rgba(0, 0, 0, 0.07);
+}
+
+[data-theme='light'] .message-raw-head button {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+[data-theme='light'] .message-raw-text {
+  color: #09090b;
 }
 
 @keyframes message-action-backdrop-in {

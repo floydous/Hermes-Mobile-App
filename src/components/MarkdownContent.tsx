@@ -13,6 +13,7 @@ import {
   FileText,
   Image as ImageIcon,
   Layers,
+  MailOpen,
   Maximize2,
   Pencil,
   TextSelect,
@@ -1304,6 +1305,7 @@ type MessageCardProps = {
   activeToolStatus?: string
   revealTimestamp: boolean
   onRevealTimestamp: (id?: number) => void
+  onMarkUnread?: (messageTimestamp?: number) => void
 }
 
 export function AgentDispatchBubble({
@@ -1372,7 +1374,7 @@ export function AgentDispatchBubble({
   )
 }
 
-export const MessageCard = memo(function MessageCard({ message, previousMessage, onEdit, profile: _profile, profiles, fallbackName: _fallbackName, isCompleted, isActiveTurn, activeToolStatus, revealTimestamp, onRevealTimestamp }: MessageCardProps) {
+export const MessageCard = memo(function MessageCard({ message, previousMessage, onEdit, profile: _profile, profiles, fallbackName: _fallbackName, isCompleted, isActiveTurn, activeToolStatus, revealTimestamp, onRevealTimestamp, onMarkUnread }: MessageCardProps) {
   const [copied, setCopied] = useState(false)
   const [actionSheetOpen, setActionSheetOpen] = useState(false)
   const [actionSheetExiting, setActionSheetExiting] = useState(false)
@@ -1658,52 +1660,74 @@ export const MessageCard = memo(function MessageCard({ message, previousMessage,
               <MarkdownContent>{cleanContent}</MarkdownContent>
             </div>
           </div>
-          <div className="message-action-footer">
-            <button
-              type="button"
-              className="message-action-btn"
-              onClick={() => setRawViewOpen(true)}
-            >
-              <TextSelect size={15} />
-              <span>Select text</span>
-            </button>
-            <button
-              type="button"
-              className="message-action-btn"
-              onClick={() => void copy()}
-            >
-              {copied ? <Check size={15} /> : <Copy size={15} />}
-              <span>{copied ? 'Copied' : 'Copy text'}</span>
-            </button>
-            {message.role === 'user' && (
+          {/*
+            Two groups, as in the reference design: the thread-affecting
+            actions first, then the text actions. Each group is its own
+            rounded surface with hairline separators between its rows.
+          */}
+          <div className="message-action-groups">
+            <div className="message-action-group">
               <button
                 type="button"
-                className="message-action-btn"
+                className="message-action-row"
                 onClick={() => {
                   closeActionSheet()
-                  onEdit(cleanContent, message.id)
+                  onMarkUnread?.(message.timestamp)
                 }}
               >
-                <Pencil size={15} />
-                <span>Edit</span>
+                <MailOpen size={18} />
+                <span>Mark as unread</span>
               </button>
-            )}
+              {message.role === 'user' && (
+                <button
+                  type="button"
+                  className="message-action-row"
+                  onClick={() => {
+                    closeActionSheet()
+                    onEdit(cleanContent, message.id)
+                  }}
+                >
+                  <Pencil size={18} />
+                  <span>Edit</span>
+                </button>
+              )}
+            </div>
+            <div className="message-action-group">
+              <button
+                type="button"
+                className="message-action-row"
+                onClick={() => void copy()}
+              >
+                {copied ? <Check size={18} /> : <Copy size={18} />}
+                <span>{copied ? 'Copied' : 'Copy'}</span>
+              </button>
+              <button
+                type="button"
+                className="message-action-row"
+                onClick={() => setRawViewOpen(true)}
+              >
+                <TextSelect size={18} />
+                <span>Select text</span>
+              </button>
+            </div>
           </div>
         </div>
         </div>
         </div>
         {rawViewOpen && (
-          <div className="message-raw-view" role="dialog" aria-modal="true" aria-label="Raw message text">
-            <header className="message-raw-head">
-              <button type="button" onClick={() => setRawViewOpen(false)} aria-label="Back to message actions">
-                <X size={16} />
-              </button>
-              <b>Raw text</b>
-              <button type="button" onClick={() => void copy()} aria-label="Copy raw text">
-                {copied ? <Check size={16} /> : <Copy size={16} />}
-              </button>
-            </header>
-            <pre className="message-raw-text">{cleanContent}</pre>
+          <div className="message-raw-view" role="dialog" aria-modal="true" aria-label="Message">
+            <div className="message-raw-panel">
+              <header className="message-raw-head">
+                <button type="button" onClick={() => setRawViewOpen(false)} aria-label="Close message">
+                  <X size={18} />
+                </button>
+                <b>Message</b>
+                <button type="button" onClick={() => void copy()} aria-label="Copy message">
+                  {copied ? <Check size={18} /> : <Copy size={18} />}
+                </button>
+              </header>
+              <pre className="message-raw-text">{cleanContent}</pre>
+            </div>
           </div>
         )}
       </>,

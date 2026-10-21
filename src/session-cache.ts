@@ -693,6 +693,25 @@ export function seedUnreadBaselineIfNeeded(
 }
 
 /**
+ * Computes the lastRead checkpoint that makes a given message count as unread.
+ *
+ * Unread is derived from `messageTime > lastRead`, so the checkpoint has to
+ * sit strictly below the message. `markSessionUnread` writes this value
+ * back, which is the only way to flag a session unread -- there is no
+ * server-side "mark unread" call.
+ *
+ * `messageTimestamp` is in seconds (the gateway's unit); it is normalized
+ * to milliseconds here. When no timestamp is available the checkpoint falls
+ * back to just before now, which marks everything up to this moment unread.
+ */
+export function computeUnreadCheckpoint(messageTimestamp?: number): number {
+  const target = messageTimestamp && messageTimestamp > 0
+    ? normalizeTimestampToMs(messageTimestamp)
+    : Date.now() - 1
+  return Math.max(0, target - 1)
+}
+
+/**
  * Calculates whether a session is unread and the exact numeric unread count.
  * Prevents the sent message race condition: user messages (role: 'user') NEVER
  * increment unread badges. Only incoming assistant responses arriving after

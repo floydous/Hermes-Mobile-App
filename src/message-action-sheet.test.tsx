@@ -7,6 +7,9 @@ import { MessageCard } from './components/MarkdownContent'
 import type { LiveMessage } from './hermes'
 
 const source = readFileSync(resolve(process.cwd(), 'src/components/MarkdownContent.tsx'), 'utf8')
+const chatView = readFileSync(resolve(process.cwd(), 'src/components/ChatView.tsx'), 'utf8')
+const appSource = readFileSync(resolve(process.cwd(), 'src/App.tsx'), 'utf8')
+const sessionCache = readFileSync(resolve(process.cwd(), 'src/session-cache.ts'), 'utf8')
 const css = readFileSync(resolve(process.cwd(), 'src/mobile-overrides.css'), 'utf8')
 
 const assistantMessage: LiveMessage = {
@@ -24,18 +27,47 @@ describe('Long-press action sheet', () => {
     expect(source).not.toContain('message-action-sheet-in-place')
   })
 
-  it('offers Select text and Copy text, and keeps Edit for user messages', () => {
+  it('offers Copy, Select text, Mark as unread and Edit', () => {
+    expect(source).toContain('Mark as unread')
     expect(source).toContain('Select text')
-    expect(source).toContain('Copy text')
-    expect(source).toContain('message.role === \'user\'')
+    expect(source).toContain("'Copied' : 'Copy'")
+    // Edit applies to the user's own messages only.
+    expect(source).toContain("message.role === 'user'")
+  })
+
+  it('groups the action rows into two rounded surfaces', () => {
+    expect(source).toContain('message-action-groups')
+    expect(source).toContain('message-action-group')
+    expect(source).toContain('message-action-row')
+    const groupRule = css.match(/\.message-action-group\s*\{[^}]*\}/s)
+    expect(groupRule).toBeTruthy()
+    expect(groupRule![0]).toContain('border-radius')
+  })
+
+  it('wires Mark as unread back to the session lastRead checkpoint', () => {
+    expect(chatView).toContain('onMarkUnread')
+    expect(appSource).toContain('markSessionUnread')
+    expect(appSource).toContain('onMarkUnread={messageTimestamp')
+  })
+
+  it('rewinds the lastRead checkpoint strictly below the message timestamp', () => {
+    // The unread comparison is `messageTime > lastRead`, so the checkpoint
+    // has to sit below the message or the message is not counted.
+    expect(appSource).toContain('computeUnreadCheckpoint(messageTimestamp)')
+    expect(sessionCache).toContain('export function computeUnreadCheckpoint')
   })
 
   it('opens a full-page raw-text window that is selectable', () => {
     expect(source).toContain('message-raw-view')
+    expect(source).toContain('message-raw-panel')
     expect(source).toContain('message-raw-text')
     const rawRule = css.match(/\.message-raw-text\s*\{[^}]*\}/s)
     expect(rawRule).toBeTruthy()
     expect(rawRule![0]).toContain('user-select: text')
+  })
+
+  it('titles the raw-text window "Message"', () => {
+    expect(source).toContain('<b>Message</b>')
   })
 
   it('lets the sheet be dismissed by dragging the grabber down', () => {
@@ -70,10 +102,10 @@ describe('Long-press action sheet', () => {
     expect(grabberRule![0]).toContain('touch-action: none')
   })
 
-  it('lets the sheet body scroll independently of the sheet box', () => {
-    const bodyRule = css.match(/\.message-action-body\s*\{[^}]*\}/s)
-    expect(bodyRule).toBeTruthy()
-    expect(bodyRule![0]).toContain('overflow-y: auto')
+  it('gives every action row a 54px touch target', () => {
+    const rowRule = css.match(/\.message-action-row\s*\{[^}]*\}/s)
+    expect(rowRule).toBeTruthy()
+    expect(rowRule![0]).toContain('min-height: 54px')
   })
 
   it('suppresses the native Android callout on bubbles so it does not race the sheet', () => {

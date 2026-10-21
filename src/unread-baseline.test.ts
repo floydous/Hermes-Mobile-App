@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   calculateUnreadState,
+  computeUnreadCheckpoint,
   getEndpointStorageKey,
   hasAnyUnreadBaselineMarker,
   hasInitializedUnreadBaseline,
@@ -302,5 +303,56 @@ describe('Unread Baseline Seeding on First App Installation', () => {
     expect(seeded).toBe(true)
     expect(sessionCount).toBeGreaterThanOrEqual(200) // 100 sessions * 2 (id + resolved_id) + profiles
     expect(duration).toBeLessThan(15) // well below 15ms
+  })
+})
+
+describe('computeUnreadCheckpoint', () => {
+  it('sits strictly below the message timestamp so the message counts as unread', () => {
+    // The unread comparison is `messageTime > lastRead`, so an equal
+    // checkpoint would leave the message counted as read.
+    const messageSec = 1_729_000_000
+    const checkpoint = computeUnreadCheckpoint(messageSec)
+
+    expect(checkpoint).toBe(messageSec * 1000 - 1)
+    expect(messageSec * 1000 > checkpoint).toBe(true)
+  })
+
+  it('normalizes a millisecond timestamp that was already in milliseconds', () => {
+    const messageMs = 1_729_000_000_000
+    expect(computeUnreadCheckpoint(messageMs)).toBe(messageMs - 1)
+  })
+
+  it('falls back to just before now when the message has no timestamp', () => {
+    const before = Date.now()
+    const checkpoint = computeUnreadCheckpoint(undefined)
+    const after = Date.now()
+
+    expect(checkpoint).toBeGreaterThanOrEqual(before - 2)
+    expect(checkpoint).toBeLessThanOrEqual(after)
+  })
+
+  it('never returns a negative checkpoint', () => {
+    expect(computeUnreadCheckpoint(0)).toBeGreaterThanOrEqual(0)
+  })
+
+  it('makes the target message unread against a live transcript', () => {
+    const messageSec = 1_729_000_000
+    const checkpoint = computeUnreadCheckpoint(messageSec)
+    const cached = [
+      { id: 1, role: 'assistant' as const, content: 'older', timestamp: messageSec - 100 },
+      { id: 2, role: 'assistant' as const, content: 'target', timestamp: messageSec },
+    ]
+
+    const { isUnread, unreadCount } = calculateUnreadState(
+      'sess-1',
+      messageSec,
+      cached,
+      checkpoint,
+      false,
+      false
+    )
+
+    expect(isUnread).toBe(true)
+    expect(unreadCount).toBe(1)
   })
 })
