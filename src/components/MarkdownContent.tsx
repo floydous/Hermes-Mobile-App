@@ -15,6 +15,7 @@ import {
   Layers,
   Maximize2,
   Pencil,
+  TextSelect,
   WifiOff,
   X,
 } from 'lucide-react'
@@ -1371,35 +1372,23 @@ export function AgentDispatchBubble({
   )
 }
 
-export function getUiZoomFactor(): number {
-  if (typeof document === 'undefined') return 1
-  try {
-    const docEl = document.documentElement
-    const computed = typeof window !== 'undefined' && window.getComputedStyle ? window.getComputedStyle(docEl) : null
-
-    // 1. Check custom property --ui-scale (computed or inline)
-    const propVal = computed?.getPropertyValue('--ui-scale') || docEl.style.getPropertyValue('--ui-scale')
-    const parsedProp = parseFloat(propVal)
-    if (!isNaN(parsedProp) && parsedProp > 0) return parsedProp
-
-    // 2. Check CSS zoom (computed or inline)
-    const zoomVal = (computed as any)?.zoom || (docEl.style as any)?.zoom
-    const parsedZoom = parseFloat(zoomVal)
-    if (!isNaN(parsedZoom) && parsedZoom > 0) return parsedZoom
-  } catch {}
-  return 1
-}
-
 export const MessageCard = memo(function MessageCard({ message, previousMessage, onEdit, profile: _profile, profiles, fallbackName: _fallbackName, isCompleted, isActiveTurn, activeToolStatus, revealTimestamp, onRevealTimestamp }: MessageCardProps) {
   const [copied, setCopied] = useState(false)
   const [actionSheetOpen, setActionSheetOpen] = useState(false)
   const [actionSheetExiting, setActionSheetExiting] = useState(false)
+  const [rawViewOpen, setRawViewOpen] = useState(false)
   const [isPressing, setIsPressing] = useState(false)
   const [bubbleRect, setBubbleRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null)
   const bubbleRef = useRef<HTMLDivElement | null>(null)
   const pressTimerRef = useRef<number | null>(null)
   const longPressTimerRef = useRef<number | null>(null)
   const touchStartPosRef = useRef<{ x: number; y: number } | null>(null)
+  const sheetDragYRef = useRef(0)
+  const sheetDragStartYRef = useRef(0)
+  const sheetDragStartTimeRef = useRef(0)
+  const [sheetDragY, setSheetDragY] = useState(0)
+  const [isSheetDragging, setIsSheetDragging] = useState(false)
+  const [isSheetSettling, setIsSheetSettling] = useState(false)
   const [swipeStartX, setSwipeStartX] = useState<number | null>(null)
   const stats = formatResponseStats(message)
   const timestamp = formatMessageTime(message.timestamp)
@@ -1479,7 +1468,8 @@ export const MessageCard = memo(function MessageCard({ message, previousMessage,
   if (/^\[IMPORTANT:\s*Background process\s+/i.test(textContent.trim()) && textContent.trim().endsWith(']')) return null
 
   const copy = async () => {
-    await navigator.clipboard.writeText(cleanContent)
+    const success = await copyCodeText(cleanContent)
+    if (!success) return
     setCopied(true)
     window.setTimeout(() => setCopied(false), 1400)
   }
@@ -1561,153 +1551,134 @@ export const MessageCard = memo(function MessageCard({ message, previousMessage,
 
   const closeActionSheet = () => {
     if (actionSheetExiting) return
+    const reduced =
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    if (reduced) {
+      setActionSheetOpen(false)
+      setRawViewOpen(false)
+      return
+    }
     setActionSheetExiting(true)
     window.setTimeout(() => {
       setActionSheetOpen(false)
       setActionSheetExiting(false)
-    }, 160)
+      setRawViewOpen(false)
+    }, 180)
   }
 
   useEffect(() => {
     if (!actionSheetOpen) return
     const prevOverflow = document.body.style.overflow
-    const prevTouchAction = document.body.style.touchAction
     document.body.style.overflow = 'hidden'
-    document.body.style.touchAction = 'none'
     const onMobileBack = (e: Event) => {
       e.preventDefault()
+      if (rawViewOpen) {
+        setRawViewOpen(false)
+        return
+      }
       closeActionSheet()
     }
     window.addEventListener('hermes-mobile-back', onMobileBack)
     return () => {
       document.body.style.overflow = prevOverflow
-      document.body.style.touchAction = prevTouchAction
       window.removeEventListener('hermes-mobile-back', onMobileBack)
     }
-  }, [actionSheetOpen, actionSheetExiting])
+  }, [actionSheetOpen, actionSheetExiting, rawViewOpen])
+
+  const handleGrabberPointerDown = (e: React.PointerEvent) => {
+    if (!e.isPrimary || e.button !== 0) return
+    try { e.currentTarget.setPointerCapture(e.pointerId) } catch {}
+    sheetDragStartYRef.current = e.clientY
+    sheetDragStartTimeRef.current = Date.now()
+    sheetDragYRef.current = 0
+    setIsSheetDragging(true)
+  }
+
+  const handleGrabberPointerMove = (e: React.PointerEvent) => {
+    if (!isSheetDragging) return
+    const deltaY = e.clientY - sheetDragStartYRef.current
+    const next = deltaY > 0 ? deltaY : deltaY * 0.15
+    sheetDragYRef.current = next
+    setSheetDragY(next)
+  }
+
+  const handleGrabberPointerUp = (e: React.PointerEvent) => {
+    if (!isSheetDragging) return
+    setIsSheetDragging(false)
+    try { e.currentTarget.releasePointerCapture(e.pointerId) } catch {}
+    const distance = sheetDragYRef.current
+    const duration = Math.max(1, Date.now() - sheetDragStartTimeRef.current)
+    const velocity = distance / duration
+    if (distance > 110 || velocity > 0.4) {
+      closeActionSheet()
+      return
+    }
+    sheetDragYRef.current = 0
+    setSheetDragY(0)
+    setIsSheetSettling(true)
+    window.setTimeout(() => setIsSheetSettling(false), 260)
+  }
 
   const renderActionSheet = () => {
     if (!actionSheetOpen || typeof document === 'undefined') return null
 
-    const zoom = getUiZoomFactor()
-    const docEl = document.documentElement
-    const viewportH = typeof window !== 'undefined' ? (docEl.clientHeight || window.innerHeight) : 700
-    const viewportW = typeof window !== 'undefined' ? (docEl.clientWidth || window.innerWidth) : 380
-
-    // When CSS zoom is active on documentElement, getBoundingClientRect() returns
-    // zoomed visual viewport coordinates. Elements rendered in position: fixed inside
-    // the zoomed root would be scaled a second time. Divide by zoom to normalize.
-    const scaledRect = bubbleRect ? {
-      top: bubbleRect.top / zoom,
-      left: bubbleRect.left / zoom,
-      width: bubbleRect.width / zoom,
-      height: bubbleRect.height / zoom,
-    } : null
-
-    // Truly tall bubble: actual rendered height exceeds 48% of viewport
-    const isTall = Boolean(scaledRect && scaledRect.height > viewportH * 0.48)
-
-    let bubblePositionStyle: React.CSSProperties = {}
-    let pillsPositionStyle: React.CSSProperties = {}
-
-    if (scaledRect) {
-      // Horizontal positioning in unscaled layout coordinate space:
-      // For assistant messages, align left edge of pills to left edge of bubble.
-      // For user messages, align right edge of pills flush to right edge of bubble.
-      const pillsEstimatedWidth = message.role === 'user' ? 186 : 96
-      const pillsLeft = message.role === 'user'
-        ? Math.max(16, Math.min(viewportW - pillsEstimatedWidth - 16, scaledRect.left + scaledRect.width - pillsEstimatedWidth))
-        : Math.max(16, Math.min(viewportW - pillsEstimatedWidth - 16, scaledRect.left))
-
-      if (isTall) {
-        // Long / overflowing message bubble:
-        // Gracefully contain within a clean 48vh viewport window with a bottom fade mask
-        const maxHeight = Math.min(Math.round(viewportH * 0.48), 380)
-        const visibleHeight = Math.min(scaledRect.height, maxHeight)
-        const top = Math.max(68, Math.min(scaledRect.top, viewportH - visibleHeight - 70))
-        const safeWidth = Math.ceil(scaledRect.width) + 3
-
-        bubblePositionStyle = {
-          position: 'fixed',
-          top: `${top}px`,
-          left: `${scaledRect.left}px`,
-          width: `${safeWidth}px`,
-          maxWidth: `${safeWidth}px`,
-          height: `${visibleHeight}px`,
-          maxHeight: `${visibleHeight}px`,
-          margin: 0,
-        }
-        // Action pills float cleanly right below the clamped preview (snug 8px gap)
-        pillsPositionStyle = {
-          position: 'fixed',
-          top: `${top + visibleHeight + 8}px`,
-          left: `${pillsLeft}px`,
-        }
-      } else {
-        // Standard in-place message:
-        // Add subtle sub-pixel buffer and use auto height so text never wraps onto an extra cropped line
-        const safeWidth = Math.ceil(scaledRect.width) + 3
-
-        bubblePositionStyle = {
-          position: 'fixed',
-          top: `${scaledRect.top}px`,
-          left: `${scaledRect.left}px`,
-          width: `${safeWidth}px`,
-          minWidth: `${scaledRect.width}px`,
-          minHeight: `${scaledRect.height}px`,
-          height: 'auto',
-          margin: 0,
-        }
-
-        // Determine whether to place pills above or below based on available space:
-        // If there is >= 54px above, place snug 8px above; otherwise snug 8px below.
-        const canShowAbove = scaledRect.top >= 54
-        const pillsTop = canShowAbove
-          ? Math.max(12, scaledRect.top - 46)
-          : scaledRect.top + scaledRect.height + 8
-
-        pillsPositionStyle = {
-          position: 'fixed',
-          top: `${pillsTop}px`,
-          left: `${pillsLeft}px`,
-        }
-      }
-    }
-
     return createPortal(
-      <div
-        className={`message-action-modal-backdrop ${actionSheetExiting ? 'exiting' : ''}`}
-        role="presentation"
-        onClick={closeActionSheet}
-      >
+      <>
         <div
-          className={`message-action-sheet-in-place ${message.role === 'user' ? 'user-sheet' : 'assistant-sheet'}`}
+          className={`message-action-backdrop ${actionSheetExiting ? 'exiting' : ''}`}
+          role="presentation"
+          onClick={closeActionSheet}
+        />
+        <div
+          className={`message-action-sheet-anim ${actionSheetExiting ? 'exiting' : ''}`}
+        >
+        <div
+          className={`message-action-sheet-drag ${isSheetDragging ? 'is-dragging' : ''} ${isSheetSettling ? 'is-settling' : ''}`}
+          style={{ '--message-drag-y': `${sheetDragY}px` } as React.CSSProperties}
+        >
+        <div
+          className="message-action-sheet"
           role="dialog"
+          aria-modal="true"
           aria-label="Message actions"
-          onClick={e => e.stopPropagation()}
         >
           <div
-            className={`message-action-bubble-clone ${isTall ? 'is-tall-clamped' : ''} ${message.role === 'user' ? 'user-bubble' : 'assistant-bubble'}`}
-            style={bubblePositionStyle}
+            className="message-action-grabber"
+            onPointerDown={handleGrabberPointerDown}
+            onPointerMove={handleGrabberPointerMove}
+            onPointerUp={handleGrabberPointerUp}
+            onPointerCancel={handleGrabberPointerUp}
           >
-            <MarkdownContent>{cleanContent}</MarkdownContent>
+            <div className="message-action-grabber-pill" aria-hidden="true" />
           </div>
-          <div className="message-action-pills" style={pillsPositionStyle}>
+          <div className="message-action-body">
+            <div className={`message-action-message ${message.role === 'user' ? 'user' : 'assistant'}`}>
+              <MarkdownContent>{cleanContent}</MarkdownContent>
+            </div>
+          </div>
+          <div className="message-action-footer">
             <button
               type="button"
-              className="message-action-pill-btn"
-              onClick={() => {
-                void copy()
-                closeActionSheet()
-              }}
+              className="message-action-btn"
+              onClick={() => setRawViewOpen(true)}
             >
-              <Copy size={15} />
-              <span>Copy</span>
+              <TextSelect size={15} />
+              <span>Select text</span>
+            </button>
+            <button
+              type="button"
+              className="message-action-btn"
+              onClick={() => void copy()}
+            >
+              {copied ? <Check size={15} /> : <Copy size={15} />}
+              <span>{copied ? 'Copied' : 'Copy text'}</span>
             </button>
             {message.role === 'user' && (
               <button
                 type="button"
-                className="message-action-pill-btn"
+                className="message-action-btn"
                 onClick={() => {
                   closeActionSheet()
                   onEdit(cleanContent, message.id)
@@ -1719,7 +1690,23 @@ export const MessageCard = memo(function MessageCard({ message, previousMessage,
             )}
           </div>
         </div>
-      </div>,
+        </div>
+        </div>
+        {rawViewOpen && (
+          <div className="message-raw-view" role="dialog" aria-modal="true" aria-label="Raw message text">
+            <header className="message-raw-head">
+              <button type="button" onClick={() => setRawViewOpen(false)} aria-label="Back to message actions">
+                <X size={16} />
+              </button>
+              <b>Raw text</b>
+              <button type="button" onClick={() => void copy()} aria-label="Copy raw text">
+                {copied ? <Check size={16} /> : <Copy size={16} />}
+              </button>
+            </header>
+            <pre className="message-raw-text">{cleanContent}</pre>
+          </div>
+        )}
+      </>,
       document.body
     )
   }

@@ -20,7 +20,6 @@ import {
   getCachedHighlightedCode,
   setCachedHighlightedCode,
   resetHighlightCacheForTesting,
-  getUiZoomFactor,
 } from './components/MarkdownContent'
 import { SmoothStreamingView } from './components/SmoothStreamingView'
 import { ChatView } from './components/ChatView'
@@ -522,10 +521,6 @@ User asked (deterministic, from compacted turns): '[Lalo Ehrmantraut] Rombak ula
   })
 
   describe('UI Scale & Zoom Geometry Normalization', () => {
-    it('resolves default zoom factor 1 when no scale property is set', () => {
-      expect(getUiZoomFactor()).toBe(1)
-    })
-
     it('normalizes bubble geometry correctly under large UI scale (1.35x)', () => {
       // Simulate an unscaled element at layout top: 200, left: 50, width: 280, height: 120
       const zoom = 1.35

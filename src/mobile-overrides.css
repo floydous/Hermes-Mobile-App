@@ -1109,7 +1109,8 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
   .assistant-bubble,
   .user-bubble.is-squished,
   .assistant-bubble.is-squished,
-  .message-action-bubble-clone {
+  .message-action-sheet,
+  .message-raw-view {
     transition: none !important;
     animation: none !important;
     transform: none !important;
@@ -1162,6 +1163,9 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
   word-break: break-word;
   transition: transform 0.28s cubic-bezier(0.175, 0.885, 0.32, 1.25), box-shadow 0.2s ease, filter 0.2s ease;
   transform-origin: center center;
+  /* The app opens its own action sheet on long-press. Without this, Android
+     also raises the native text-selection callout and the two menus race. */
+  -webkit-touch-callout: none;
 }
 
 .user-bubble .markdown-body,
@@ -1587,6 +1591,9 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
   word-break: break-word;
   transition: transform 0.28s cubic-bezier(0.175, 0.885, 0.32, 1.25), box-shadow 0.2s ease, filter 0.2s ease;
   transform-origin: center center;
+  /* The app opens its own action sheet on long-press. Without this, Android
+     also raises the native text-selection callout and the two menus race. */
+  -webkit-touch-callout: none;
 }
 
 /* Tactile Elastic Bubble Squish on Press-and-Hold (controlled strictly via is-squished) */
@@ -4014,13 +4021,11 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
 /* ==========================================================================
    Item 5: Native Chat Long-Press Contextual Action Sheet
    ========================================================================== */
-.message-action-modal-backdrop {
+.message-action-backdrop {
   position: fixed;
   inset: 0;
   z-index: 120;
   background: rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   animation: message-action-backdrop-in 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   touch-action: none;
   user-select: none;
@@ -4028,97 +4033,279 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
   scrollbar-width: none !important;
 }
 
-.message-action-modal-backdrop::-webkit-scrollbar {
-  display: none !important;
-  width: 0 !important;
-  height: 0 !important;
-}
-
-.message-action-modal-backdrop.exiting {
+.message-action-backdrop.exiting {
   animation: message-action-backdrop-out 0.14s ease-out forwards;
 }
 
-.message-action-sheet-in-place {
+/*
+ * The sheet slides up from the bottom and is dismissed by dragging its
+ * grabber pill down. It is a real bottom sheet, not an in-place bubble
+ * clone: a clone pinned to the original bubble's rect went off-screen for
+ * long messages and made the action row float over unrelated text.
+ *
+ * Three layers, because the entrance/exit animation and the drag offset
+ * both move the sheet and must not fight:
+ *
+ *   .message-action-sheet-anim  entrance / exit animation
+ *   .message-action-sheet-drag  the finger's drag offset
+ *   .message-action-sheet       the sheet's own box
+ *
+ * On one element the animation's transform would override the drag (an
+ * animation's value outranks an inline style), so a drag during the 300ms
+ * entrance killed the animation and the sheet jumped up to full height.
+ */
+.message-action-sheet-anim {
   position: fixed;
-  inset: 0;
+  z-index: 121;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  animation: message-action-sheet-up 0.3s cubic-bezier(0.32, 0.6, 0.35, 1) backwards;
+  will-change: transform;
   pointer-events: none;
-  overflow: hidden !important;
-  scrollbar-width: none !important;
 }
 
-.message-action-bubble-clone {
+.message-action-sheet-anim.exiting {
+  animation: message-action-sheet-down 0.18s cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+
+.message-action-sheet-drag {
+  --message-drag-y: 0px;
+  transform: translateY(var(--message-drag-y));
+  will-change: transform;
+}
+
+/* While dragging, the sheet follows the finger exactly. */
+.message-action-sheet-drag.is-dragging {
+  transition: none;
+}
+
+/* Released below the dismiss threshold: ease back to rest rather than snap. */
+.message-action-sheet-drag.is-settling {
+  transition: transform 240ms cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+.message-action-sheet {
   pointer-events: auto;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
-  transform: none !important;
-  transform-origin: center;
-  transition: none !important;
-  animation: none !important;
-  scrollbar-width: none !important;
-  -ms-overflow-style: none !important;
-  box-sizing: border-box !important;
-  word-break: break-word !important;
+  max-height: 82dvh;
+  display: flex;
+  flex-direction: column;
+  border-radius: 20px 20px 0 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.09);
+  background: #131416;
+  box-shadow: 0 -14px 50px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+  /* The body must stay scrollable, so the sheet itself only allows vertical
+     panning; the grabber opts out of it entirely so its drag is not stolen
+     by the scroller. */
+  touch-action: pan-y;
 }
 
-.message-action-bubble-clone.is-tall-clamped {
-  overflow: hidden !important;
-  transform: none !important;
-  mask-image: linear-gradient(to bottom, black calc(100% - 36px), transparent 100%) !important;
-  -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 36px), transparent 100%) !important;
+.message-action-grabber {
+  flex: 0 0 auto;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.message-action-bubble-clone::-webkit-scrollbar {
-  display: none !important;
-  width: 0 !important;
-  height: 0 !important;
+.message-action-grabber:active {
+  cursor: grabbing;
 }
 
-.message-action-pills {
-  pointer-events: auto;
+.message-action-grabber-pill {
+  width: 36px;
+  height: 4.5px;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--text, #f4f4f5) 22%, transparent);
+  transition: background 0.15s ease, width 0.15s ease;
+}
+
+.message-action-grabber:active .message-action-grabber-pill {
+  width: 44px;
+  background: color-mix(in srgb, var(--text, #f4f4f5) 45%, transparent);
+}
+
+.message-action-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 18px 14px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.message-action-body::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.message-action-message {
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: #1a1b1e;
+  padding: 12px 14px;
+}
+
+.message-action-message.user {
+  background: #24252a;
+}
+
+.message-action-message .markdown-body {
+  font-size: 14px;
+  line-height: 1.55;
+  color: #e8e9eb;
+}
+
+.message-action-footer {
+  flex: 0 0 auto;
   display: flex;
   gap: 8px;
-  z-index: 130;
-  animation: message-action-pills-in 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-  scrollbar-width: none !important;
+  padding: 10px 18px calc(14px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  background: #131416;
 }
 
-.message-action-pills::-webkit-scrollbar {
-  display: none !important;
-  width: 0 !important;
-  height: 0 !important;
-}
-
-.message-action-pill-btn {
+.message-action-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 12px;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 18px;
-  border-radius: 9999px;
-  background: rgba(24, 24, 27, 0.95);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  color: #f4f4f5;
-  font-size: 14px;
+  justify-content: center;
+  gap: 7px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  background: rgba(255, 255, 255, 0.045);
+  color: #e8e9eb;
+  font-size: 13px;
   font-weight: 500;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
   cursor: pointer;
   transition: transform 0.12s ease, background 0.12s ease;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
 }
 
-.message-action-pill-btn:active {
-  transform: scale(0.96);
-  background: rgba(39, 39, 42, 0.98);
+.message-action-btn:active {
+  transform: scale(0.97);
+  background: rgba(255, 255, 255, 0.09);
 }
 
-[data-theme='light'] .message-action-pill-btn {
-  background: rgba(255, 255, 255, 0.96);
+.message-action-btn span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-theme='light'] .message-action-sheet {
+  background: #ffffff;
+  border-top-color: rgba(0, 0, 0, 0.08);
+  box-shadow: 0 -14px 50px rgba(0, 0, 0, 0.18);
+}
+
+[data-theme='light'] .message-action-message {
+  background: #f4f4f5;
+  border-color: rgba(0, 0, 0, 0.07);
+}
+
+[data-theme='light'] .message-action-message.user {
+  background: #e9e9ec;
+}
+
+[data-theme='light'] .message-action-message .markdown-body {
+  color: #09090b;
+}
+
+[data-theme='light'] .message-action-footer {
+  background: #ffffff;
+  border-top-color: rgba(0, 0, 0, 0.07);
+}
+
+[data-theme='light'] .message-action-btn {
+  background: rgba(0, 0, 0, 0.04);
   border-color: rgba(0, 0, 0, 0.1);
   color: #09090b;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
 }
 
-[data-theme='light'] .message-action-pill-btn:active {
-  background: rgba(244, 244, 245, 0.98);
+[data-theme='light'] .message-action-btn:active {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+/*
+ * The raw-text view: a full-page window over the sheet, showing the message
+ * source unrendered so the user can select and copy a portion of it.
+ */
+.message-raw-view {
+  position: fixed;
+  inset: 0;
+  z-index: 122;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg, #030405);
+  /* The view is portaled to <body>, so it cannot inherit the chat shell's
+     colour -- set it from the theme token instead. */
+  color: var(--text, #f4f5f7);
+  animation: message-raw-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.message-raw-head {
+  flex: 0 0 auto;
+  height: calc(52px + env(safe-area-inset-top, 0px));
+  padding: env(safe-area-inset-top, 0px) 12px 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  background: var(--bg, #030405);
+}
+
+.message-raw-head b {
+  font-size: 14px;
+  font-weight: 590;
+}
+
+.message-raw-head button {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.message-raw-head button:active {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.message-raw-text {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 16px 18px calc(28px + env(safe-area-inset-bottom, 0px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 13px;
+  line-height: 1.62;
+  color: var(--text, #e8e9eb);
+  white-space: pre-wrap;
+  word-break: break-word;
+  /* The one place in the app where text selection is allowed. */
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
 }
 
 @keyframes message-action-backdrop-in {
@@ -4131,27 +4318,25 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
   to { opacity: 0; }
 }
 
-@keyframes message-action-bubble-pop {
-  0% {
-    transform: scale(0.965, 0.942);
-  }
-  50% {
-    transform: scale(1.032);
-  }
-  100% {
-    transform: scale(1.02);
-  }
+@keyframes message-action-sheet-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
 }
 
-@keyframes message-action-pills-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px) scale(0.96);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
+/*
+ * The exit slides the sheet down from wherever it is. The drag offset lives
+ * on the layer below, so it is still applied while this animation runs --
+ * the two compose, and the sheet keeps sliding from the finger instead of
+ * jumping up to its resting position first.
+ */
+@keyframes message-action-sheet-down {
+  from { transform: translateY(0); }
+  to { transform: translateY(100%); }
+}
+
+@keyframes message-raw-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 /* ==========================================================================
