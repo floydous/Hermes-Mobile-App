@@ -1675,7 +1675,7 @@ export const MessageCard = memo(function MessageCard({ message, previousMessage,
                   onMarkUnread?.(message.timestamp)
                 }}
               >
-                <MessageSquareDot size={20} />
+                <MessageSquareDot size={13} />
                 <span>Mark as unread</span>
               </button>
               {message.role === 'user' && (
@@ -1687,7 +1687,7 @@ export const MessageCard = memo(function MessageCard({ message, previousMessage,
                     onEdit(cleanContent, message.id)
                   }}
                 >
-                  <Pencil size={20} />
+                  <Pencil size={13} />
                   <span>Edit</span>
                 </button>
               )}
@@ -1698,7 +1698,7 @@ export const MessageCard = memo(function MessageCard({ message, previousMessage,
                 className="message-action-row"
                 onClick={() => void copy()}
               >
-                {copied ? <Check size={20} /> : <Copy size={20} />}
+                {copied ? <Check size={13} /> : <Copy size={13} />}
                 <span>{copied ? 'Copied' : 'Copy'}</span>
               </button>
               <button
@@ -1706,7 +1706,7 @@ export const MessageCard = memo(function MessageCard({ message, previousMessage,
                 className="message-action-row"
                 onClick={() => setRawViewOpen(true)}
               >
-                <TextCursor size={20} />
+                <TextCursor size={13} />
                 <span>Select text</span>
               </button>
             </div>

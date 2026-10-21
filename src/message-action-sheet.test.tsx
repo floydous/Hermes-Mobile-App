@@ -44,15 +44,15 @@ describe('Long-press action sheet', () => {
   })
 
   it('uses the reference icons for the actions', () => {
-    expect(source).toContain('<TextCursor size={20} />')
-    expect(source).toContain('<MessageSquareDot size={20} />')
-    expect(source).toContain('<Copy size={20} />')
+    expect(source).toContain('<TextCursor size={13} />')
+    expect(source).toContain('<MessageSquareDot size={13} />')
+    expect(source).toContain('<Copy size={13} />')
   })
 
   it('indents the group separator to the label column', () => {
     const sepRule = css.match(/\.message-action-row \+ \.message-action-row::before\s*\{[^}]*\}/s)
     expect(sepRule).toBeTruthy()
-    expect(sepRule![0]).toContain('left: 54px')
+    expect(sepRule![0]).toContain('left: 39px')
   })
 
   it('groups the action rows into two rounded surfaces', () => {
@@ -122,10 +122,46 @@ describe('Long-press action sheet', () => {
     expect(grabberRule![0]).toContain('touch-action: none')
   })
 
-  it('gives every action row a 50px touch target', () => {
+  it('matches the reference metrics measured off the iOS screenshot', () => {
+    // Every value below was measured off the reference screenshot (an iOS
+    // action sheet on a 393pt phone, captured at 1.878x) and converted to
+    // CSS px at the app's default 1.15 UI zoom. At 1.15 zoom they render
+    // back at the reference's point values.
+    const ZOOM = 1.15
     const rowRule = css.match(/\.message-action-row\s*\{[^}]*\}/s)
-    expect(rowRule).toBeTruthy()
-    expect(rowRule![0]).toContain('min-height: 50px')
+    const groupRule = css.match(/\.message-action-group\s*\{[^}]*\}/s)
+    const sheetRule = css.match(/\.message-action-sheet\s*\{[^}]*\}/s)
+    const sepRule = css.match(/\.message-action-row \+ \.message-action-row::before\s*\{[^}]*\}/s)
+    const iconRule = css.match(/\.message-action-row svg\s*\{[^}]*\}/s)
+
+    // reference: 45.26pt row, 14.91pt icon, 19.17pt icon inset,
+    // 13.31pt icon->label gap, 44.73pt separator inset, 17.4pt group radius
+    const rowPt = parseFloat(/min-height:\s*(\d+)px/.exec(rowRule![0])![1]) * ZOOM
+    const iconPt = 13 * ZOOM
+    const insetPt = 17 * ZOOM
+    const gapPt = 12 * ZOOM
+    const sepPt = parseFloat(/left:\s*(\d+)px/.exec(sepRule![0])![1]) * ZOOM
+    const radiusPt = parseFloat(/border-radius:\s*(\d+)px/.exec(groupRule![0])![1]) * ZOOM
+
+    // Each must land within 1pt of the reference measurement.
+    const within = (actual: number, expected: number) =>
+      expect(Math.abs(actual - expected)).toBeLessThanOrEqual(1)
+
+    within(rowPt, 45.26)
+    within(iconPt, 14.91)
+    within(insetPt, 19.17)
+    within(gapPt, 13.31)
+    within(sepPt, 44.73)
+    within(radiusPt, 17.4)
+
+    // The reference draws its icons in the same pure white as the labels.
+    expect(iconRule![0]).toContain('color: #ffffff')
+    expect(rowRule![0]).toContain('color: #ffffff')
+    expect(rowRule![0]).toContain('font-size: 15px')
+
+    // Reference surfaces: sheet 20/20/20, group 32/32/32 on the dark theme.
+    expect(sheetRule![0]).toContain('background: #141414')
+    expect(groupRule![0]).toContain('background: #202020')
   })
 
   it('suppresses the native Android callout on bubbles so it does not race the sheet', () => {

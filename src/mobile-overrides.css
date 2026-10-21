@@ -4089,9 +4089,10 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
   pointer-events: auto;
   display: flex;
   flex-direction: column;
-  border-radius: 20px 20px 0 0;
+  /* The reference sheet's top corners are ~20pt. */
+  border-radius: 17px 17px 0 0;
   border-top: 1px solid rgba(255, 255, 255, 0.09);
-  background: #131416;
+  background: #141414;
   box-shadow: 0 -14px 50px rgba(0, 0, 0, 0.55);
   overflow: hidden;
   /* The body must stay scrollable, so the sheet itself only allows vertical
@@ -4102,7 +4103,7 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
 
 .message-action-grabber {
   flex: 0 0 auto;
-  height: 34px;
+  height: 26px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -4118,48 +4119,64 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
 
 .message-action-grabber-pill {
   width: 36px;
-  height: 4.5px;
+  height: 5px;
   border-radius: 9999px;
-  background: color-mix(in srgb, var(--text, #f4f4f5) 22%, transparent);
+  background: rgba(255, 255, 255, 0.28);
   transition: background 0.15s ease, width 0.15s ease;
 }
 
 .message-action-grabber:active .message-action-grabber-pill {
   width: 44px;
-  background: color-mix(in srgb, var(--text, #f4f4f5) 45%, transparent);
+  background: rgba(255, 255, 255, 0.45);
 }
 
 /*
  * The action rows are grouped into two rounded surfaces, each row separated
  * by a hairline that starts at the icon column rather than the sheet edge.
  * This mirrors the reference design.
+ *
+ * Every metric here was measured off the reference screenshot (an iOS
+ * action sheet on a 393pt-wide phone, captured at 1.878x) and converted to
+ * CSS pixels at the app's default 1.15 UI zoom:
+ *
+ *   row height        45.3pt  -> 39px
+ *   label font size   17pt    -> 15px
+ *   icon size         14.9pt  -> 13px
+ *   icon inset        19.2pt  -> 17px
+ *   icon->label gap   13.3pt  -> 12px
+ *   separator inset   44.7pt  -> 39px
+ *   group radius      17.4pt  -> 15px
+ *
+ * The app scales the whole sheet with `--ui-scale`, so these are the
+ * unzoomed values; on device they land on the reference's proportions.
  */
 .message-action-groups {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 0 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  gap: 7px;
+  padding: 0 18px calc(14px + env(safe-area-inset-bottom, 0px));
 }
 
 .message-action-group {
-  border-radius: 14px;
-  background: #1c1d20;
+  border-radius: 15px;
+  background: #202020;
   overflow: hidden;
 }
 
 .message-action-row {
   width: 100%;
-  min-height: 50px;
-  padding: 0 18px;
+  min-height: 39px;
+  padding: 0 17px;
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
   border: 0;
   background: transparent;
-  color: #e8e9eb;
-  font-size: 16px;
+  color: #ffffff;
+  font-size: 15px;
   font-weight: 400;
+  letter-spacing: -0.1px;
   text-align: left;
   cursor: pointer;
   transition: background 0.12s ease;
@@ -4179,37 +4196,43 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
   content: '';
   position: absolute;
   top: 0;
-  left: 54px;
+  left: 39px;
   right: 0;
   height: 1px;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .message-action-row:active {
-  background: rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.09);
 }
 
+/*
+ * The reference draws its icons in the same pure white as the labels.
+ * A grey icon was the single clearest thing making the sheet look unlike
+ * the iOS original.
+ */
 .message-action-row svg {
   flex: 0 0 auto;
-  color: #a3a6ad;
+  color: #ffffff;
+  stroke-width: 1.75;
 }
 
 [data-theme='light'] .message-action-sheet {
-  background: #ffffff;
+  background: #f7f7f8;
   border-top-color: rgba(0, 0, 0, 0.08);
   box-shadow: 0 -14px 50px rgba(0, 0, 0, 0.18);
 }
 
 [data-theme='light'] .message-action-group {
-  background: #f4f4f5;
+  background: #ffffff;
 }
 
 [data-theme='light'] .message-action-row {
-  color: #09090b;
+  color: #000000;
 }
 
 [data-theme='light'] .message-action-row + .message-action-row::before {
-  background: rgba(0, 0, 0, 0.08);
+  background: rgba(0, 0, 0, 0.09);
 }
 
 [data-theme='light'] .message-action-row:active {
@@ -4217,7 +4240,11 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
 }
 
 [data-theme='light'] .message-action-row svg {
-  color: #71717a;
+  color: #000000;
+}
+
+[data-theme='light'] .message-action-grabber-pill {
+  background: rgba(0, 0, 0, 0.22);
 }
 
 /*
