@@ -280,13 +280,11 @@
 }
 
 .onboarding-welcome-stage .onboarding-actions {
-  position: fixed;
-  bottom: calc(10px + env(safe-area-inset-bottom));
-  left: 0;
-  right: 0;
+  grid-row: 3;
+  align-self: end;
   width: 100%;
   max-width: 440px;
-  margin: 0 auto;
+  margin: 16px auto calc(10px + env(safe-area-inset-bottom));
   padding: 0 24px;
   box-sizing: border-box;
   z-index: 10;
@@ -350,14 +348,17 @@
   max-height: calc(100% - var(--onboarding-footer-height));
   overflow: visible;
   box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  /* Hero centred in the stage; the bottom row only grows past 1fr when the button needs the room. */
+  grid-template-rows: 1fr auto 1fr;
+  grid-template-columns: 100%;
   z-index: 2;
 }
 
 .onboarding-hero-composition {
+  grid-row: 2;
+  /* Words, offsets and slogan gap use cqw of this box (the hero's width): vw and px grow with the UI-scale zoom, cqw does not. */
+  container-type: inline-size;
   position: relative;
   width: 100%;
   margin: clamp(40px, 7vh, 68px) auto 0;
@@ -389,9 +390,10 @@
 }
 
 /* Monumental background words: centered horizontally with exact 8% side margin */
+/* cqw values = the tuned px layout (128/152px words, -52/-40px offsets, 44px slogan gap) at a 423.5px-wide hero (360px screen, 0.85 UI scale) */
 .onboarding-bg-word-top {
   position: absolute;
-  top: -52px; /* Shifts up so 50% is visible above head, 50% covered by head */
+  top: -12.3cqw; /* Shifts up so 50% is visible above head, 50% covered by head */
   left: 0;
   right: 0;
   width: 100%;
@@ -406,7 +408,7 @@
 
 .onboarding-bg-word-top .onboarding-bg-title-word {
   text-align: center;
-  font-size: clamp(128px, 32.5vw, 172px);
+  font-size: min(30.2cqw, 172px);
   line-height: 0.85;
   letter-spacing: -0.04em;
   margin: 0 auto;
@@ -416,7 +418,7 @@
 
 .onboarding-bg-word-bottom {
   position: absolute;
-  bottom: -40px; /* Shifts down so 50% is covered by torso, 50% visible below */
+  bottom: -9.45cqw; /* Shifts down so 50% is covered by torso, 50% visible below */
   left: 0;
   right: 0;
   width: 100%;
@@ -431,7 +433,7 @@
 
 .onboarding-bg-word-bottom .onboarding-bg-title-word {
   text-align: center;
-  font-size: clamp(152px, 38.5vw, 204px);
+  font-size: min(35.9cqw, 204px);
   line-height: 0.85;
   letter-spacing: -0.04em;
   margin: 0 auto;
@@ -510,7 +512,7 @@
 .onboarding-welcome-slogan {
   position: relative;
   z-index: 3;
-  margin-top: 44px;
+  margin-top: 10.4cqw;
   margin-bottom: 0;
   padding: 0 16px;
   font-size: 15px;
@@ -535,10 +537,10 @@
     bottom: -32px;
   }
   .onboarding-bg-word-top .onboarding-bg-title-word {
-    font-size: 104px;
+    font-size: min(104px, 27.6cqw);
   }
   .onboarding-bg-word-bottom .onboarding-bg-title-word {
-    font-size: 112px;
+    font-size: min(112px, 29.8cqw);
   }
   .onboarding-welcome-slogan {
     margin-top: 40px;
