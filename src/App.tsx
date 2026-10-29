@@ -100,6 +100,7 @@ import {
 } from './clarify-isolation'
 
 import { classifyInteractiveRowGesture, computeNextSwipeTab, isHorizontalSwipeIntent, type Tab } from './tab-swipe'
+import { PageHost, PAGE_EXIT_STATE, usePageExit } from './page-transition'
 type DraftBot = { role: string; name: string; description: string; soul: string; model: string; provider: string; shape: string }
 type Theme = 'dark' | 'light' | 'grey'
 
@@ -391,6 +392,34 @@ export default function App() {
   const navigationRef = useRef({ selected: false, profileSheet: false, settings: false, createOpen: false, tab: 'bots' as Tab })
   navigationRef.current = { selected: Boolean(selected), profileSheet, settings, createOpen, tab }
 
+  /*
+   * Closes the chat with the shared page transition: the chat slides out
+   * to the right and the roster is revealed underneath it.
+   *
+   * The chat is kept mounted for the length of the animation. Unmounting
+   * it immediately would make the leaving page vanish rather than travel.
+   */
+  const { isExiting: chatExiting, requestClose: closeChat } = usePageExit(() => {
+    sessionLoadRef.current++
+    navigationIntentRef.current++
+    openingSessionIdRef.current = null
+    setOpeningSessionId(null)
+    setConversationLoading(false)
+    cancelPendingCachedHydration()
+    setSelected(null)
+  })
+
+  // The bot settings sheet and the create wizard are pushed pages too, so
+  // they slide out to the right on the way back.
+  const { isExiting: profileExiting, requestClose: closeProfile } = usePageExit(() => {
+    setProfileSheet(false)
+  })
+  const { isExiting: wizardExiting, requestClose: closeWizard } = usePageExit(() => {
+    setCreateOpen(false)
+    setCreateStep(0)
+    setError('')
+  })
+
   useEffect(() => {
     let disposed = false
     let unlisten: (() => void) | undefined
@@ -409,18 +438,17 @@ export default function App() {
 
       const navigation = navigationRef.current
       if (navigation.settings) { setSettings(false); return true }
-      if (navigation.profileSheet) { setProfileSheet(false); return true }
+      if (navigation.profileSheet) { closeProfile(); return true }
       if (hadPendingIntent) {
         remoteLog('DEBUG', 'Navigation', `Back pressed while opening: cancelled pending open`)
         return true
       }
       if (navigation.selected) {
         remoteLog('DEBUG', 'Navigation', `Hardware back pressed: leaving session ${selectedRef.current?.id || 'unknown'}`)
-        cancelPendingCachedHydration()
-        setSelected(null)
+        closeChat()
         return true
       }
-      if (navigation.createOpen) { setCreateOpen(false); return true }
+      if (navigation.createOpen) { closeWizard(); return true }
       if (navigation.tab !== 'bots') { switchTab('bots'); return true }
       return false
     }
@@ -2380,14 +2408,13 @@ export default function App() {
     )
   }
 
-  if (createOpen) return <CreateWizard step={createStep} setStep={setCreateStep} draft={botDraft} setDraft={setBotDraft} creating={creating} error={error} close={() => { setCreateOpen(false); setCreateStep(0); setError('') }} finish={() => void finishCreate()}/>
-  if (selected && profileSheet) return <BotProfileSheet profile={profiles.find(profile => profile.name === selected.profile)} session={selected} onClose={() => setProfileSheet(false)} onUpdated={() => void refresh()}/>
+  if (createOpen) return <PageHost state={wizardExiting ? PAGE_EXIT_STATE : undefined} zIndex={70}><CreateWizard step={createStep} setStep={setCreateStep} draft={botDraft} setDraft={setBotDraft} creating={creating} error={error} close={closeWizard} finish={() => void finishCreate()}/></PageHost>
+  if (selected && profileSheet) return <PageHost state={profileExiting ? PAGE_EXIT_STATE : undefined} zIndex={70}><BotProfileSheet profile={profiles.find(profile => profile.name === selected.profile)} session={selected} onClose={closeProfile} onUpdated={() => void refresh()}/></PageHost>
 
   return (
     <>
       <main
         className={`app roster-shell tab-slide-${slideDirection}`}
-        style={selected ? { display: 'none' } : undefined}
         onTouchStart={selected ? undefined : handleRosterTouchStart}
         onTouchMove={selected ? undefined : handleRosterTouchMove}
         onTouchEnd={selected ? undefined : handleRosterTouchEnd}
@@ -2689,6 +2716,7 @@ export default function App() {
     <NavIsland tab={tab} setTab={switchTab}/>
   </main>
   {selected && (
+    <PageHost state={chatExiting ? PAGE_EXIT_STATE : undefined} zIndex={60}>
     <ErrorBoundary
       onError={cancelPendingCachedHydration}
       onReset={() => { cancelPendingCachedHydration(); setSelected(null) }}
@@ -2705,14 +2733,8 @@ export default function App() {
         toolActivities={toolActivities}
         error={error}
         back={() => {
-          sessionLoadRef.current++
-          navigationIntentRef.current++
-          openingSessionIdRef.current = null
-          setOpeningSessionId(null)
-          setConversationLoading(false)
-          cancelPendingCachedHydration()
           remoteLog('DEBUG', 'Navigation', `Chat chevron back tapped from ${selected.id}`)
-          setSelected(null)
+          closeChat()
         }}
         refresh={() => void openSession(selected)}
         clearChat={() => handleClearChat(selected)}
@@ -2731,6 +2753,7 @@ export default function App() {
         }}
       />
     </ErrorBoundary>
+    </PageHost>
   )}
 
   {settings && (

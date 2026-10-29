@@ -27,6 +27,7 @@ import {
   type LiveProfile,
 } from '../hermes'
 import { useEdgeSwipeBack } from '../edge-swipe'
+import { PageHost, PAGE_EXIT_STATE, usePageExit } from '../page-transition'
 
 type Props = {
   profiles: LiveProfile[]
@@ -216,6 +217,14 @@ export function TasksView({
   const optimisticJobsRef = useRef(new Map<string, CronJob>())
   const scopeKey = profiles.map(profile => profile.name).sort().join('|')
 
+  // The task detail and the new-task sheet are pushed pages, so they slide
+  // out to the right when they close rather than vanishing.
+  const { isExiting: detailExiting, requestClose: closeDetail } = usePageExit(() => setSelected(null))
+  const { isExiting: createExiting, requestClose: closeCreate } = usePageExit(() => {
+    setIsCreateOpen(false)
+    setInternalCreateOpen(false)
+  })
+
   const refresh = async (silent = true, force = false) => {
     if (!silent && !cachedTaskJobs.length) setLoading(true)
     setError('')
@@ -317,12 +326,16 @@ export function TasksView({
   }
   if (selected) {
     return active ? (
-      <TaskDetail job={selected} busy={busy} back={() => setSelected(null)} onRefresh={() => refresh(true, true)} onToggle={toggle} onTrigger={trigger} onDelete={() => setDeleteCandidate(selected)} baseUrl={effectiveBaseUrl}/>
+      <PageHost state={detailExiting ? PAGE_EXIT_STATE : undefined} zIndex={70}>
+        <TaskDetail job={selected} busy={busy} back={closeDetail} onRefresh={() => refresh(true, true)} onToggle={toggle} onTrigger={trigger} onDelete={() => setDeleteCandidate(selected)} baseUrl={effectiveBaseUrl}/>
+      </PageHost>
     ) : null
   }
   if (isCreateOpen) {
     return active ? (
-      <NewTaskSheet profiles={profiles} baseUrl={effectiveBaseUrl} onClose={() => setIsCreateOpen(false)} onCreated={() => refresh(true, true)}/>
+      <PageHost state={createExiting ? PAGE_EXIT_STATE : undefined} zIndex={70}>
+        <NewTaskSheet profiles={profiles} baseUrl={effectiveBaseUrl} onClose={closeCreate} onCreated={() => refresh(true, true)}/>
+      </PageHost>
     ) : null
   }
   const showRunning = running.length > 0

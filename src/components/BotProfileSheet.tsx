@@ -5,6 +5,7 @@ import { loadModelOptions, loadProfileDetails, setProfileDescription, setProfile
 import { BotAvatar } from './BotAvatar'
 import { CapabilityManager } from './CapabilityManager'
 import { useEdgeSwipeBack } from '../edge-swipe'
+import { PageHost } from '../page-transition'
 
 type Props = { profile?: LiveProfile; session: LiveSession; onClose: () => void; onUpdated: () => void }
 const titleize = (value?: string | null) => (value || '').split(/[-_]+/).filter(Boolean).map(part => (part[0] ? part[0].toUpperCase() + part.slice(1) : '')).join(' ') || 'Bot'
@@ -47,7 +48,7 @@ export function BotProfileSheet({ profile, session, onClose, onUpdated }: Props)
   const saveAbout = async () => { if (!aboutDirty) { setEditingAbout(false); return }; setSavingAbout(true); setError(''); try { await setProfileDescription(session.profile, descriptionDraft); await reload(); setEditingAbout(false); onUpdated() } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not save this Bot’s description.') } finally { setSavingAbout(false) } }
   const chooseDefaultModel = async (provider: string, model: string) => { setSavingModel(true); setError(''); try { await setProfileModel(session.profile, provider, model); await reload(); setChangingModel(false); onUpdated() } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not update the Bot default model.') } finally { setSavingModel(false) } }
 
-  if (managingCapabilities) return <CapabilityManager profile={profile} session={session} onBack={() => setManagingCapabilities(false)} onUpdated={() => { void reload(); onUpdated() }}/>
+  if (managingCapabilities) return <PageHost zIndex={80}><CapabilityManager profile={profile} session={session} onBack={() => setManagingCapabilities(false)} onUpdated={() => { void reload(); onUpdated() }}/></PageHost>
   return <main ref={shellRef} className="app profile-sheet">
     <header className="profile-sheet-head"><button className="round-control" onClick={onClose} aria-label="Close Bot settings"><X size={18}/></button><b>Bot settings</b><span/></header>
     <section className="profile-identity"><BotAvatar profile={profile} fallbackName={session.profile} variant="welcome"/><h1>{botName}</h1><p>@{session.profile}</p></section>

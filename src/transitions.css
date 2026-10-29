@@ -1,7 +1,15 @@
 :root {
   --ease-out-smooth: cubic-bezier(0.16, 1, 0.3, 1);
-  --duration-page: 0.26s;
-  --duration-tab: 0.22s;
+  --duration-page: 0.3s;
+  --duration-tab: 0.24s;
+  /*
+   * Page transitions follow the iOS navigation model: a new page is pushed
+   * in from the right, and going back slides it out to the right again.
+   *
+   * The distance is a percentage of the viewport width, so the motion is
+   * identical on a 360pt phone and a tablet.
+   */
+  --page-slide-in: 100%;
 }
 
 /* Base page smooth entrance */
@@ -10,13 +18,39 @@
   will-change: opacity, transform;
 }
 
-/* Sub-page drill-in (Settings, Chat, Wizard, Tasks, Profile sheets) */
-.app.panel,
-.app.chat-shell,
-.app.wizard,
-.app.tasks-sheet,
-.app.task-detail {
-  animation-name: app-subpage-enter;
+/*
+ * A pushed page is hosted in a fixed overlay so it can travel across the
+ * viewport without the page underneath reflowing. The host carries the
+ * motion; the page inside it must not animate on its own or the two
+ * motions fight.
+ */
+.page-host {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  /* The host is the opaque surface the page slides over. The page inside
+     it is centred and may be narrower than the viewport, so without this
+     the page underneath shows through at the edges. */
+  background: var(--bg, #010102);
+  animation: app-page-in var(--duration-page) var(--ease-out-smooth) backwards;
+  will-change: opacity, transform;
+}
+
+.page-host > .app {
+  animation: none !important;
+  will-change: auto !important;
+}
+
+/*
+ * A page that is leaving slides out to the right and fades.
+ *
+ * It is kept mounted for the length of the animation by the exit hook.
+ * Without that it is unmounted the instant it is asked to close and never
+ * animates at all.
+ */
+.page-host.is-page-exiting {
+  animation: app-page-exit var(--duration-page) var(--ease-out-smooth) forwards;
+  pointer-events: none;
 }
 
 /* Returning to main Roster */
@@ -27,7 +61,7 @@
 @keyframes app-page-enter {
   0% {
     opacity: 0;
-    transform: translateY(10px) scale(0.994);
+    transform: translateX(var(--page-slide-in));
   }
   100% {
     opacity: 1;
@@ -35,21 +69,42 @@
   }
 }
 
-@keyframes app-subpage-enter {
+/*
+ * The new page arrives from the right and comes to rest at 0.
+ *
+ * It does not fade: the page slides in opaque over the one underneath,
+ * the way iOS pushes a navigation stack. Fading it in made the page
+ * underneath show through, which read as a cross-fade rather than a push.
+ */
+@keyframes app-page-in {
   0% {
-    opacity: 0;
-    transform: translate3d(0, 10px, 0);
+    transform: translateX(var(--page-slide-in));
   }
   100% {
+    transform: none;
+  }
+}
+
+/*
+ * Going back: the page that is leaving slides out to the right, revealing
+ * the page underneath. It fades slightly at the very end so the page
+ * underneath reads as being uncovered.
+ */
+@keyframes app-page-exit {
+  0% {
     opacity: 1;
     transform: none;
+  }
+  100% {
+    opacity: 0.4;
+    transform: translateX(var(--page-slide-in));
   }
 }
 
 @keyframes app-roster-enter {
   0% {
     opacity: 0;
-    transform: translateY(-6px) scale(0.996);
+    transform: translateX(-8%);
   }
   100% {
     opacity: 1;
@@ -63,7 +118,11 @@
   animation: none !important;
 }
 
-/* Roster tab switch (Bots <-> Sessions <-> Tasks) */
+/*
+ * Roster tab switch (Bots <-> Sessions <-> Tasks). Tabs are siblings
+ * within one page, not a navigation stack, so they slide a short way
+ * rather than a full page width.
+ */
 .bot-list,
 .roster-shell .tasks-sheet {
   animation: app-tab-enter var(--duration-tab) var(--ease-out-smooth) backwards;
@@ -83,7 +142,7 @@
 @keyframes app-tab-enter {
   0% {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateX(12px);
   }
   100% {
     opacity: 1;
@@ -94,7 +153,7 @@
 @keyframes app-tab-enter-forward {
   0% {
     opacity: 0;
-    transform: translateX(18px);
+    transform: translateX(28px);
   }
   100% {
     opacity: 1;
@@ -105,7 +164,7 @@
 @keyframes app-tab-enter-backward {
   0% {
     opacity: 0;
-    transform: translateX(-18px);
+    transform: translateX(-28px);
   }
   100% {
     opacity: 1;
@@ -122,7 +181,7 @@
 @keyframes app-step-enter {
   0% {
     opacity: 0;
-    transform: translateX(12px);
+    transform: translateX(20px);
   }
   100% {
     opacity: 1;
@@ -133,11 +192,8 @@
 /* Respect user preference for reduced motion */
 @media (prefers-reduced-motion: reduce) {
   .app,
-  .app.panel,
-  .app.chat-shell,
-  .app.wizard,
-  .app.tasks-sheet,
-  .app.task-detail,
+  .page-host,
+  .page-host > .app,
   .app.roster-shell,
   .bot-list,
   .wizard > section {
