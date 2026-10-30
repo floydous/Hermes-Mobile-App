@@ -323,4 +323,56 @@ describe('edge swipe back', () => {
       ;(globalThis as any).window = origWindow
     }
   })
+
+  it('moves the whole page host 1:1 and hands it to the exit slide where the finger let go', () => {
+    vi.useFakeTimers()
+    const origDoc = (globalThis as any).document
+    const origWindow = (globalThis as any).window
+    try {
+      ;(globalThis as any).document = { activeElement: null, documentElement: { style: { zoom: '1.15' } } }
+      ;(globalThis as any).window = { clearTimeout, setTimeout, focus: () => {} }
+      const mockNode = () => {
+        const classes = new Set<string>()
+        return {
+          classes,
+          isConnected: true,
+          style: { transform: '' } as Record<string, string>,
+          classList: {
+            add: (...c: string[]) => c.forEach(x => classes.add(x)),
+            remove: (...c: string[]) => c.forEach(x => classes.delete(x)),
+            contains: (c: string) => classes.has(c),
+          },
+        }
+      }
+      const host = mockNode()
+      const listeners: Record<string, (e: any) => void> = {}
+      const page = {
+        ...mockNode(),
+        closest: (selector: string) => (selector === '.page-host' ? host : null),
+        addEventListener: (type: string, fn: any) => { listeners[type] = fn },
+        removeEventListener: (type: string) => { delete listeners[type] },
+      }
+      let backs = 0
+      const cleanup = createEdgeSwipeController(page as any, () => { backs++; host.classList.add('is-page-exiting') })
+
+      listeners.touchstart({ touches: [{ clientX: 20, clientY: 300 }], target: null })
+      listeners.touchmove({ touches: [{ clientX: 135, clientY: 300 }], cancelable: true, preventDefault: () => {} })
+      // 115 visual px at zoom 1.15 is 100 CSS px: the host tracks the finger exactly.
+      const offset = () => parseFloat(host.style.transform.replace('translate3d(', ''))
+      expect(offset()).toBeCloseTo(100)
+      expect(page.style.transform).toBe('')
+
+      listeners.touchend({ changedTouches: [{ clientX: 135, clientY: 300 }], cancelable: true, preventDefault: () => {} })
+      expect(backs).toBe(1)
+      // The offset stays for the exit keyframes to start from, through teardown too.
+      expect(offset()).toBeCloseTo(100)
+      cleanup()
+      vi.advanceTimersByTime(200)
+      expect(offset()).toBeCloseTo(100)
+    } finally {
+      ;(globalThis as any).document = origDoc
+      ;(globalThis as any).window = origWindow
+      vi.useRealTimers()
+    }
+  })
 })

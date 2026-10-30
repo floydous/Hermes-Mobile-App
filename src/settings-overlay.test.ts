@@ -42,7 +42,8 @@ describe('Settings overlay sheet contract', () => {
     // (it only dims), so nothing is pushed off screen.
     expect(settingsSource).not.toContain('translateX(calc(${navOffset}px - 100%))')
     expect(settingsSource).not.toContain('translateX(${-navOffset}px)')
-    expect(settingsSource).toContain("transform: isDragging ? `translateY(${dragY}px)` : 'translateY(0)'")
+    // The root only ever moves vertically, with the grabber.
+    expect(settingsSource).toContain('rootPageRef.current.style.transform = `translateY(${y}px)`')
     expect(settingsCss).toMatch(/\.settings-page-root\.is-covered::after\s*\{[^}]*opacity: 0\.3/s)
   })
 
@@ -64,7 +65,10 @@ describe('Settings overlay sheet contract', () => {
     const card = transitionsCss.match(/html\.sheet-presented \.app\.roster-shell\s*\{[^}]*\}/s)
     expect(card).toBeTruthy()
     expect(card![0]).toContain('scale(')
-    expect(card![0]).toContain('border-radius')
+    // The radius is fixed while the sheet is open: one that changed per frame
+    // repainted the whole card on every frame of a drag.
+    expect(card![0]).not.toContain('border-radius')
+    expect(transitionsCss).toMatch(/html\.sheet-open \.app\.roster-shell\s*\{[^}]*border-radius: 14px[^}]*will-change: transform/s)
     // The card follows the grabber while it is dragged.
     expect(settingsSource).toContain("'--sheet-progress'")
     expect(transitionsCss).toMatch(/html\.sheet-dragging \.app\.roster-shell\s*\{[^}]*transition:\s*none/s)
@@ -80,28 +84,16 @@ describe('Settings overlay sheet contract', () => {
     expect(rule![0]).not.toContain('backdrop-filter')
   })
 
-  it('enters the sheet by animating top, not a composited transform', () => {
-    // A transform on the wrapper is composited by the browser, and the
-    // composited layer did not follow the root page's box: the sheet's
-    // visible top edge jumped to the top of the screen (y=0), sat there
-    // for ~50ms, then snapped back down to its rest position (y=79).
-    // Measured, that was a 79px overshoot -- exactly the root page's top
-    // inset -- on every single open.
-    //
-    // Animating `top` is a layout animation, so the edge travels exactly
-    // as the box model says (854 -> 801 -> ... -> 79), no overshoot.
+  it('enters the sheet as a GPU transform, not a per-frame layout of top', () => {
+    // A `top` animation is main-thread layout on every frame, so it stuttered
+    // whenever the app was busy, as it is on open. It had replaced a transform
+    // entrance that jumped to y=0 and back; that jump was the opening focus()
+    // scrolling the page stack, fixed with preventScroll. Measured with the
+    // transform: 922 -> 895 -> 849 -> ... -> 88 -> 78, no overshoot.
     const rule = settingsCss.match(/@keyframes settings-sheet-up\s*\{[^}]*\}/s)
     expect(rule).toBeTruthy()
-    expect(rule![0]).toContain('top: 100%')
-    expect(rule![0]).not.toContain('transform')
-  })
-
-  it('lets the entrance animate top instead of pinning it with inset', () => {
-    // `inset: 0` sets top: 0, which would pin the animated property.
-    const rule = settingsCss.match(/\.settings-sheet-anim\s*\{[^}]*\}/s)
-    expect(rule).toBeTruthy()
-    expect(rule![0]).not.toContain('inset: 0')
-    expect(rule![0]).toContain('top: 0')
+    expect(rule![0]).toContain('translateY(100%)')
+    expect(rule![0]).not.toContain('top:')
   })
 
   it('exits the sheet from the drag position instead of snapping back up', () => {
@@ -137,6 +129,17 @@ describe('Settings sheet motion contract', () => {
     expect(rule).toBeTruthy()
     expect(rule![0]).not.toContain(hardEaseOut)
     expect(rule![0]).toContain('cubic-bezier(0.25, 0.1, 0.25, 1)')
+  })
+
+  it('keeps the drag off React and off inherited styles', () => {
+    // Each touchmove used to set React state (re-rendering the whole sheet)
+    // and an inherited variable on the card (restyling every row in it):
+    // 8.7ms per move on a desktop CPU, 0.2ms after.
+    expect(settingsSource).not.toContain('setDragY(deltaY)')
+    expect(settingsSource).not.toContain('setNavOffset(offset)')
+    expect(transitionsCss).toMatch(/@property --sheet-progress\s*\{[^}]*inherits: false/s)
+    // A forwards-filled fade-in pinned the scrim's opacity and overrode the drag.
+    expect(settingsCss).toContain('settings-backdrop-in 0.35s ease backwards')
   })
 
   it('gives the entrance the iOS sheet pace, with the card and scrim in step', () => {

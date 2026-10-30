@@ -385,6 +385,15 @@ export default function App() {
     localStorage.setItem('hermes-mobile-ui-scale', String(uiScale))
   }, [uiScale])
   const rosterScrollRef = useRef<HTMLDivElement | null>(null)
+  // Rows fade in once, when the list first appears. A tab's rows sit under
+  // display: none while another tab shows, and showing it again restarted
+  // every row's animation: 45 at once on each switch to Sessions.
+  const [rowEntrance, setRowEntrance] = useState(true)
+  useEffect(() => {
+    if (!rowEntrance || loading) return
+    const timer = window.setTimeout(() => setRowEntrance(false), 700)
+    return () => window.clearTimeout(timer)
+  }, [rowEntrance, loading])
 
   const setRowRipplePoint = (event: React.PointerEvent<HTMLButtonElement>) => {
     const x = event.nativeEvent.offsetX ?? 50
@@ -2343,11 +2352,6 @@ export default function App() {
         return
       }
     }
-
-    // Once horizontal swipe intent is confirmed, prevent Android WebView native scroll/fling interception
-    if (swipeIntentConfirmedRef.current && event.cancelable) {
-      event.preventDefault()
-    }
   }
 
   const handleRosterTouchEnd = (event: React.TouchEvent<HTMLElement>) => {
@@ -2383,6 +2387,14 @@ export default function App() {
         }
         switchTabRafRef.current = requestAnimationFrame(() => {
           switchTabRafRef.current = null
+          // A slightly diagonal swipe also flings the list vertically, and
+          // Android swallows the first tap during a fling, so the next tap
+          // looked dead. Making the list unscrollable for a frame ends it.
+          const scroller = rosterScrollRef.current
+          if (scroller) {
+            scroller.style.overflowY = 'hidden'
+            requestAnimationFrame(() => { scroller.style.overflowY = '' })
+          }
           switchTab(nextTab)
         })
       }
@@ -2585,8 +2597,8 @@ export default function App() {
                 const isWaitingInput = Boolean(activeTurn && (activeTurn.status === 'waiting' || activeTurn.needsInput))
                 return (
                     <button
-                      className={`bot-row enter ${isWorking ? 'working' : ''} ${isWaitingInput ? 'waiting' : ''}`}
-                      style={{ animationDelay: `${Math.min(index, 8) * 28}ms` }}
+                      className={`bot-row ${rowEntrance && index < 8 ? 'enter' : ''} ${isWorking ? 'working' : ''} ${isWaitingInput ? 'waiting' : ''}`}
+                      style={rowEntrance && index < 8 ? { animationDelay: `${index * 28}ms` } : undefined}
                       key={profile.name}
                       onPointerDown={handleRowPointerDown}
                       onClick={() => {
@@ -2655,8 +2667,8 @@ export default function App() {
                   const profile = profileMap.get(session.profile)
                   return (
                     <button
-                      className={`bot-row enter ${isWorking ? 'working' : ''} ${isOpening ? 'opening' : ''} ${isWaitingInput ? 'waiting' : ''}`}
-                      style={{ animationDelay: `${Math.min(index, 8) * 28}ms` }}
+                      className={`bot-row ${rowEntrance && index < 8 ? 'enter' : ''} ${isWorking ? 'working' : ''} ${isOpening ? 'opening' : ''} ${isWaitingInput ? 'waiting' : ''}`}
+                      style={rowEntrance && index < 8 ? { animationDelay: `${index * 28}ms` } : undefined}
                       key={`${session.profile}:${session.id}`}
                       onPointerDown={handleRowPointerDown}
                       onClick={() => {

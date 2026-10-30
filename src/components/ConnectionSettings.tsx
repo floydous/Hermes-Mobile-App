@@ -5,7 +5,6 @@ import { Check, CheckCircle2, ChevronLeft, ChevronRight, Copy, ExternalLink, Git
 
 import HermesAgentAppIcon from '../assets/hermes-agent-app-icon.png'
 import { errorMessage, supportsBasicAuth } from '../connection-state'
-import { useEdgeSwipeBack } from '../edge-swipe'
 import type { Accent, Appearance, ChatLayout, DarkVariant, ThemeMode } from '../appearance'
 import { nativeSignIn, passwordSignIn, probeHermesGateway } from '../hermes'
 import {
@@ -129,9 +128,7 @@ function Header({
 }
 
 function AboutHermesMobile({ back }: { back: () => void }) {
-  const shellRef = useRef<HTMLElement>(null)
-  useEdgeSwipeBack(shellRef, back)
-  return <main ref={shellRef} className="app panel about-screen">
+  return <main className="app panel about-screen">
     <Header title="" subtitle="" back={back} compact/>
     <section className="about-hero">
       <div className="about-logo-card"><img src={HermesMobileLogo} alt="Hermes Mobile logo"/></div>
@@ -159,8 +156,6 @@ function AboutHermesMobile({ back }: { back: () => void }) {
 }
 
 function PairingSettings({ back, onPaired, onPairingBusy, initialEndpoint }: { back: () => void; onPaired: (endpoint: string) => Promise<void>; onPairingBusy: (busy: boolean) => void; initialEndpoint?: string }) {
-  const shellRef = useRef<HTMLElement>(null)
-  useEdgeSwipeBack(shellRef, back)
   const [gatewayUrl, setGatewayUrl] = useState(initialEndpoint || '')
   const [checking, setChecking] = useState(false)
   const [verifiedEndpoint, setVerifiedEndpoint] = useState<string | null>(null)
@@ -217,7 +212,7 @@ function PairingSettings({ back, onPaired, onPairingBusy, initialEndpoint }: { b
       setCopied(true); window.setTimeout(() => setCopied(false), 1800)
     } catch { setResult({ tone: 'error', text: 'Clipboard access is unavailable. You can still follow the checklist below.' }) }
   }
-  return <main ref={shellRef} className="app panel pairing-screen">
+  return <main className="app panel pairing-screen">
     <Header title="Security & pairing" subtitle="Private access for your mobile device" back={back}/>
 
     <section className="settings-group">
@@ -322,15 +317,13 @@ function AppearanceSettings({
   uiScale: number
   setUiScale: (scale: number) => void
 }) {
-  const shellRef = useRef<HTMLElement>(null)
-  useEdgeSwipeBack(shellRef, back)
   const set = <K extends keyof Appearance>(key: K, value: Appearance[K]) => setAppearance(current => ({ ...current, [key]: value }))
 
   const scalePercent = Math.round(uiScale * 100)
   const isDefault = Math.abs(uiScale - 1.15) < 0.02
 
   return (
-    <main ref={shellRef} className="app panel appearance-screen">
+    <main className="app panel appearance-screen">
       <Header title="Appearance" subtitle="" back={back} compact/>
       <h1 className="appearance-title">Appearance</h1>
 
@@ -448,8 +441,6 @@ function AppearanceSettings({
 }
 
 function DiagnosticsSettings({ back }: { back: () => void }) {
-  const shellRef = useRef<HTMLElement>(null)
-  useEdgeSwipeBack(shellRef, back)
   const [enabled, setEnabled] = useState(() => isPerformanceDiagnosticsEnabled())
   const [host, setHost] = useState(() => (typeof localStorage !== 'undefined' ? localStorage.getItem('hermes_perf_debug_host') || '100.117.86.67' : '100.117.86.67'))
   const [token, setToken] = useState(() => (typeof localStorage !== 'undefined' ? localStorage.getItem('hermes_perf_debug_token') || '' : ''))
@@ -511,7 +502,7 @@ function DiagnosticsSettings({ back }: { back: () => void }) {
   }
 
   return (
-    <main ref={shellRef} className="app panel appearance-screen">
+    <main className="app panel appearance-screen">
       <Header title="Diagnostics" subtitle="Remote Performance Telemetry" back={back}/>
 
       <section className="settings-group">
@@ -615,6 +606,13 @@ export function ConnectionSettings({ profiles, sessions, connected, endpoint, ap
   isClosingRef.current = isClosing
 
   const sheetRef = useRef<HTMLDivElement>(null)
+  // Gestures write their per-frame transforms straight to these elements.
+  // Going through React state re-rendered the whole sheet on every touchmove.
+  const rootPageRef = useRef<HTMLDivElement>(null)
+  const subPageRef = useRef<HTMLDivElement>(null)
+  const backdropRef = useRef<HTMLDivElement>(null)
+  const rosterCardRef = useRef<HTMLElement | null>(null)
+  const swipeZoomRef = useRef(1)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const { scrolled: rootScrolled, ref: rootScrollRef } = useScrolledPastTop()
   const { scrolled: subScrolled, ref: subScrollRef } = useScrolledPastTop()
@@ -665,20 +663,57 @@ export function ConnectionSettings({ profiles, sessions, connected, endpoint, ap
     return () => root.classList.remove('sheet-presented')
   }, [isClosing])
 
-  // While the grabber is dragged, the card follows: it grows back toward full
-  // size as the sheet is pulled down. Set on the roster itself so the per-frame
-  // change does not restyle the whole document.
+  // The card's fixed shape (corner radius, edge, the color around it) stays
+  // for the sheet's whole lifetime, including its exit.
   useLayoutEffect(() => {
     const root = document.documentElement
-    const roster = document.querySelector<HTMLElement>('.app.roster-shell')
-    if (!isDragging || !roster) return
-    root.classList.add('sheet-dragging')
-    roster.style.setProperty('--sheet-progress', String(Math.max(0, 1 - dragY / Math.max(1, window.innerHeight * 0.9))))
-    return () => {
-      root.classList.remove('sheet-dragging')
-      roster.style.removeProperty('--sheet-progress')
+    root.classList.add('sheet-open')
+    return () => root.classList.remove('sheet-open')
+  }, [])
+
+  /*
+   * The sheet drag, frame by frame: the root page follows the finger, the
+   * scrim lightens, and the card behind grows back toward full size. All
+   * three are written to the DOM directly. `--sheet-progress` is registered
+   * as non-inherited (transitions.css), so changing it restyles the card
+   * alone rather than every row in the list inside it.
+   */
+  const startSheetDrag = () => {
+    rosterCardRef.current = document.querySelector<HTMLElement>('.app.roster-shell')
+    document.documentElement.classList.add('sheet-dragging')
+    setIsDragging(true)
+  }
+
+  const moveSheetDrag = (y: number) => {
+    dragYRef.current = y
+    if (rootPageRef.current) rootPageRef.current.style.transform = `translateY(${y}px)`
+    if (backdropRef.current) backdropRef.current.style.opacity = String(Math.max(0.1, 1 - (y / 300) * 0.8))
+    rosterCardRef.current?.style.setProperty('--sheet-progress', String(Math.max(0, 1 - y / Math.max(1, window.innerHeight * 0.9))))
+  }
+
+  // Ends the drag. Closing hands the offset to the exit animation; otherwise
+  // everything eases back to rest on the CSS transitions.
+  const endSheetDrag = (closing: boolean) => {
+    document.documentElement.classList.remove('sheet-dragging')
+    rosterCardRef.current?.style.removeProperty('--sheet-progress')
+    rosterCardRef.current = null
+    if (rootPageRef.current) rootPageRef.current.style.transform = ''
+    const backdrop = backdropRef.current
+    if (backdrop && !closing) {
+      backdrop.style.transition = 'opacity 240ms ease'
+      backdrop.style.opacity = ''
+      window.setTimeout(() => { backdrop.style.transition = '' }, 260)
     }
-  }, [isDragging, dragY])
+    setIsDragging(false)
+    if (closing) {
+      // The exit continues from the drag offset rather than jumping back up.
+      setDragY(dragYRef.current)
+    } else {
+      dragYRef.current = 0
+      setIsSettling(true)
+      window.setTimeout(() => setIsSettling(false), 280)
+    }
+  }
 
   const handleClose = useCallback(() => {
     if (isClosingRef.current) return
@@ -863,9 +898,7 @@ export function ConnectionSettings({ profiles, sessions, connected, endpoint, ap
 
     isTrackingRef.current = true
     isConfirmedDragRef.current = isBar
-    if (isBar) {
-      setIsDragging(true)
-    }
+    if (isBar) startSheetDrag()
   }
 
   const handleTouchMove = (e: React.TouchEvent) => {
@@ -883,22 +916,14 @@ export function ConnectionSettings({ profiles, sessions, connected, endpoint, ap
 
       if (deltaY > 8 && deltaY > Math.abs(deltaX) * 1.25) {
         isConfirmedDragRef.current = true
-        setIsDragging(true)
+        startSheetDrag()
       } else if (Math.abs(deltaX) > 10 || deltaY < -10) {
         isTrackingRef.current = false
         return
       }
     }
 
-    if (isConfirmedDragRef.current) {
-      if (deltaY > 0) {
-        dragYRef.current = deltaY
-        setDragY(deltaY)
-      } else {
-        dragYRef.current = deltaY * 0.15
-        setDragY(deltaY * 0.15)
-      }
-    }
+    if (isConfirmedDragRef.current) moveSheetDrag(deltaY > 0 ? deltaY : deltaY * 0.15)
   }
 
   const handleTouchEnd = () => {
@@ -906,22 +931,11 @@ export function ConnectionSettings({ profiles, sessions, connected, endpoint, ap
     isTrackingRef.current = false
 
     if (isConfirmedDragRef.current) {
-      setIsDragging(false)
-      // Read from the ref: React has not re-rendered yet, so the state value
-      // is the one from the previous frame.
       const distance = dragYRef.current
       const duration = Math.max(1, Date.now() - dragStartTimeRef.current)
-      const velocity = distance / duration
-
-      if (distance > 110 || velocity > 0.4) {
-        handleClose()
-      } else {
-        // Ease back to rest rather than snapping.
-        setIsSettling(true)
-        dragYRef.current = 0
-        setDragY(0)
-        window.setTimeout(() => setIsSettling(false), 280)
-      }
+      const closing = distance > 110 || distance / duration > 0.4
+      endSheetDrag(closing)
+      if (closing) handleClose()
     }
 
     isConfirmedDragRef.current = false
@@ -929,10 +943,8 @@ export function ConnectionSettings({ profiles, sessions, connected, endpoint, ap
 
   const handleTouchCancel = () => {
     isTrackingRef.current = false
+    if (isConfirmedDragRef.current) endSheetDrag(false)
     isConfirmedDragRef.current = false
-    setIsDragging(false)
-    dragYRef.current = 0
-    setDragY(0)
   }
 
   /* ---------------------------------------------------------------------
@@ -950,14 +962,15 @@ export function ConnectionSettings({ profiles, sessions, connected, endpoint, ap
     swipeTrackingRef.current = true
     swipeIntentRef.current = false
     swipeOffsetRef.current = 0
+    // Read once: touches are in visual pixels and the transform is in CSS
+    // pixels, and the app scales with the root zoom.
+    swipeZoomRef.current = parseFloat(document.documentElement.style.zoom) || 1
   }
 
   const handleSubPageTouchMove = (e: React.TouchEvent) => {
     if (!swipeTrackingRef.current || isClosingRef.current || e.touches.length !== 1) return
     const touch = e.touches[0]
-    // Touch coordinates are visual pixels; the transform is in CSS pixels.
-    // The app scales with `documentElement.style.zoom`, so convert.
-    const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1
+    const zoom = swipeZoomRef.current
     const deltaX = (touch.clientX - swipeStartXRef.current) / zoom
     const deltaY = (touch.clientY - swipeStartYRef.current) / zoom
 
@@ -976,11 +989,9 @@ export function ConnectionSettings({ profiles, sessions, connected, endpoint, ap
     }
 
     // The page follows the finger, clamped to the sheet width.
-    const width = sheetWidth()
-    const offset = Math.min(width, Math.max(0, deltaX))
+    const offset = Math.min(sheetWidth(), Math.max(0, deltaX))
     swipeOffsetRef.current = offset
-    setNavOffset(offset)
-    if (e.cancelable) e.preventDefault()
+    if (subPageRef.current) subPageRef.current.style.transform = `translateX(${offset}px)`
   }
 
   const handleSubPageTouchEnd = () => {
@@ -1011,7 +1022,9 @@ export function ConnectionSettings({ profiles, sessions, connected, endpoint, ap
         setNavAnimating(false)
       }, settleDelay)
     } else {
-      // Snap back to the sub-page.
+      // Snap back to the sub-page. The offset was written to the DOM during
+      // the drag, so it is reset there too; React's value is already 0.
+      if (subPageRef.current) subPageRef.current.style.transform = 'translateX(0px)'
       setNavOffset(0)
       window.setTimeout(() => setNavAnimating(false), settleDelay)
     }
@@ -1025,6 +1038,7 @@ export function ConnectionSettings({ profiles, sessions, connected, endpoint, ap
       // Abort the swipe and snap back to the sub-page.
       setNavDragging(false)
       setNavAnimating(true)
+      if (subPageRef.current) subPageRef.current.style.transform = 'translateX(0px)'
       setNavOffset(0)
       window.setTimeout(() => setNavAnimating(false), prefersReducedMotion() ? 0 : NAV_DURATION_MS)
     }
@@ -1044,27 +1058,20 @@ export function ConnectionSettings({ profiles, sessions, connected, endpoint, ap
     setIsSettling(false)
     isTrackingRef.current = true
     isConfirmedDragRef.current = true
-    setIsDragging(true)
+    startSheetDrag()
   }
 
   const handleBarPointerMove = (e: React.PointerEvent) => {
     if (e.pointerType === 'touch' || !isTrackingRef.current) return
     const deltaY = e.clientY - dragStartYRef.current
-    if (deltaY > 0) {
-      dragYRef.current = deltaY
-      setDragY(deltaY)
-    } else {
-      dragYRef.current = deltaY * 0.15
-      setDragY(deltaY * 0.15)
-    }
+    moveSheetDrag(deltaY > 0 ? deltaY : deltaY * 0.15)
   }
 
   const handleBarPointerCancel = (e: React.PointerEvent) => {
     if (e.pointerType === 'touch' || !isTrackingRef.current) return
     isTrackingRef.current = false
     isConfirmedDragRef.current = false
-    setIsDragging(false)
-    setDragY(0)
+    endSheetDrag(false)
     try {
       e.currentTarget.releasePointerCapture(e.pointerId)
     } catch {}
@@ -1073,25 +1080,16 @@ export function ConnectionSettings({ profiles, sessions, connected, endpoint, ap
   const handleBarPointerUp = (e: React.PointerEvent) => {
     if (e.pointerType === 'touch' || !isTrackingRef.current) return
     isTrackingRef.current = false
-    setIsDragging(false)
+    isConfirmedDragRef.current = false
     try {
       e.currentTarget.releasePointerCapture(e.pointerId)
     } catch {}
 
-    // Read the distance from a ref, not from state: React has not re-rendered
-    // yet at this point, so the state value is the one from the last frame.
     const distance = dragYRef.current
     const duration = Math.max(1, Date.now() - dragStartTimeRef.current)
-    const velocity = distance / duration
-    if (distance > 110 || velocity > 0.4) {
-      handleClose()
-    } else {
-      // Ease back to rest rather than snapping.
-      setIsSettling(true)
-      dragYRef.current = 0
-      setDragY(0)
-      window.setTimeout(() => setIsSettling(false), 280)
-    }
+    const closing = distance > 110 || distance / duration > 0.4
+    endSheetDrag(closing)
+    if (closing) handleClose()
   }
 
   const renderSubPage = () => {
@@ -1263,13 +1261,7 @@ export function ConnectionSettings({ profiles, sessions, connected, endpoint, ap
       aria-modal="true"
       aria-label="Settings and host connection"
     >
-      <div
-        className="settings-modal-backdrop"
-        style={{
-          opacity: isDragging ? Math.max(0.1, 1 - (dragY / 300) * 0.8) : undefined,
-        }}
-        onClick={handleClose}
-      />
+      <div ref={backdropRef} className="settings-modal-backdrop" onClick={handleClose}/>
       <div
         ref={sheetRef}
         className={`settings-modal-sheet ${isClosing ? 'is-closing' : ''}`}
@@ -1295,20 +1287,8 @@ export function ConnectionSettings({ profiles, sessions, connected, endpoint, ap
         >
           <div className="settings-sheet-anim">
             <div
+              ref={rootPageRef}
               className={`settings-page settings-page-root ${navAnimating && !navDragging ? 'is-transitioning' : ''} ${isDragging ? 'is-dragging' : ''} ${isSettling ? 'is-settling' : ''} ${page !== 'root' && (navOffset === 0 || navDragging) ? 'is-covered' : ''}`}
-              style={{
-                // The root never moves sideways: a sub-page slides in OVER it
-                // and the root only dims underneath, then brightens as the
-                // sub-page slides away. It carries only the vertical
-                // drag-to-dismiss, so the sheet itself never moves or resizes.
-                //
-                // The drag offset applies only while dragging. On a dismiss
-                // the exit animation takes over on the page stack, which
-                // carries both the root and the sub-page, and starts from
-                // the drag offset so the sheet keeps sliding down from the
-                // finger instead of jumping up to the top first.
-                transform: isDragging ? `translateY(${dragY}px)` : 'translateY(0)',
-              }}
             >
               <div
                 className="settings-drag-handle-bar"
@@ -1326,6 +1306,7 @@ export function ConnectionSettings({ profiles, sessions, connected, endpoint, ap
 
           {page !== 'root' && (
             <div
+              ref={subPageRef}
               className={`settings-page settings-page-sub ${navAnimating && !navDragging ? 'is-transitioning' : ''}`}
               style={{ transform: `translateX(${navOffset}px)` }}
               onTouchStart={handleSubPageTouchStart}

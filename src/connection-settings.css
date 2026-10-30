@@ -811,7 +811,9 @@
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.62);
-  animation: settings-backdrop-in 0.35s ease forwards;
+  /* No forwards fill: a filled animation would pin opacity at 1 and override
+     the drag, which lightens the scrim as the sheet is pulled down. */
+  animation: settings-backdrop-in 0.35s ease backwards;
   will-change: opacity;
 }
 
@@ -878,9 +880,7 @@
  */
 .settings-sheet-anim {
   position: absolute;
-  /* `top` is animated by the entrance keyframe, so it cannot also be
-     pinned to 0 by `inset`. The box keeps the stack's full height and
-     slides as a whole. */
+  /* The box keeps the stack's full height and slides up as a whole. */
   top: 0;
   left: 0;
   right: 0;
@@ -1270,30 +1270,23 @@
   to { opacity: 1; }
 }
 
+/* No `from`: it fades out from wherever the drag left it. */
 @keyframes settings-backdrop-out {
-  from { opacity: 1; }
   to { opacity: 0; }
 }
 
 /*
- * The sheet enters by sliding up from the bottom edge.
+ * The sheet enters by sliding up from the bottom edge, as a transform the
+ * GPU runs on its own.
  *
- * It animates `top`, not `transform`. A transform on the wrapper is
- * composited by the browser, and the composited layer did not follow the
- * root page's own box: the sheet's visible top edge jumped to the top of
- * the screen (y=0), sat there for ~50ms, and then snapped back down to its
- * rest position (y=79). Measured, that was a 79px overshoot -- exactly
- * the root page's top inset -- on every single open.
- *
- * Animating `top` is a layout animation, so the sheet's edge travels
- * exactly as the box model says: 854 -> 801 -> 730 -> ... -> 79, with no
- * overshoot and no backward movement. It still runs at 60fps (measured),
- * because the sheet's subtree is small and the layout is not dirty
- * otherwise.
+ * It once animated `top` instead, after a transform entrance was measured
+ * jumping to y=0 and back (79px, the root page's inset). That jump was the
+ * opening focus() scrolling the clipped page stack, since fixed with
+ * preventScroll. A `top` animation is layout on the main thread every
+ * frame, so it stuttered whenever the app was busy, as it is on open.
  */
 @keyframes settings-sheet-up {
-  from { top: 100%; }
-  to { top: 0; }
+  from { transform: translateY(100%); }
 }
 
 /*

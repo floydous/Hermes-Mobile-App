@@ -1,4 +1,4 @@
-import { useEffect, type RefObject } from 'react'
+import { useEffect, useRef, type RefObject } from 'react'
 import { remoteLog } from './remote-logger'
 
 export const EDGE_SWIPE_MAX_START_PX = 72
@@ -25,12 +25,25 @@ export function createEdgeSwipeController<T extends HTMLElement>(
   let cancelling = false
   let committed = false
   let resetTimer: number | undefined
+  // What moves: the page's PageHost when it has one, so the whole page
+  // (with its own background) follows the finger and uncovers the page
+  // underneath, as on iOS. The transform is written inline each frame; a
+  // CSS variable here was inherited by every element of the page and
+  // restyled all of them on every frame.
+  let moving: HTMLElement = element
+  let zoom = 1
+  // Set once a committed page is sliding out on its own; teardown leaves it be.
+  let handedOff = false
+
+  const setOffset = (px: number) => {
+    moving.style.transform = `translate3d(${px}px, 0, 0)`
+  }
 
   const clearMotion = () => {
     window.clearTimeout(resetTimer)
     resetTimer = undefined
-    element.classList.remove('edge-swipe-active', 'edge-swipe-committed', 'edge-swipe-cancelling')
-    element.style.removeProperty('--edge-swipe-offset')
+    moving.classList.remove('edge-swipe-active', 'edge-swipe-cancelling')
+    moving.style.transform = ''
     tracking = false
     intentConfirmed = false
     cancelling = false
@@ -43,11 +56,11 @@ export function createEdgeSwipeController<T extends HTMLElement>(
     tracking = false
     intentConfirmed = false
     committed = false
-    element.classList.remove('edge-swipe-active', 'edge-swipe-committed')
-    element.classList.add('edge-swipe-cancelling')
-    element.style.setProperty('--edge-swipe-offset', '0px')
+    moving.classList.remove('edge-swipe-active')
+    moving.classList.add('edge-swipe-cancelling')
+    setOffset(0)
     window.clearTimeout(resetTimer)
-    resetTimer = window.setTimeout(clearMotion, 220)
+    resetTimer = window.setTimeout(clearMotion, 240)
   }
 
   const onTouchStart = (event: TouchEvent) => {
@@ -55,6 +68,11 @@ export function createEdgeSwipeController<T extends HTMLElement>(
     const target = event.target as HTMLElement | null
     if (target?.closest('input,textarea,select,button,[data-no-edge-swipe],.table-scroll,pre,code')) return
     window.clearTimeout(resetTimer)
+    handedOff = false
+    moving = (element.closest?.('.page-host') as HTMLElement | null) ?? element
+    // Touches are in visual pixels; the transform is in CSS pixels, which the
+    // root zoom scales. Read once per gesture.
+    zoom = parseFloat(globalThis.document?.documentElement?.style.zoom || '') || 1
     startX = event.touches[0].clientX
     startY = event.touches[0].clientY
     startTime = Date.now()
@@ -93,15 +111,12 @@ export function createEdgeSwipeController<T extends HTMLElement>(
       cancelMotion()
       return
     }
-    if (deltaX <= 0) {
-      element.style.setProperty('--edge-swipe-offset', '0px')
-      return
-    }
     const durationMs = Date.now() - startTime
-    const offset = Math.min(EDGE_SWIPE_MAX_OFFSET_PX, Math.max(0, (deltaX - 8) * .55))
-    element.classList.remove('edge-swipe-cancelling')
-    element.classList.add('edge-swipe-active')
-    element.style.setProperty('--edge-swipe-offset', `${offset}px`)
+    moving.classList.remove('edge-swipe-cancelling')
+    moving.classList.add('edge-swipe-active')
+    // A page with a host follows the finger 1:1; a bare page only hints.
+    const followsFinger = moving !== element
+    setOffset(Math.max(0, followsFinger ? deltaX / zoom : Math.min(EDGE_SWIPE_MAX_OFFSET_PX, (deltaX - 8) * .55)))
     committed = shouldCommitEdgeSwipe(deltaX, deltaY, durationMs)
   }
 
@@ -132,8 +147,24 @@ export function createEdgeSwipeController<T extends HTMLElement>(
       )) {
         (document.activeElement as HTMLElement).blur()
       }
-      clearMotion()
-      onBack()
+      if (moving === element) {
+        clearMotion()
+        onBack()
+      } else {
+        // Hand the page to its exit slide where the finger left it: the exit
+        // keyframes have no start frame, so they begin at this inline offset
+        // instead of snapping back to 0 first.
+        const page = moving
+        page.classList.remove('edge-swipe-active')
+        tracking = false
+        committed = false
+        handedOff = true
+        onBack()
+        // If nothing took the page away (going back was refused), ease it back.
+        resetTimer = window.setTimeout(() => {
+          if (page.isConnected && !page.classList.contains('is-page-exiting')) cancelMotion()
+        }, 120)
+      }
       try { window.focus() } catch {}
     } else {
       remoteLog('DEBUG', 'EdgeSwipe', `Edge swipe cancelled: deltaX=${Math.round(deltaX)} duration=${durationMs}ms`)
@@ -161,14 +192,19 @@ export function createEdgeSwipeController<T extends HTMLElement>(
     element.removeEventListener('touchmove', onTouchMove)
     element.removeEventListener('touchend', onTouchEnd)
     element.removeEventListener('touchcancel', onTouchCancel)
-    clearMotion()
+    if (!handedOff) clearMotion()
   }
 }
 
 export function useEdgeSwipeBack<T extends HTMLElement>(ref: RefObject<T | null>, onBack: () => void, enabled = true) {
+  // Callers pass a fresh callback on every render. Reading it from a ref keeps
+  // one subscription per page instead of tearing the listeners down and
+  // re-adding them on every render (every streamed token, in a chat).
+  const onBackRef = useRef(onBack)
+  onBackRef.current = onBack
   useEffect(() => {
     const element = ref.current
     if (!element || !enabled) return
-    return createEdgeSwipeController(element, onBack)
-  }, [enabled, onBack, ref])
+    return createEdgeSwipeController(element, () => onBackRef.current())
+  }, [enabled, ref])
 }
