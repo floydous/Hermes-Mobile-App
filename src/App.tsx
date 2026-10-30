@@ -99,20 +99,14 @@ import {
 } from './clarify-isolation'
 
 import { classifyInteractiveRowGesture, computeNextSwipeTab, isHorizontalSwipeIntent, type Tab } from './tab-swipe'
-import { FreezeWhileCovered, PageHost, PAGE_EXIT_STATE, usePageExit } from './page-transition'
+import { FreezeWhileCovered, MENU_CLOSE_MS, PageHost, PAGE_EXIT_STATE, usePageExit } from './page-transition'
+import { appearanceForTheme, applyAppearance, readAppearance, resolveTheme, saveAppearance, systemPrefersDark, type Appearance, type Theme } from './appearance'
 
 // The chat pulls in the markdown, KaTeX and highlight.js bundle (~600 kB), which
 // the roster never needs, so it loads after the roster paints instead of at launch.
 const loadChatView = () => import('./components/ChatView')
 const ChatView = lazy(() => loadChatView().then(module => ({ default: module.ChatView })))
 type DraftBot = { role: string; name: string; description: string; soul: string; model: string; provider: string; shape: string }
-type Theme = 'dark' | 'light' | 'grey'
-
-export function normalizeTheme(val: string | null | undefined): Theme {
-  if (val === 'dark' || val === 'grey' || val === 'light') return val
-  if (val === 'aurora') return 'dark' // Graceful fallback for legacy aurora preference
-  return 'light'
-}
 type SettledAssistantResponse = { sessionId: string; profile: string; content: string; usage?: LiveUsage }
 
 const titleize = (value?: string | null) => (value || '').split(/[-_]+/).filter(Boolean).map(part => (part[0] ? part[0].toUpperCase() + part.slice(1) : '')).join(' ') || 'Bot'
@@ -363,6 +357,7 @@ export default function App() {
   const recentEndedTurnsRef = useRef<Map<string, number>>(new Map())
   const [query, setQuery] = useState('')
   const [searching, setSearching] = useState(false)
+  const { isExiting: searchClosing, requestClose: closeSearch } = usePageExit(() => { setQuery(''); setSearching(false) }, MENU_CLOSE_MS)
   const [settings, setSettings] = useState(false)
   const [actionMenuOpen, setActionMenuOpen] = useState(false)
   const [createTaskOpen, setCreateTaskOpen] = useState(false)
@@ -374,7 +369,10 @@ export default function App() {
     soul: 'You are a pragmatic software engineer. Read surrounding code before changing it, keep diffs focused, and verify your work by running it.',
     model: '', provider: '', shape: 'blobatar',
   })
-  const [theme, setTheme] = useState<Theme>(() => normalizeTheme(localStorage.getItem('hermes-mobile-theme')))
+  const [appearance, setAppearance] = useState<Appearance>(() => readAppearance(localStorage))
+  const [systemDark, setSystemDark] = useState(systemPrefersDark)
+  const theme = resolveTheme(appearance, systemDark)
+  const setTheme = useCallback((next: Theme) => setAppearance(current => appearanceForTheme(current, next)), [])
   const [uiScale, setUiScale] = useState<number>(() => {
     const saved = localStorage.getItem('hermes-mobile-ui-scale')
     const parsed = saved ? parseFloat(saved) : 1.15
@@ -474,9 +472,16 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    document.documentElement.dataset.theme = theme
-    localStorage.setItem('hermes-mobile-theme', theme)
-  }, [theme])
+    applyAppearance(document.documentElement, appearance, systemDark)
+    saveAppearance(localStorage, appearance)
+  }, [appearance, systemDark])
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return
+    const query = window.matchMedia('(prefers-color-scheme: dark)')
+    const onChange = (event: MediaQueryListEvent) => setSystemDark(event.matches)
+    query.addEventListener('change', onChange)
+    return () => query.removeEventListener('change', onChange)
+  }, [])
   const activateEndpoint = (endpoint: string) => {
     const normalized = endpoint.replace(/\/$/, '')
     activeEndpointRef.current = normalized
@@ -2459,7 +2464,7 @@ export default function App() {
           </button>
         </div>
         <div className="header-actions">
-          <button className="icon-button" aria-label="Search" onClick={() => setSearching(value => !value)}><Search size={18}/></button>
+          <button className="icon-button" aria-label="Search" onClick={() => searching ? closeSearch() : setSearching(true)}><Search size={18}/></button>
           <button className="icon-button" aria-label="Settings" onClick={() => setSettings(true)}><SettingsIcon size={18}/></button>
           {tab === 'sessions' ? (
             <div className="header-action-group">
@@ -2562,7 +2567,7 @@ export default function App() {
           )}
         </div>
       </header>
-      {searching && <div className="search"><Search size={16}/><input autoFocus value={query} onChange={event => setQuery(event.target.value)} placeholder={tab === 'bots' ? 'Search bots and group chats…' : tab === 'sessions' ? 'Search sessions…' : 'Search tasks…'}/><button onClick={() => { setQuery(''); setSearching(false) }}><X size={16}/></button></div>}
+      {searching && <div className={`search roster-search${searchClosing ? ' is-closing' : ''}`}><Search size={16}/><input autoFocus value={query} onChange={event => setQuery(event.target.value)} placeholder={tab === 'bots' ? 'Search bots and group chats…' : tab === 'sessions' ? 'Search sessions…' : 'Search tasks…'}/><button onClick={closeSearch}><X size={16}/></button></div>}
     </div>
     <div
       className="roster-list-scroll"
@@ -2769,8 +2774,8 @@ export default function App() {
       sessions={sessions.length}
       connected={connectionStatus === 'connected'}
       endpoint={activeEndpoint !== 'http://127.0.0.1:9119' ? activeEndpoint : undefined}
-      theme={theme}
-      setTheme={setTheme}
+      appearance={appearance}
+      setAppearance={setAppearance}
       uiScale={uiScale}
       setUiScale={setUiScale}
       close={() => setSettings(false)}
@@ -2857,7 +2862,7 @@ export function NavIsland({ tab, setTab }: { tab: Tab; setTab: (tab: Tab) => voi
             className={`nav-island-item ${tab === id ? 'active' : ''}`}
             onClick={() => setTab(id)}
           >
-            <Icon size={14} strokeWidth={1.75} />
+            <Icon size={16} strokeWidth={1.75} />
             <span className="nav-island-label">{label}</span>
           </button>
         ))}

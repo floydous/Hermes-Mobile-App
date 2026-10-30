@@ -15,6 +15,7 @@ import '@fontsource/geist-mono/500.css'
 import '@fontsource/geist-mono/600.css'
 import '@fontsource/geist-mono/700.css'
 import App from './App'
+import { applyAppearance, readAppearance, systemPrefersDark } from './appearance'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import './styles.css'
 import './chat.css'
@@ -31,11 +32,11 @@ import './connection-settings.css'
 import './edge-swipe.css'
 import './transitions.css'
 import './glass.css'
+import './appearance.css'
 import './tasks.css'
 
 try {
-  const savedTheme = localStorage.getItem('hermes-mobile-theme') || 'light'
-  document.documentElement.setAttribute('data-theme', savedTheme)
+  applyAppearance(document.documentElement, readAppearance(localStorage), systemPrefersDark())
 
   const savedScale = localStorage.getItem('hermes-mobile-ui-scale')
   const parsed = savedScale ? parseFloat(savedScale) : 1.15

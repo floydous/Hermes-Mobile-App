@@ -16,7 +16,7 @@
  */
 :root {
   --glass-fill: rgba(255, 255, 255, 0.08);
-  --glass-fill-strong: rgba(36, 36, 40, 0.8);
+  --glass-fill-strong: rgba(36, 36, 40, 0.97);
   /* A gradient rim, not a flat border: lit at the top-left, catching a second
      highlight at the bottom-right, so circles read as glass as well as pills. */
   --glass-rim: linear-gradient(135deg, rgba(255, 255, 255, 0.6) 0%, rgba(255, 255, 255, 0.14) 28%, rgba(255, 255, 255, 0.05) 58%, rgba(255, 255, 255, 0.34) 100%);
@@ -30,13 +30,13 @@
 
 :root[data-theme='grey'] {
   --glass-fill: rgba(255, 255, 255, 0.09);
-  --glass-fill-strong: rgba(52, 54, 59, 0.84);
+  --glass-fill-strong: rgba(52, 54, 59, 0.97);
   --glass-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
 }
 
 :root[data-theme='light'] {
   --glass-fill: rgba(255, 255, 255, 0.42);
-  --glass-fill-strong: rgba(255, 255, 255, 0.86);
+  --glass-fill-strong: rgba(255, 255, 255, 0.97);
   --glass-rim: linear-gradient(135deg, #ffffff 0%, rgba(255, 255, 255, 0.7) 30%, rgba(0, 0, 0, 0.1) 62%, rgba(255, 255, 255, 0.95) 100%);
   --glass-highlight: inset 0 1px 1px rgba(255, 255, 255, 0.9), inset 0 0 16px rgba(255, 255, 255, 0.5);
   --glass-shadow: 0 6px 22px rgba(0, 0, 0, 0.12);
@@ -69,25 +69,49 @@
   border: 1px solid transparent;
   background: var(--glass-fill);
   box-shadow: var(--glass-highlight), var(--glass-shadow);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
   color: var(--text);
 }
 
-/* Menus carry text, so they use the denser fill. */
+/*
+ * Only the tab bar blurs what is behind it. Android's WebView redraws the
+ * whole screen every frame, and each backdrop-filter is a full extra GPU pass
+ * on every one of them: with every control blurred the app ran at roughly
+ * 10fps on a phone. The rest stay unblurred.
+ */
+.app .nav-island {
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+}
+
+/* Unblurred controls that float over the scrolling thread sit on a mostly
+   opaque underlay, so passing text stays a faint hint instead of reading
+   through. Over a still background they look exactly as before. The
+   composer pill shares it, so it matches the + beside it. */
+.app.chat-shell .round-control,
+.app.chat-shell .chat-identity-button,
+.app.chat-shell .composer-plus,
+.app.chat-shell .ai-composer,
+.app.chat-shell .recording-composer,
+.app.chat-shell .latest-button {
+  background-color: color-mix(in srgb, var(--bg) 82%, transparent);
+  background-image: linear-gradient(var(--glass-fill), var(--glass-fill));
+}
+
+/* Menus carry text, so they use the denser fill. It is nearly opaque, so
+   they need no blur. */
 .app.chat-shell .chat-more-menu,
 .app.task-detail .task-more-menu,
 .app.chat-shell .composer-plus-menu,
-.app.chat-shell .model-popover,
-.app.chat-shell .reasoning-popover,
 .app.chat-shell .mention-popover,
 .app.chat-shell .slash-popover,
 .app .action-group-menu {
   border: 1px solid transparent;
   background: var(--glass-fill-strong);
   box-shadow: var(--glass-highlight), 0 18px 50px rgba(0, 0, 0, 0.32);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 /* The menus, the latest button and the tab bar are already positioned. */
@@ -118,8 +142,6 @@
 .app.chat-shell .chat-more-menu::before,
 .app.task-detail .task-more-menu::before,
 .app.chat-shell .composer-plus-menu::before,
-.app.chat-shell .model-popover::before,
-.app.chat-shell .reasoning-popover::before,
 .app.chat-shell .mention-popover::before,
 .app.chat-shell .slash-popover::before,
 .app .action-group-menu::before {
@@ -143,7 +165,7 @@
 .app.chat-shell .composer-plus:active,
 .app.chat-shell .composer-plus.open,
 .app.chat-shell .latest-button:active {
-  background: color-mix(in srgb, var(--glass-fill) 60%, var(--glass-press));
+  background-image: linear-gradient(var(--glass-press), var(--glass-press));
   transform: scale(0.95);
 }
 
@@ -153,6 +175,11 @@
    -------------------------------------------------------------------------- */
 .app.chat-shell {
   --chat-head-h: calc(var(--safe-top) + var(--control) + 14px);
+  /* The reference dock: 24 pt in from the sides and 28 pt up from the bottom
+     edge. Android often reports no bottom inset edge to edge, so 28 pt is
+     the floor; a larger system inset still wins. */
+  --dock-side: calc(24px / 1.15);
+  --dock-bottom: max(calc(env(safe-area-inset-bottom, 0px) + 8px), calc(28px / 1.15));
 }
 
 .app.chat-shell .chat-header {
@@ -169,8 +196,7 @@
   justify-items: center;
   gap: 10px;
   border: 0;
-  /* Only dims the status-bar strip; the text has to reach the glass to be seen through it. */
-  background: linear-gradient(to bottom, color-mix(in srgb, var(--bg) 85%, transparent) 0%, color-mix(in srgb, var(--bg) 35%, transparent) 40%, transparent 70%);
+  background: none;
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
   pointer-events: none;
@@ -178,6 +204,33 @@
 
 .app.chat-shell .chat-header > * {
   pointer-events: auto;
+}
+
+/*
+ * Messages fade out as they scroll up under the header, as in iOS: solid
+ * behind the status bar, then an eased fade that runs past the buttons. A
+ * painted gradient, not a mask, so it costs no extra GPU pass per frame.
+ */
+.app.chat-shell .chat-header::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: -1;
+  height: calc(var(--chat-head-h) + 36px);
+  background: linear-gradient(to bottom,
+    var(--bg) 0%,
+    var(--bg) calc(var(--safe-top) * 0.6),
+    color-mix(in srgb, var(--bg) 74%, transparent) 30%,
+    color-mix(in srgb, var(--bg) 54%, transparent) 42%,
+    color-mix(in srgb, var(--bg) 38%, transparent) 53%,
+    color-mix(in srgb, var(--bg) 25%, transparent) 63%,
+    color-mix(in srgb, var(--bg) 14%, transparent) 73%,
+    color-mix(in srgb, var(--bg) 6%, transparent) 83%,
+    color-mix(in srgb, var(--bg) 2%, transparent) 92%,
+    transparent 100%);
+  pointer-events: none;
 }
 
 .app.chat-shell .chat-header .round-control {
@@ -188,19 +241,26 @@
 .app.chat-shell .chat-identity-button {
   max-width: 100%;
   height: var(--control);
-  padding: 0 14px 0 5px;
+  padding: 0 16px 0 9px;
   border-radius: 999px;
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   transition: transform 0.16s ease, background 0.16s ease;
+}
+
+/* The reference pill: a small avatar beside the name. */
+.app.chat-shell .chat-identity-button .bot-avatar-header {
+  width: calc(26px / 1.15);
+  height: calc(26px / 1.15);
+  flex: 0 0 calc(26px / 1.15);
 }
 
 .app.chat-shell .chat-identity-button b {
   min-width: 0;
   overflow: hidden;
   font-size: var(--type-body);
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: -0.2px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -292,8 +352,32 @@
   right: 0;
   bottom: 0;
   z-index: 12;
-  padding: 12px 12px calc(10px + env(safe-area-inset-bottom));
-  background: linear-gradient(to top, color-mix(in srgb, var(--bg) 80%, transparent) 0%, transparent 55%);
+  padding: 12px var(--dock-side) var(--dock-bottom);
+  background: none;
+  pointer-events: none;
+}
+
+/* Messages fade out behind the composer the way they do under the header:
+   solid at the screen edge, then an eased fade that runs above the pill. */
+.app.chat-shell .chat-dock::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: -1;
+  height: calc(100% + 36px);
+  background: linear-gradient(to top,
+    var(--bg) 0%,
+    var(--bg) calc(var(--dock-bottom) * 0.5),
+    color-mix(in srgb, var(--bg) 80%, transparent) 26%,
+    color-mix(in srgb, var(--bg) 60%, transparent) 40%,
+    color-mix(in srgb, var(--bg) 42%, transparent) 52%,
+    color-mix(in srgb, var(--bg) 27%, transparent) 63%,
+    color-mix(in srgb, var(--bg) 15%, transparent) 74%,
+    color-mix(in srgb, var(--bg) 6%, transparent) 85%,
+    color-mix(in srgb, var(--bg) 2%, transparent) 93%,
+    transparent 100%);
   pointer-events: none;
 }
 
@@ -304,14 +388,14 @@
 .composer-row {
   display: flex;
   align-items: flex-end;
-  gap: 8px;
+  gap: calc(10px / 1.15);
 }
 
-/* The reference composer and + button are 40 pt tall. */
+/* The reference composer and + button are 44 pt tall. */
 .app.chat-shell .composer-plus {
-  width: calc(40px / 1.15);
-  height: calc(40px / 1.15);
-  flex: 0 0 calc(40px / 1.15);
+  width: calc(44px / 1.15);
+  height: calc(44px / 1.15);
+  flex: 0 0 calc(44px / 1.15);
   border-radius: 50%;
   display: grid;
   place-items: center;
@@ -321,9 +405,9 @@
 .app.chat-shell .ai-composer {
   min-width: 0;
   flex: 1 1 auto;
-  min-height: calc(40px / 1.15);
-  padding: 2px 3px 2px 14px;
-  border-radius: calc(20px / 1.15);
+  min-height: calc(44px / 1.15);
+  padding: calc(3px / 1.15) calc(3px / 1.15) calc(3px / 1.15) 16px;
+  border-radius: calc(22px / 1.15);
 }
 
 .composer-input-row {
@@ -340,7 +424,9 @@
   min-width: 0;
   flex: 1 1 auto;
   min-height: calc(36px / 1.15);
-  padding: 5px 0;
+  /* Content stays just under min-height: the auto-grow code sets height from
+     scrollHeight, which rounds up and would push the pill past 44 pt. */
+  padding: 6px 0 4.5px;
   color: var(--text);
   font-size: var(--type-body);
   line-height: 1.3;
@@ -364,16 +450,16 @@
 }
 
 .app.chat-shell .composer-input-row .composer-icon {
-  width: calc(32px / 1.15);
-  height: calc(32px / 1.15);
+  width: calc(36px / 1.15);
+  height: calc(36px / 1.15);
   border-radius: 50%;
   color: var(--muted);
 }
 
 .app.chat-shell .composer-input-row .composer-send {
-  width: calc(32px / 1.15);
-  height: calc(32px / 1.15);
-  min-width: calc(32px / 1.15);
+  width: calc(36px / 1.15);
+  height: calc(36px / 1.15);
+  min-width: calc(36px / 1.15);
   border: 0;
   background: var(--glass-send);
   color: var(--glass-send-ink);
@@ -392,15 +478,102 @@
 
 .app.chat-shell .composer-plus-menu {
   position: absolute;
-  left: 12px;
+  left: var(--dock-side);
   bottom: calc(var(--chat-dock-h, 70px) + 6px);
   z-index: 31;
-  width: min(calc(280px / 1.15), calc(100% - 24px));
-  padding: 5px;
+  width: min(calc(280px / 1.15), calc(100% - 2 * var(--dock-side)));
+  overflow: hidden;
   border-radius: calc(24px / 1.15);
   /* Grows out of the + button below it. */
-  transform-origin: calc(40px / 1.15 / 2) calc(100% + 30px);
+  transform-origin: calc(44px / 1.15 / 2) calc(100% + 30px);
   animation: glass-menu-in 0.38s cubic-bezier(0.34, 1.25, 0.64, 1);
+  /* Picking Model or Reasoning reshapes this same container to the list;
+     its height is set to the measured content. */
+  transition: width 0.34s var(--ease-page), height 0.34s var(--ease-page);
+}
+
+.app.chat-shell .composer-plus-menu.view-model {
+  width: min(calc(340px / 1.15), calc(100% - 2 * var(--dock-side)));
+}
+
+.app.chat-shell .composer-plus-menu.view-reasoning {
+  width: min(calc(240px / 1.15), calc(100% - 2 * var(--dock-side)));
+}
+
+.app.chat-shell .plus-pane {
+  padding: 5px;
+  animation: plus-pane-in 0.3s var(--ease-out-smooth) both;
+}
+
+/* Going back to the menu, its rows come in from the other side. */
+.app.chat-shell .composer-plus-menu.view-menu .plus-pane {
+  animation-name: plus-pane-back;
+}
+
+@keyframes plus-pane-in {
+  from {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+}
+
+@keyframes plus-pane-back {
+  from {
+    opacity: 0;
+    transform: translateX(-14px);
+  }
+}
+
+.app.chat-shell .plus-pane-back {
+  font-weight: 600;
+}
+
+.app.chat-shell .composer-plus-menu .model-search {
+  height: calc(36px / 1.15);
+  margin: 2px 4px 6px;
+  border: 0;
+  border-radius: calc(12px / 1.15);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  color: var(--muted);
+}
+
+.app.chat-shell .composer-plus-menu .model-search input {
+  color: var(--text);
+  font-size: var(--type-subhead);
+}
+
+.app.chat-shell .composer-plus-menu .model-list {
+  max-height: min(calc(360px / 1.15), 46dvh);
+}
+
+.app.chat-shell .composer-plus-menu .model-list button {
+  min-height: calc(52px / 1.15);
+}
+
+.app.chat-shell .composer-plus-menu .model-list b {
+  color: var(--text);
+  font-size: var(--type-body);
+  font-weight: 400;
+}
+
+.app.chat-shell .composer-plus-menu .model-list small {
+  color: var(--muted);
+  font-size: var(--type-footnote);
+}
+
+.app.chat-shell .composer-plus-menu .model-list p {
+  margin: 0;
+  padding: 14px 12px;
+  color: var(--muted);
+  font-size: var(--type-subhead);
+}
+
+.app.chat-shell .composer-plus-menu button.selected {
+  background: var(--glass-press);
+}
+
+.app.chat-shell .composer-plus-menu button.selected > svg:last-child {
+  color: var(--accent);
 }
 
 .app.chat-shell .composer-plus-menu button > span {
@@ -420,15 +593,8 @@
   color: var(--quiet);
 }
 
-.app.chat-shell .model-popover,
 .app.chat-shell .mention-popover,
 .app.chat-shell .slash-popover {
-  bottom: calc(var(--chat-dock-h, 70px) + 6px);
-}
-
-.app.chat-shell .reasoning-popover {
-  left: 12px;
-  right: auto;
   bottom: calc(var(--chat-dock-h, 70px) + 6px);
 }
 
@@ -438,7 +604,7 @@
 
 .app.chat-shell .latest-button {
   left: auto;
-  right: 14px;
+  right: var(--dock-side);
   bottom: calc(var(--chat-dock-h, 70px) + 10px);
   width: var(--control);
   height: var(--control);
@@ -459,7 +625,7 @@
   padding: 0 5px;
   border-radius: 9px;
   background: var(--accent);
-  color: #ffffff;
+  color: var(--accent-ink, #ffffff);
   font-size: 10px;
   font-weight: 650;
   line-height: 18px;
@@ -468,23 +634,20 @@
 
 /*
  * iOS 26 menus are not faded in: they grow out of the control that opened
- * them, sharpening from a blur with a slight overshoot, and shrink back into
- * it when they close.
+ * them with a slight overshoot, and shrink back into it when they close.
+ * Opacity and transform only; an animated blur is a GPU pass per frame.
  */
 @keyframes glass-menu-in {
   0% {
     opacity: 0;
     transform: scale(0.35);
-    filter: blur(10px);
   }
   50% {
     opacity: 1;
-    filter: blur(0);
   }
   100% {
     opacity: 1;
     transform: none;
-    filter: none;
   }
 }
 
@@ -492,7 +655,6 @@
   to {
     opacity: 0;
     transform: scale(0.5);
-    filter: blur(8px);
   }
 }
 
@@ -522,8 +684,44 @@
 }
 
 .app .nav-island {
-  height: 52px;
-  padding: 5px;
+  height: calc(48px / 1.15);
+  padding: calc(4px / 1.15);
+}
+
+.app .nav-island-indicator {
+  top: calc(4px / 1.15);
+  bottom: calc(4px / 1.15);
+}
+
+/* The search field opens out from under the header, easing the list down,
+   and folds back up before it is removed. */
+.app .roster-search {
+  overflow: hidden;
+  transform-origin: 50% 0;
+  animation: roster-search-in 0.32s var(--ease-out-smooth) both;
+}
+
+.app .roster-search.is-closing {
+  animation: roster-search-out 0.16s cubic-bezier(0.4, 0, 1, 1) forwards;
+  pointer-events: none;
+}
+
+@keyframes roster-search-in {
+  from {
+    height: 0;
+    margin-top: 0;
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+@keyframes roster-search-out {
+  to {
+    height: 0;
+    margin-top: 0;
+    opacity: 0;
+    transform: scale(0.96);
+  }
 }
 
 /* The scrim only needs to lift the tab labels off the list, not hide it. */
@@ -534,7 +732,7 @@
 /* Tab labels in the system font, sentence case, as on iOS. */
 .app .nav-island-item .nav-island-label {
   font-family: var(--font-sans);
-  font-size: var(--type-footnote);
+  font-size: var(--type-subhead);
   font-weight: 500;
   letter-spacing: 0;
   text-transform: none;
@@ -542,22 +740,22 @@
 
 /*
  * Roster rows follow the iOS conversation list: regular-weight names, a quiet
- * preview and time, no dividers, "…" truncation, and a blue dot for unread.
- * Metrics are the reference's (68 pt rows, 40 pt avatars) on the shared scale;
+ * preview and time, no dividers, "…" truncation, and an accent dot for unread.
+ * Metrics are the reference's (72 pt rows, 44 pt avatars) on the shared scale;
  * the !important only outranks the older !important row rules.
  */
 .app .bot-row {
   gap: 12px !important;
   padding: 0 !important;
-  min-height: calc(68px / 1.15) !important;
+  min-height: calc(72px / 1.15) !important;
   border-bottom: 0 !important;
 }
 
 .app .bot-row .bot-avatar-roster,
 .app .bot-row .bot-avatar-session {
-  width: calc(40px / 1.15);
-  height: calc(40px / 1.15);
-  flex: 0 0 calc(40px / 1.15);
+  width: calc(44px / 1.15);
+  height: calc(44px / 1.15);
+  flex: 0 0 calc(44px / 1.15);
 }
 
 .app .bot-copy {
@@ -589,7 +787,7 @@
   width: calc(10px / 1.15);
   height: calc(10px / 1.15);
   border-radius: 50%;
-  background: #0a84ff;
+  background: var(--accent);
   animation: unread-dot-enter 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
@@ -602,6 +800,7 @@
 @media (prefers-reduced-motion: reduce) {
   .app.chat-shell .chat-more-menu,
   .app.chat-shell .composer-plus-menu,
+  .app.chat-shell .plus-pane,
   .app.chat-shell .latest-button,
   .chat-working-dot {
     animation: none !important;

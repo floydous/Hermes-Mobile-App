@@ -64,8 +64,7 @@
   /* Origin stays at the top here too, so the card grows back from the top
      edge after `.sheet-presented` is removed instead of jumping to centre. */
   transform-origin: 50% 0;
-  transition: filter var(--duration-page) var(--ease-page),
-              transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1),
+  transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1),
               border-radius 0.3s cubic-bezier(0.2, 0.8, 0.2, 1),
               background-color 0.35s var(--ease-out-smooth),
               color 0.35s var(--ease-out-smooth);
@@ -73,15 +72,18 @@
 
 /*
  * iOS sheet presentation (Settings): the app behind the sheet recedes into a
- * rounded card just below the status bar, against black, on the sheet's own
- * entrance timing, and grows back as the sheet leaves. `--sheet-progress`
- * (1 = fully presented) is set while the grabber is dragged, so the card
- * follows the finger with transitions off.
+ * rounded card just below the status bar, on the sheet's own entrance
+ * timing, and grows back as the sheet leaves. `--sheet-progress` (1 = fully
+ * presented) is set while the grabber is dragged, so the card follows the
+ * finger with transitions off.
+ *
+ * Behind the card is a deeper shade of the theme's own background, so the
+ * strip above it matches the chosen theme (Black stays black).
  */
 html.sheet-presented,
 html.sheet-presented body,
 html.sheet-presented #root {
-  background-color: #000;
+  background-color: color-mix(in srgb, var(--bg) 80%, #000);
 }
 
 html.sheet-presented .app.roster-shell {
@@ -89,8 +91,7 @@ html.sheet-presented .app.roster-shell {
   border-radius: calc(14px * var(--sheet-progress, 1));
   /* On the black theme the card's edge would vanish into the black around it. */
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--text) 10%, transparent);
-  transition: filter var(--duration-page) var(--ease-page),
-              transform 0.35s cubic-bezier(0.25, 0.1, 0.25, 1),
+  transition: transform 0.35s cubic-bezier(0.25, 0.1, 0.25, 1),
               border-radius 0.35s cubic-bezier(0.25, 0.1, 0.25, 1),
               background-color 0.35s var(--ease-out-smooth),
               color 0.35s var(--ease-out-smooth);
@@ -105,19 +106,36 @@ html.sheet-dragging .app.roster-shell {
  * settings) stays exactly where it is and only dims, then brightens as the
  * pushed page slides away. Nothing underneath is pushed, matching the
  * Settings sheet.
+ *
+ * The dim is a 30% black overlay, the same result as brightness(0.7). A
+ * filter would render the whole covered page as an extra GPU pass on every
+ * frame, which Android's WebView pays even while nothing underneath moves.
  */
-.page-host {
-  transition: filter var(--duration-page) var(--ease-page);
+.app.roster-shell::after,
+.page-host::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  /* Above the roster's tab bar (50); below the pushed pages (60+). */
+  z-index: 55;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--duration-page) var(--ease-page);
 }
 
-.app.roster-shell.is-covered,
-.page-host.is-covered {
-  filter: brightness(0.7);
+.page-host::after {
+  z-index: 1000;
+}
+
+.app.roster-shell.is-covered::after,
+.page-host.is-covered::after {
+  opacity: 0.3;
 }
 
 /*
  * The pushed chat's glass controls materialize as the page lands, growing
- * out of a blur with a slight overshoot, and dissolve as it leaves.
+ * with a slight overshoot, and dissolve as it leaves.
  */
 .page-host .chat-header > *,
 .page-host .composer-row > * {
@@ -133,12 +151,10 @@ html.sheet-dragging .app.roster-shell {
   0% {
     opacity: 0;
     transform: scale(0.8);
-    filter: blur(6px);
   }
   100% {
     opacity: 1;
     transform: none;
-    filter: none;
   }
 }
 
@@ -146,7 +162,6 @@ html.sheet-dragging .app.roster-shell {
   100% {
     opacity: 0;
     transform: scale(0.85);
-    filter: blur(4px);
   }
 }
 
@@ -291,8 +306,8 @@ html.sheet-dragging .app.roster-shell {
     will-change: auto !important;
   }
 
-  .app.roster-shell.is-covered,
-  .page-host.is-covered {
-    filter: none;
+  .app.roster-shell.is-covered::after,
+  .page-host.is-covered::after {
+    opacity: 0;
   }
 }

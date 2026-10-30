@@ -7,11 +7,6 @@ import {
   Copy,
   Cpu,
   Download,
-  File,
-  FileCode,
-  FileSpreadsheet,
-  FileText,
-  Image as ImageIcon,
   Layers,
   Maximize2,
   MessageSquareDot,
@@ -416,6 +411,57 @@ function parseMessageSegments(text: string): MessageSegment[] {
     segments.push({ type: 'text', content: currentText.join('\n') })
   }
   return segments
+}
+
+// The backend's attached-context block describes each file one of two ways:
+// binary files as "📎 @file:`/path/report.pdf` (application/pdf, 398.3 KB)",
+// text files as "📄 @file:/path/notes.json (117 tokens)" followed by the file
+// itself in a code fence, which is measured instead.
+const ATTACHMENT_SIZE_RE = /@file:\s*`?([^`\n]+?)`?\s*\([^,()\n]+,\s*([\d.]+)\s*([KMGT]?B)\)/g
+const INLINED_FILE_RE = /@file:\s*`?([^`\n]+?)`?\s*\(\d[\d,]*\s*tokens?\)\s*\n```[^\n]*\n([\s\S]*?)```/g
+const SIZE_UNITS: Record<string, number> = { B: 1, KB: 1024, MB: 1024 ** 2, GB: 1024 ** 3, TB: 1024 ** 4 }
+
+export const formatFileSize = (size: number) => size < 1024 * 1024 ? `${Math.max(1, Math.round(size / 1024))} KB` : `${(size / (1024 * 1024)).toFixed(1)} MB`
+
+// Sizes of files sent from this device, by path and by name, for messages
+// that don't describe them (the local copy shown right after sending).
+const sentFileSizes = new Map<string, number>()
+export function rememberFileSize(pathOrName: string, bytes: number) {
+  sentFileSizes.set(pathOrName, bytes)
+}
+
+function describedFileSizes(raw: string): Map<string, number> {
+  const sizes = new Map<string, number>()
+  for (const [, path, value, unit] of raw.matchAll(ATTACHMENT_SIZE_RE)) sizes.set(path.trim(), parseFloat(value) * (SIZE_UNITS[unit.toUpperCase()] ?? 1))
+  for (const [, path, body] of raw.matchAll(INLINED_FILE_RE)) {
+    if (!sizes.has(path.trim())) sizes.set(path.trim(), new TextEncoder().encode(body.replace(/\n$/, '')).length)
+  }
+  return sizes
+}
+
+export type MessageFile = { path: string; size?: string }
+
+/**
+ * Pulls file attachments (not images) out of a message so they render as
+ * their own cards beside the bubble, as in iOS. `raw` is the message before
+ * its attached-context block was stripped; file sizes are read from there.
+ */
+export function splitFileAttachments(text: string, raw = text): { text: string; files: MessageFile[] } {
+  const segments = parseMessageSegments(text)
+  if (!segments.some(seg => seg.type !== 'text' && !isImagePath(seg.path))) return { text, files: [] }
+  const sizes = describedFileSizes(raw)
+  const sizeOf = (path: string) => {
+    const bytes = sizes.get(path) ?? sentFileSizes.get(path) ?? sentFileSizes.get(path.split(/[/\\]/).pop() || path)
+    return bytes == null ? undefined : formatFileSize(bytes)
+  }
+  const files: MessageFile[] = []
+  const kept: string[] = []
+  for (const seg of segments) {
+    if (seg.type === 'text') kept.push(seg.content)
+    else if (isImagePath(seg.path)) kept.push(seg.type === 'media' ? `MEDIA:${seg.path}` : `Attached: ${seg.path}`)
+    else if (!files.some(file => file.path === seg.path)) files.push({ path: seg.path, size: sizeOf(seg.path) })
+  }
+  return { text: kept.join('\n').trim(), files }
 }
 
 export async function triggerDownload(src: string, fileName: string) {
@@ -855,20 +901,7 @@ export function ChatImage({
 
   if (failed || (!resolvedSrc && !isRemote)) {
     if (isData) {
-      return (
-        <div className="media-attachment-card media">
-          <div className="media-card-icon-box">
-            <ImageIcon size={18} />
-          </div>
-          <div className="media-card-content">
-            <div className="media-card-filename">{alt || 'Inline Image'}</div>
-            <div className="media-card-sub">
-              <span className="media-card-badge">IMAGE</span>
-              <span className="media-card-path">Could not render inline base64 image</span>
-            </div>
-          </div>
-        </div>
-      )
+      return <FileAttachmentCard rawPath={alt || 'Inline image'} kind="media" detail="Could not display this image" />
     }
     return <FileAttachmentCard rawPath={rawPath || src} kind={kind === 'attachment' ? 'attachment' : 'media'} />
   }
@@ -908,26 +941,33 @@ export function ChatImage({
   )
 }
 
-export function FileAttachmentCard({ rawPath, kind }: { rawPath: string; kind: 'media' | 'attachment' }) {
+const FILE_TYPES: Array<[string, string[]]> = [
+  ['pdf', ['pdf']],
+  ['code', ['js', 'ts', 'tsx', 'jsx', 'py', 'rs', 'go', 'json', 'yaml', 'yml', 'toml', 'html', 'css', 'sh', 'sql', 'c', 'cpp']],
+  ['sheet', ['csv', 'tsv', 'xlsx', 'xls']],
+  ['doc', ['doc', 'docx', 'rtf', 'pages']],
+  ['archive', ['zip', 'tar', 'gz', 'tgz', '7z', 'rar']],
+]
+
+// A file as its own card, as in iOS: a page thumbnail banded by type, the
+// name truncated in the middle so its ending stays readable, then type and size.
+export function FileAttachmentCard({ rawPath, kind, detail }: { rawPath: string; kind: 'media' | 'attachment'; detail?: string }) {
   const cleanPath = rawPath.trim()
   const fileName = cleanPath.split(/[/\\]/).filter(Boolean).pop() || cleanPath
-  const ext = fileName.includes('.') ? fileName.split('.').pop()?.toLowerCase() || '' : ''
-  const isImage = isImagePath(cleanPath)
-  const isCode = ['js', 'ts', 'tsx', 'jsx', 'py', 'rs', 'go', 'json', 'yaml', 'yml', 'toml', 'html', 'css', 'sh', 'sql', 'c', 'cpp'].includes(ext)
-  const isSheet = ['csv', 'tsv', 'xlsx', 'xls'].includes(ext)
-  const isDoc = ['md', 'txt', 'pdf', 'doc', 'docx', 'rtf'].includes(ext)
-
-  const typeLabel = ext ? ext.toUpperCase() : 'FILE'
+  const dot = fileName.lastIndexOf('.')
+  const ext = dot > 0 ? fileName.slice(dot + 1).toLowerCase() : ''
+  const base = dot > 0 ? fileName.slice(0, dot) : fileName
+  const fileType = isImagePath(cleanPath) ? 'image' : FILE_TYPES.find(([, exts]) => exts.includes(ext))?.[0] || 'plain'
+  const tail = base.length > 16 ? base.slice(-8) : ''
+  const meta = [ext ? ext.toUpperCase() : 'File', detail].filter(Boolean).join(' · ')
 
   return (
     <div className={`media-attachment-card ${kind}`} title={fileName} aria-label={`Attached file: ${fileName}`} data-path={cleanPath}>
-      <div className="media-card-icon-box" aria-hidden="true">
-        {isImage ? <ImageIcon size={14} /> : isCode ? <FileCode size={14} /> : isSheet ? <FileSpreadsheet size={14} /> : isDoc ? <FileText size={14} /> : <File size={14} />}
-      </div>
-      <div className="media-card-content">
-        <span className="media-card-filename">{fileName}</span>
-      </div>
-      <span className="media-card-badge">{typeLabel}</span>
+      <span className={`file-thumb ${fileType}`} aria-hidden="true"><i/><i/><i/></span>
+      <span className="media-card-content">
+        <span className="media-card-filename"><span>{tail ? base.slice(0, -8) : base}</span>{tail && <span>{tail}</span>}</span>
+        <span className="media-card-badge">{meta}</span>
+      </span>
     </div>
   )
 }
@@ -1765,11 +1805,18 @@ export const MessageCard = memo(function MessageCard({ message, previousMessage,
   const isTallBubble = Boolean(bubbleRect && bubbleRect.height > 160)
   const squishClass = isPressing ? (isTallBubble ? 'is-squished is-tall-squish' : 'is-squished') : ''
 
+  const { text: bubbleText, files } = splitFileAttachments(cleanContent, textContent)
+  const fileCards = files.length > 0 && (
+    <div className="message-files">
+      {files.map(file => <FileAttachmentCard key={file.path} rawPath={file.path} kind="attachment" detail={file.size}/>)}
+    </div>
+  )
+
   if (message.role === 'user') {
     return (
       <>
         <article className="message-row user-row">
-          <div
+          {bubbleText && <div
             className={`user-bubble ${squishClass}`}
             ref={bubbleRef}
             onPointerDown={handlePointerDown}
@@ -1777,8 +1824,9 @@ export const MessageCard = memo(function MessageCard({ message, previousMessage,
             onPointerUp={handlePointerUp}
             onPointerCancel={handlePointerUp}
           >
-            <MarkdownContent>{cleanContent}</MarkdownContent>
-          </div>
+            <MarkdownContent>{bubbleText}</MarkdownContent>
+          </div>}
+          {fileCards}
         </article>
         {renderActionSheet()}
       </>
@@ -1802,10 +1850,11 @@ export const MessageCard = memo(function MessageCard({ message, previousMessage,
             onPointerUp={handlePointerUp}
             onPointerCancel={handlePointerUp}
           >
-            {cleanContent && <MarkdownContent>{cleanContent}</MarkdownContent>}
+            {bubbleText && <MarkdownContent>{bubbleText}</MarkdownContent>}
             {stats && <div className="response-stats" aria-label="Response generation statistics">{stats}</div>}
           </div>
         </div>
+        {fileCards}
         {timestamp && <time className="message-time">{timestamp}</time>}
       </article>
       {renderActionSheet()}

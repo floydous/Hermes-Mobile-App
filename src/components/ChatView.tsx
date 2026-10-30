@@ -273,7 +273,8 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
   const [editRequest, setEditRequest] = useState<ComposerEditRequest | null>(null)
   const dropFilesRef: ComposerDropFilesRef = useRef<((files: File[]) => void) | null>(null)
   const botProfile = profiles.find(profile => profile.name === (session.profile || 'default'))
-  const botName = botProfile?.display_name || (session.title && session.title !== 'Bot Chat' ? session.title : titleize(session.profile || 'default'))
+  // The header names the bot, as in iOS, not the conversation's title.
+  const botName = botProfile?.display_name || titleize(session.profile || 'default')
 
   const visibleError = error || controlError
   const activeAssistantText = settledAssistant?.content || streaming

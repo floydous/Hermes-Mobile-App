@@ -43,7 +43,7 @@ describe('Settings overlay sheet contract', () => {
     expect(settingsSource).not.toContain('translateX(calc(${navOffset}px - 100%))')
     expect(settingsSource).not.toContain('translateX(${-navOffset}px)')
     expect(settingsSource).toContain("transform: isDragging ? `translateY(${dragY}px)` : 'translateY(0)'")
-    expect(settingsCss).toMatch(/\.settings-page-root\.is-covered\s*\{[^}]*brightness/s)
+    expect(settingsCss).toMatch(/\.settings-page-root\.is-covered::after\s*\{[^}]*opacity: 0\.3/s)
   })
 
   it('opens from the bottom without the app-wide sideways page entrance', () => {

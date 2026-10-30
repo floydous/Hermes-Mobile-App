@@ -30,3 +30,42 @@
   --row: calc(50px / 1.15);              /* single-line list row */
   --row-two-line: calc(62px / 1.15);     /* title + subtitle row */
 }
+
+/*
+ * Android's WebView enlarges long wrapping text (chat paragraphs) but not
+ * single-line rows, so chats read far bigger than the lists. Size comes from
+ * the app's own Text size setting instead.
+ */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* Chat text on the same scale as the lists: a message is the size of a
+   conversation's name in the roster, as in iOS Messages. */
+.app.chat-shell .markdown-body {
+  font-size: var(--type-body);
+  line-height: 1.45;
+}
+
+.app.chat-shell .user-bubble .markdown-body {
+  font-size: var(--type-body);
+  line-height: 1.35;
+}
+
+.app.chat-shell .markdown-body h1 {
+  font-size: var(--type-title2);
+}
+
+.app.chat-shell .markdown-body h2 {
+  font-size: var(--type-title3);
+}
+
+.app.chat-shell .markdown-body h3 {
+  font-size: var(--type-body);
+  font-weight: 600;
+}
+
+.app.chat-shell .markdown-body table {
+  font-size: var(--type-footnote);
+}

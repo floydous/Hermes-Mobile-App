@@ -3,6 +3,7 @@ import {
   ArrowUp,
   BrainCircuit,
   Check,
+  ChevronLeft,
   ChevronRight,
   Cpu,
   FileText,
@@ -21,7 +22,7 @@ import type { ChangeEvent, KeyboardEvent } from 'react'
 
 import { onError as onSttError, onResult as onSttResult, onStateChange as onSttStateChange, isAvailable as sttIsAvailable, requestPermission as requestSttPermission, startListening as startSttListening, stopListening as stopSttListening } from 'tauri-plugin-stt-api'
 import { attachFile, completeSlash, loadModelOptions, setSessionModel, setSessionReasoning, type LiveProfile, type LiveSession, type ModelOptions, type SlashCompletion } from '../hermes'
-import { cacheImageDataUrl, isImagePath, parseFileReference } from './MarkdownContent'
+import { cacheImageDataUrl, formatFileSize, isImagePath, parseFileReference, rememberFileSize } from './MarkdownContent'
 import { BotAvatar } from './BotAvatar'
 import { applySlashCompletion } from '../slash-routing'
 import { isExpectedVoiceCleanupError, VOICE_AUTOSEND_HOLD_MS } from '../voice-input'
@@ -66,7 +67,6 @@ const toDataUrl = (file: File): Promise<string> => new Promise((resolve, reject)
 })
 
 const attachmentId = (file: File) => `${file.name}:${file.size}:${file.lastModified}`
-const formatFileSize = (size: number) => size < 1024 * 1024 ? `${Math.max(1, Math.round(size / 1024))} KB` : `${(size / (1024 * 1024)).toFixed(1)} MB`
 const maxAttachmentBytes = 50 * 1024 * 1024
 const MODEL_OPTIONS_CACHE = new Map<string, ModelOptions>()
 
@@ -76,9 +76,12 @@ export const Composer = memo(function Composer({ session, profiles, sending, dra
   const dockRef = useRef<HTMLElement>(null)
   const [draft, setDraft] = useState('')
   const [plusMenu, setPlusMenu] = useState(false)
-  const { isExiting: plusMenuClosing, requestClose: closePlusMenu } = usePageExit(() => setPlusMenu(false), MENU_CLOSE_MS)
-  const [modelMenu, setModelMenu] = useState(false)
-  const [reasoningMenu, setReasoningMenu] = useState(false)
+  // The + menu is one container whose content switches between the menu and
+  // the Model or Reasoning list, reshaping itself instead of reopening.
+  const [plusView, setPlusView] = useState<'menu' | 'model' | 'reasoning'>('menu')
+  const { isExiting: plusMenuClosing, requestClose: closePlusMenu } = usePageExit(() => { setPlusMenu(false); setPlusView('menu') }, MENU_CLOSE_MS)
+  const plusPaneRef = useRef<HTMLDivElement>(null)
+  const [plusPaneHeight, setPlusPaneHeight] = useState<number>()
   const [modelSearch, setModelSearch] = useState('')
   const [modelOptions, setModelOptions] = useState<ModelOptions>({})
   const [model, setModel] = useState(session.model || '')
@@ -338,6 +341,15 @@ export const Composer = memo(function Composer({ session, profiles, sending, dra
       return
     }
   }
+  useLayoutEffect(() => {
+    const pane = plusPaneRef.current
+    if (!plusMenu || !pane) { setPlusPaneHeight(undefined); return }
+    const measure = () => setPlusPaneHeight(pane.offsetHeight)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(pane)
+    return () => observer.disconnect()
+  }, [plusMenu, plusView])
   const uploadAttachment = async (file: File, id: string) => {
     try {
       if (file.size > maxAttachmentBytes) throw new Error(`Files must be 50 MB or smaller (${file.name} is ${formatFileSize(file.size)}).`)
@@ -349,8 +361,10 @@ export const Composer = memo(function Composer({ session, profiles, sending, dra
       if (isImagePath(uploaded.name) || isImagePath(file.name)) {
         cacheImageDataUrl(uploaded.name, dataUrl)
       }
+      rememberFileSize(uploaded.name, file.size)
       if (uploaded.refText) {
         const refPath = parseFileReference(uploaded.refText)
+        if (refPath) rememberFileSize(refPath, file.size)
         if (refPath && isImagePath(refPath)) {
           cacheImageDataUrl(refPath, dataUrl)
         }
@@ -394,7 +408,7 @@ export const Composer = memo(function Composer({ session, profiles, sending, dra
       setProvider(nextProvider)
       setModel(nextModel)
       onSessionModelChange(nextModel)
-      setModelMenu(false)
+      closePlusMenu()
     } catch (reason) { onControlError(reason instanceof Error ? reason.message : 'Could not change this chat model.') }
   }
 
@@ -403,7 +417,7 @@ export const Composer = memo(function Composer({ session, profiles, sending, dra
     try {
       await setSessionReasoning(session.id, session.profile, effort)
       setReasoning(effort)
-      setReasoningMenu(false)
+      closePlusMenu()
     } catch (reason) { onControlError(reason instanceof Error ? reason.message : 'Could not change reasoning effort.') }
   }
 
@@ -411,22 +425,26 @@ export const Composer = memo(function Composer({ session, profiles, sending, dra
     {slashOpen && (slashItems.length || slashLoading) && <section className="slash-popover" aria-label="Hermes skills and commands" role="listbox"><div className="slash-popover-head"><Sparkles size={14}/><span>{slashLoading ? 'Loading Hermes skills…' : 'Hermes skills & commands'}</span></div>{slashItems.slice(0, 12).map((item, index) => <button className={`${index === slashIndex ? 'selected' : ''} ${item.kind === 'skill' ? 'skill' : 'command'}`} key={`${item.text}:${index}`} type="button" role="option" aria-selected={index === slashIndex} onMouseDown={event => event.preventDefault()} onClick={() => chooseSlash(item)}><span className="slash-item-icon">{item.kind === 'skill' ? <Sparkles size={14}/> : '/'}</span><span><b>{item.display || item.text}</b><small>{item.meta || (item.kind === 'skill' ? 'Installed Hermes skill' : 'Hermes command')}</small></span></button>)}</section>}
     {mentionOpen && <div className="mention-popover">{mentions.map(item => <button key={item.name} onClick={() => setDraft(draft.replace(/@[\w-]*$/, `@${item.name} `))}><BotAvatar profile={item} fallbackName={item.name} variant="mention"/><span><b>{item.display_name || titleize(item.name)}</b><small>@{item.name}</small></span></button>)}</div>}
 
-    {(plusMenu || modelMenu || reasoningMenu) && <button className="popover-scrim" aria-label="Close menu" onClick={() => { if (plusMenu) closePlusMenu(); setModelMenu(false); setReasoningMenu(false) }}/>}
-    {plusMenu && <section className={`composer-plus-menu ${plusMenuClosing ? 'is-closing' : ''}`} role="menu" aria-label="Attach and chat options">
-      <button role="menuitem" disabled={sending} onClick={() => { closePlusMenu(); fileInputRef.current?.click() }}><Paperclip size={16}/><span>Attach files</span></button>
-      <button role="menuitem" onClick={() => { closePlusMenu(); setModelMenu(true) }}><Cpu size={16}/><span>Model</span><small>{model || 'Default model'}</small><ChevronRight size={14}/></button>
-      <button role="menuitem" onClick={() => { closePlusMenu(); setReasoningMenu(true) }}><BrainCircuit size={16}/><span>Reasoning</span><small>{labelReasoning(reasoning)}</small><ChevronRight size={14}/></button>
+    {plusMenu && <button className="popover-scrim" aria-label="Close menu" onClick={closePlusMenu}/>}
+    {plusMenu && <section className={`composer-plus-menu view-${plusView} ${plusMenuClosing ? 'is-closing' : ''}`} style={{ height: plusPaneHeight }} aria-label="Attach and chat options">
+      <div className="plus-pane" key={plusView} ref={plusPaneRef}>
+        {plusView === 'menu' ? <div role="menu">
+          <button role="menuitem" disabled={sending} onClick={() => { closePlusMenu(); fileInputRef.current?.click() }}><Paperclip size={16}/><span>Attach files</span></button>
+          <button role="menuitem" onClick={() => setPlusView('model')}><Cpu size={16}/><span>Model</span><small>{model || 'Default model'}</small><ChevronRight size={14}/></button>
+          <button role="menuitem" onClick={() => setPlusView('reasoning')}><BrainCircuit size={16}/><span>Reasoning</span><small>{labelReasoning(reasoning)}</small><ChevronRight size={14}/></button>
+        </div> : <>
+          <button className="plus-pane-back" onClick={() => setPlusView('menu')}><ChevronLeft size={16}/><span>{plusView === 'model' ? 'Model' : 'Reasoning'}</span></button>
+          {plusView === 'model' ? <>
+            <div className="model-search"><Search size={14}/><input value={modelSearch} onChange={event => setModelSearch(event.target.value)} placeholder="Search models"/></div>
+            <div className="model-list">{filteredModels.length ? filteredModels.map(item => <button className={item.name === model && item.provider === provider ? 'selected' : ''} disabled={!item.authenticated} key={`${item.provider}:${item.name}`} onClick={() => void chooseModel(item.provider, item.name)}><span><b>{item.name}</b><small>{item.providerName}</small></span>{item.name === model && item.provider === provider && <Check size={16}/>}</button>) : <p>No configured models match.</p>}</div>
+          </> : <div className="reasoning-list">{reasoningChoices.map(item => <button className={item === reasoning ? 'selected' : ''} key={item} onClick={() => void chooseReasoning(item)}><span>{labelReasoning(item)}</span>{item === reasoning && <Check size={16}/>}</button>)}</div>}
+        </>}
+      </div>
     </section>}
-    {modelMenu && <section className="model-popover">
-      <div className="model-search"><Search size={14}/><input value={modelSearch} onChange={event => setModelSearch(event.target.value)} placeholder="Search models"/></div>
-      <small className="popover-label">Available models</small>
-      <div className="model-list">{filteredModels.length ? filteredModels.map(item => <button className={item.name === model && item.provider === provider ? 'selected' : ''} disabled={!item.authenticated} key={`${item.provider}:${item.name}`} onClick={() => void chooseModel(item.provider, item.name)}><span><b>{item.name}</b><small>{item.providerName}</small></span>{item.name === model && item.provider === provider && <span>✓</span>}</button>) : <p>No configured models match.</p>}</div>
-    </section>}
-    {reasoningMenu && <section className="reasoning-popover"><small className="popover-label">Reasoning effort</small>{reasoningChoices.map(item => <button className={item === reasoning ? 'selected' : ''} key={item} onClick={() => void chooseReasoning(item)}><span>{labelReasoning(item)}</span>{item === reasoning && <span>✓</span>}</button>)}</section>}
 
     <footer className="chat-dock" ref={dockRef}>
       {voiceState !== 'idle' ? <div className={`recording-composer ${voiceAutoSend ? 'voice-autosend' : ''}`}><button onClick={() => void finishVoice(true)} aria-label="Cancel voice input"><X size={18}/></button>{voiceAutoSend && <small className="voice-autosend-label">Auto-send</small>}<span><i/>0:{String(recordSeconds).padStart(2, '0')}</span><div className="voice-bars">{voiceState === 'processing' ? 'Transcribing your voice…' : voiceInterim || (voiceAutoSend ? 'Release to send' : 'Listening…')}</div><button className="composer-send" onClick={() => void finishVoice()} aria-label="Finish voice input"><ArrowUp size={16}/></button></div> : <div className="composer-row">
-        <button className={`composer-plus ${plusMenu ? 'open' : ''}`} onClick={() => { if (plusMenu) closePlusMenu(); else setPlusMenu(true); setModelMenu(false); setReasoningMenu(false) }} aria-label="Attach files, model and reasoning" aria-haspopup="menu" aria-expanded={plusMenu}><Plus size={18}/></button>
+        <button className={`composer-plus ${plusMenu ? 'open' : ''}`} onClick={() => { if (plusMenu) closePlusMenu(); else setPlusMenu(true) }} aria-label="Attach files, model and reasoning" aria-haspopup="menu" aria-expanded={plusMenu}><Plus size={18}/></button>
         <input ref={fileInputRef} className="attachment-input" type="file" multiple onChange={onFileInput} aria-label="Choose files to attach"/>
         <div className={`ai-composer ${draggingFiles ? 'file-drop-active' : ''}`}>
         {draggingFiles && <div className="file-drop-hint"><Paperclip size={15}/><span>Drop files to send to Hermes</span></div>}

@@ -1915,23 +1915,6 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
    iOS-Inspired Task Detail Page (Modern, Clean, Inset-Grouped)
    ========================================================================== */
 
-/* Automatically hide bottom navigation island and scrim when viewing task details */
-.roster-shell:has(.task-detail) .nav-island,
-.roster-shell:has(.task-detail) .nav-bottom-scrim {
-  display: none !important;
-}
-
-/* KEEP the top pinned roster header (settings, search, host node) visible when viewing task details */
-.roster-shell:has(.task-detail) .roster-pinned {
-  display: block !important;
-  z-index: 60;
-}
-
-.roster-shell:has(.task-detail) {
-  padding-left: 0 !important;
-  padding-right: 0 !important;
-}
-
 .app.task-detail {
   position: relative;
   width: 100%;
@@ -2152,128 +2135,115 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,#root::-webkit-scrollbar{display
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* Media & File Attachment Card UI - Ultra-slim, harmonious inline pill */
+/*
+ * File attachments, as in iOS: each file is its own card beside the message
+ * (not a chip inside the bubble), with a page thumbnail banded by file type,
+ * the name truncated in the middle, and the type and size underneath.
+ */
+.message-files {
+  display: grid;
+  justify-items: start;
+  gap: calc(8px / 1.15);
+  max-width: 100%;
+  margin-top: calc(6px / 1.15);
+}
+
+.user-row .message-files {
+  justify-items: end;
+}
+
 .media-attachment-card {
+  width: fit-content;
+  max-width: 100%;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 5px 9px;
-  margin: 4px 0;
-  border-radius: 9px;
-  background: color-mix(in srgb, var(--panel) 88%, var(--surface));
+  gap: calc(14px / 1.15);
+  padding: calc(12px / 1.15) calc(18px / 1.15) calc(12px / 1.15) calc(14px / 1.15);
   border: 1px solid var(--border);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-  max-width: 100%;
+  border-radius: calc(20px / 1.15);
+  background: color-mix(in srgb, var(--text) 9%, var(--bg));
   box-sizing: border-box;
 }
 
-.media-card-icon-box {
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  background: color-mix(in srgb, var(--surface) 85%, transparent);
-  border: 1px solid var(--border);
-  color: var(--accent);
-}
-
-.media-card-content {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-}
-
-.media-card-filename {
-  font-size: 12.5px;
-  font-weight: 540;
-  color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  letter-spacing: -0.01em;
-}
-
-.media-card-badge {
-  font-size: 8.5px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  padding: 1.5px 5px;
-  border-radius: 4px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  color: var(--muted);
-  flex-shrink: 0;
-  line-height: 1.1;
-  text-transform: uppercase;
-}
-
-.user-bubble .media-attachment-card {
-  background: rgba(255, 255, 255, 0.09);
-  border-color: rgba(255, 255, 255, 0.15);
-  box-shadow: none;
-}
-
-.user-bubble .media-card-icon-box {
-  background: rgba(255, 255, 255, 0.14);
-  border-color: rgba(255, 255, 255, 0.2);
-  color: #ffffff;
-}
-
-.user-bubble .media-card-filename {
-  color: #ffffff;
-}
-
-.user-bubble .media-card-badge {
-  background: rgba(255, 255, 255, 0.16);
-  border-color: rgba(255, 255, 255, 0.22);
-  color: #ffffff;
+.markdown-body .media-attachment-card {
+  margin: 6px 0;
 }
 
 [data-theme='light'] .media-attachment-card {
-  background: #f4f4f5;
-  border-color: #e4e4e7;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
-}
-
-[data-theme='light'] .media-card-icon-box {
   background: #ffffff;
-  border-color: #e4e4e7;
-  color: #18181b;
 }
 
-[data-theme='light'] .media-card-filename {
-  color: #09090b;
+.file-thumb {
+  --band: transparent;
+  position: relative;
+  flex: none;
+  width: calc(28px / 1.15);
+  height: calc(36px / 1.15);
+  overflow: hidden;
+  border: 1.5px solid color-mix(in srgb, var(--text) 45%, transparent);
+  border-radius: 4px;
+  color: color-mix(in srgb, var(--text) 45%, transparent);
 }
 
-[data-theme='light'] .media-card-badge {
-  background: #e4e4e7;
-  border-color: #d4d4d8;
-  color: #52525b;
+.file-thumb i {
+  position: absolute;
+  left: 22%;
+  right: 22%;
+  height: 1.5px;
+  border-radius: 1px;
+  background: currentColor;
 }
 
-[data-theme='light'] .user-bubble .media-attachment-card {
-  background: rgba(0, 0, 0, 0.05);
-  border-color: rgba(0, 0, 0, 0.09);
+.file-thumb i:nth-child(1) { top: 20%; }
+.file-thumb i:nth-child(2) { top: 34%; }
+.file-thumb i:nth-child(3) { top: 48%; right: 40%; }
+
+.file-thumb::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 28%;
+  background: var(--band);
 }
 
-[data-theme='light'] .user-bubble .media-card-icon-box {
-  background: #ffffff;
-  border-color: rgba(0, 0, 0, 0.1);
-  color: #09090b;
+.file-thumb.pdf { --band: #ff453a; }
+.file-thumb.code { --band: #0a84ff; }
+.file-thumb.sheet { --band: #30d158; }
+.file-thumb.doc { --band: #3478f6; }
+.file-thumb.archive { --band: #ff9f0a; }
+.file-thumb.image { --band: #bf5af2; }
+
+.media-card-content {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
 }
 
-[data-theme='light'] .user-bubble .media-card-filename {
-  color: #09090b;
+/* The start shrinks with an ellipsis; the last few characters stay put. */
+.media-card-filename {
+  min-width: 0;
+  display: flex;
+  color: var(--text);
+  font-size: var(--type-body);
+  font-weight: 500;
+  white-space: nowrap;
 }
 
-[data-theme='light'] .user-bubble .media-card-badge {
-  background: rgba(0, 0, 0, 0.08);
-  border-color: rgba(0, 0, 0, 0.12);
-  color: #27272a;
+.media-card-filename > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.media-card-filename > span + span {
+  flex: none;
+}
+
+.media-card-badge {
+  color: var(--muted);
+  font-size: var(--type-subhead);
 }
 
 /* ==========================================================================

@@ -22,8 +22,10 @@ describe('Bottom navigation fade scrim', () => {
     expect(css).toContain('color-mix(in srgb, var(--bg, #010102)')
   })
 
-  it('hides the scrim when task details are open', () => {
-    expect(css).toMatch(/\.roster-shell:has\(\.task-detail\)\s+\.nav-bottom-scrim[^{]*\{[^}]*display:\s*none\s*!important/s)
+  it('leaves the roster alone under task details', () => {
+    // Task Details is an overlay above the tab bar now; rules keyed on it
+    // reshaped the roster underneath while the page slid in.
+    expect(css).not.toMatch(/\.roster-shell:has\(\.task-detail\)/)
   })
 
   it('disables scrim animation when prefers-reduced-motion is active', () => {

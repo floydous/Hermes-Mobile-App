@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
+  AlertTriangle,
   CalendarClock,
   ChevronLeft,
   Copy,
   MoreHorizontal,
+  Pause,
   RefreshCw,
   Trash2,
   Zap,
@@ -371,28 +373,29 @@ export function TasksView({
     catch { /* Keep the list payload visible; the full prompt remains available when the gateway supports the detail route. */ }
   }
   const deleteAlert = deleteCandidate && <DeleteTaskModal job={deleteCandidate} deleting={busy === `${deleteCandidate.job_id}:remove`} onCancel={() => setDeleteCandidate(null)} onConfirm={() => void remove(deleteCandidate)}/>
-  if (selected) {
-    return active ? (
+  // Pushed pages stack over the list, which stays mounted underneath. Returning
+  // them instead unmounted the list, so going back slid away onto an empty
+  // screen while the list was rebuilt.
+  return (
+    <>
+    {active && selected && (
       <PageHost state={detailExiting ? PAGE_EXIT_STATE : undefined} zIndex={70}>
         <TaskDetail job={selected} busy={busy} back={closeDetail} onRefresh={() => refresh(true, true)} onToggle={toggle} onTrigger={trigger} onDelete={() => setDeleteCandidate(selected)} baseUrl={effectiveBaseUrl}/>
         {deleteAlert}
       </PageHost>
-    ) : null
-  }
-  if (isCreateOpen) {
-    return active ? (
+    )}
+    {active && !selected && isCreateOpen && (
       <PageHost state={createExiting ? PAGE_EXIT_STATE : undefined} zIndex={70}>
         <NewTaskSheet profiles={profiles} baseUrl={effectiveBaseUrl} onClose={closeCreate} onCreated={() => refresh(true, true)}/>
       </PageHost>
-    ) : null
-  }
-  return (
+    )}
     <div
       className="tasks-sheet tasks-scroll"
       style={{ display: active ? undefined : 'none', ...style }}
       ref={scrollRef as any}
     >
       <h1 className="tasks-large-title">Tasks</h1>
+      {filteredJobs.length > 0 && <p className="tasks-summary">{taskSummary(filteredJobs)}</p>}
       {error && <p className="tasks-note error">{error}</p>}
       {!filteredJobs.length && loading ? (
         <section className="tasks-group" aria-label="Loading tasks">
@@ -416,8 +419,9 @@ export function TasksView({
           <TaskGroup label={attention.some(job => stateOf(job) === 'error') ? 'Needs Attention' : 'Paused'} jobs={attention} busy={busy} onOpen={openTask} onToggle={toggle}/>
         </>
       )}
-      {deleteAlert}
+      {!selected && deleteAlert}
     </div>
+    </>
   )
 }
 
@@ -426,6 +430,25 @@ type RowActions = { busy: string; onOpen: (job: CronJob) => void; onToggle: (job
 function TaskGroup({ label, jobs, ...actions }: { label: string; jobs: CronJob[] } & RowActions) {
   if (!jobs.length) return null
   return <section className="tasks-group"><h2 className="tasks-group-header">{label}</h2><div className="tasks-group-body">{jobs.map(job => <TaskRow job={job} key={job.job_id} {...actions}/>)}</div></section>
+}
+
+const runTime = (value?: number | string) => value ? new Date(typeof value === 'number' ? value * 1000 : value).valueOf() : NaN
+
+/** "2 tasks · Next run Today, 6:03 PM" */
+function taskSummary(jobs: CronJob[]): string {
+  const count = `${jobs.length} ${jobs.length === 1 ? 'task' : 'tasks'}`
+  const next = jobs
+    .filter(job => stateOf(job) === 'scheduled' && Number.isFinite(runTime(job.next_run_at)))
+    .sort((a, b) => runTime(a.next_run_at) - runTime(b.next_run_at))[0]
+  return next ? `${count} · Next run ${runLabel(next.next_run_at)}` : count
+}
+
+const STATE_ICONS = { scheduled: CalendarClock, running: Zap, paused: Pause, error: AlertTriangle }
+
+// An iOS Settings-style icon tile, colored by the task's state.
+function TaskIcon({ state, large = false }: { state: ReturnType<typeof stateOf>; large?: boolean }) {
+  const Icon = STATE_ICONS[state]
+  return <span className={`task-icon ${state}${large ? ' large' : ''}`} aria-hidden="true"><Icon size={large ? 28 : 16} strokeWidth={2.2}/></span>
 }
 
 // Laid out like a Clock › Alarms row: what and when on the left, on/off on the right.
@@ -439,8 +462,11 @@ function TaskRow({ job, busy, onOpen, onToggle }: { job: CronJob } & RowActions)
         : `${cadence} · ${runLabel(job.next_run_at)}`
   return <div className={`task-row ${state}`}>
     <button className="task-row-open" onClick={() => onOpen(job)} aria-label={`Open ${title}`}>
-      <span className="task-row-title">{title}</span>
-      <span className="task-row-detail">{state === 'running' && <i className="task-row-live" aria-hidden="true"/>}{detail}</span>
+      <TaskIcon state={state}/>
+      <span className="task-row-text">
+        <span className="task-row-title">{title}</span>
+        <span className="task-row-detail">{state === 'running' && <i className="task-row-live" aria-hidden="true"/>}{detail}</span>
+      </span>
     </button>
     <TaskSwitch job={job} busy={busy} onToggle={onToggle}/>
   </div>
@@ -577,6 +603,7 @@ function TaskDetail({
       </header>
 
       <section className="task-detail-hero">
+        <TaskIcon state={state} large/>
         <h1>{jobTitle(job)}</h1>
         <p><span className={`task-state ${state}`}>{statusWord}</span>{job.profile && <> · {job.profile}</>}</p>
       </section>

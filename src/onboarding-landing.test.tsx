@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { renderToString } from 'react-dom/server'
-import { normalizeTheme, DEV_FORCE_LANDING_PAGE } from './App'
+import { DEV_FORCE_LANDING_PAGE } from './App'
+import { normalizeTheme } from './appearance'
 import {
   isLoopbackAddress,
   normalizeGatewayUrl,

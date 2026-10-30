@@ -198,23 +198,229 @@
   margin-top: 2px;
 }
 
-/* --- Theme rows --------------------------------------------------------- */
+/* --- Appearance page ----------------------------------------------------- */
 
-.settings-theme-cell {
+.appearance-title {
+  margin: 10px 4px 18px;
+  color: var(--text);
+  font-size: var(--type-large-title);
+  font-weight: 700;
+  letter-spacing: -0.6px;
+  line-height: 1.1;
+}
+
+/* A live sample of a chat in the chosen theme, accent and layout. */
+.appearance-sample {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: calc(22px / 1.15);
+  background: var(--panel);
+}
+.appearance-sample p {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--type-body);
+  line-height: 1.35;
+}
+.appearance-sample-bot {
+  display: flex;
   align-items: center;
+  gap: 10px;
+}
+.appearance-sample-avatar {
+  flex: none;
+  width: calc(32px / 1.15);
+  height: calc(32px / 1.15);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 38% 45%, rgba(0, 0, 0, 0.7) 0 6%, transparent 7%),
+    radial-gradient(circle at 62% 45%, rgba(0, 0, 0, 0.7) 0 6%, transparent 7%),
+    var(--accent);
+}
+.appearance-sample.is-bubbles .appearance-sample-bot p {
+  padding: 9px 13px;
+  border: 1px solid var(--border);
+  border-radius: 18px 18px 18px 5px;
+  background: var(--bg);
+}
+.appearance-sample + .settings-group {
+  margin-top: 28px;
+}
+.appearance-sample-user {
+  justify-self: end;
+  padding: 9px 14px;
+  border-radius: 18px 18px 5px 18px;
+  background: color-mix(in srgb, var(--text) 10%, var(--panel));
+}
+
+.appearance-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
 }
-.settings-theme-cell .theme-swatch {
-  flex: none;
-  width: 28px;
-  height: 28px;
-  border-radius: 7px;
+.appearance-tile-option {
+  display: grid;
+  justify-items: center;
+  gap: 9px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: var(--type-subhead);
+  -webkit-tap-highlight-color: transparent;
 }
-.settings-theme-cell .theme-swatch.theme-light {
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.22);
+.appearance-tile-option.is-selected {
+  color: var(--text);
+  font-weight: 600;
 }
-.settings-theme-cell.is-selected {
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
+.appearance-tile-option:active .appearance-tile {
+  transform: scale(0.97);
+}
+.appearance-tile-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* A miniature screen: a title bar, a reply and a sent message. */
+.appearance-tile {
+  --tile-bg: #ffffff;
+  --tile-ink: #e5e5ea;
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 1.3;
+  overflow: hidden;
+  border-radius: calc(16px / 1.15);
+  background: var(--tile-bg);
+  box-shadow: inset 0 0 0 1px var(--border);
+  transition: transform 0.15s ease;
+}
+.appearance-tile-option.is-selected .appearance-tile {
+  outline: 2.5px solid var(--text);
+  outline-offset: 3px;
+}
+.appearance-tile i {
+  position: absolute;
+  display: block;
+  border-radius: 999px;
+  background: var(--tile-ink);
+}
+.appearance-tile i:nth-child(1) {
+  top: 15%;
+  left: 10%;
+  width: 36%;
+  height: 7%;
+}
+.appearance-tile i:nth-child(2) {
+  top: 34%;
+  left: 10%;
+  width: 56%;
+  height: 18%;
+}
+.appearance-tile i:nth-child(3) {
+  top: 62%;
+  right: 10%;
+  width: 40%;
+  height: 18%;
+}
+.appearance-tile.tile-dark.tone-charcoal { --tile-bg: #202124; --tile-ink: #3a3b40; }
+.appearance-tile.tile-dark.tone-graphite { --tile-bg: #141416; --tile-ink: #2b2b30; }
+.appearance-tile.tile-dark.tone-black { --tile-bg: #000000; --tile-ink: #222225; }
+/* System: the light screen with its right half inverted to dark. */
+.appearance-tile.tile-system::after {
+  content: '';
+  position: absolute;
+  inset: 0 0 0 50%;
+  background: #ffffff;
+  mix-blend-mode: difference;
+  pointer-events: none;
+}
+.appearance-tile-check {
+  position: absolute;
+  z-index: 1;
+  top: 7px;
+  right: 7px;
+  box-sizing: content-box;
+  padding: 3px;
+  border-radius: 50%;
+  background: var(--text);
+  color: var(--bg);
+}
+
+.appearance-accents {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  padding: 16px 4px 12px;
+}
+.appearance-accent {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: var(--type-footnote);
+  -webkit-tap-highlight-color: transparent;
+}
+.appearance-accent.is-selected {
+  color: var(--text);
+  font-weight: 600;
+}
+.appearance-swatch {
+  width: calc(40px / 1.15);
+  height: calc(40px / 1.15);
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: #ffffff;
+  transition: transform 0.15s ease;
+}
+.appearance-accent:active .appearance-swatch {
+  transform: scale(0.92);
+}
+.appearance-accent.is-selected .appearance-swatch {
+  box-shadow: 0 0 0 2.5px var(--panel), 0 0 0 5px var(--text);
+}
+.swatch-iris { background: #8b80ff; }
+.swatch-ocean { background: #3ab4ff; }
+.swatch-mint { background: #34d399; }
+.swatch-sunset { background: #fb923c; }
+.swatch-rose { background: #fb7185; }
+.swatch-mono { background: #d4d4d8; color: #09090b; }
+
+.appearance-segment-body {
+  padding: 8px;
+}
+.appearance-segment {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 3px;
+  border-radius: calc(14px / 1.15);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+.appearance-segment button {
+  min-height: var(--control);
+  border: 0;
+  border-radius: calc(11px / 1.15);
+  background: none;
+  color: var(--muted);
+  font-size: var(--type-body);
+  transition: background 0.2s ease, color 0.2s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.appearance-segment button.is-selected {
+  background: color-mix(in srgb, var(--text) 12%, var(--panel));
+  color: var(--text);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+}
+[data-theme='light'] .appearance-segment button.is-selected {
+  background: #ffffff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
 }
 
 /* --- Hero cell (pairing recommendation) --------------------------------- */
@@ -527,27 +733,6 @@
   color: var(--bg);
 }
 
-.settings-preview {
-  margin-top: 14px;
-  padding: 12px 14px;
-  border-radius: 12px;
-  background: var(--panel);
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.settings-preview-sender {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--accent);
-}
-.settings-preview p {
-  margin: 0;
-  font-size: 14px;
-  line-height: 1.45;
-  color: var(--text);
-}
-
 /* --- Light theme --------------------------------------------------------- */
 
 [data-theme='light'] .settings-group-body {
@@ -579,9 +764,6 @@
 [data-theme='light'] .settings-action {
   background: #ffffff;
   border-color: rgba(0, 0, 0, 0.1);
-}
-[data-theme='light'] .settings-preview {
-  background: #ffffff;
 }
 [data-theme='light'] .settings-switch {
   background: #d4d4d8;
@@ -631,6 +813,11 @@
   background: rgba(0, 0, 0, 0.62);
   animation: settings-backdrop-in 0.35s ease forwards;
   will-change: opacity;
+}
+
+/* Light dims the card behind less, so it still reads as the light theme. */
+[data-theme='light'] .settings-modal-backdrop {
+  background: rgba(0, 0, 0, 0.3);
 }
 
 .settings-modal-overlay.is-closing .settings-modal-backdrop {
@@ -782,8 +969,20 @@
   z-index: 2;
   box-shadow: -8px 0 24px rgba(0, 0, 0, 0.28);
 }
-.settings-page-root.is-covered {
-  filter: brightness(0.7);
+/* A 30% black overlay, the same as brightness(0.7) without a filter's
+   per-frame GPU pass. */
+.settings-page-root::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 300ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.settings-page-root.is-covered::after {
+  opacity: 0.3;
 }
 
 /* The app-wide page entrance slides every `.app` in from the right. Inside
@@ -827,8 +1026,7 @@
 
 /* The transition is armed only after the start position is committed. */
 .settings-page.is-transitioning {
-  transition: transform 300ms cubic-bezier(0.16, 1, 0.3, 1),
-              filter 300ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 300ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @media (prefers-reduced-motion: reduce) {

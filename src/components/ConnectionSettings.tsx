@@ -1,11 +1,12 @@
 import { invoke } from '@tauri-apps/api/core'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, CheckCircle2, ChevronLeft, ChevronRight, Copy, ExternalLink, GitBranch, Globe2, Heart, LoaderCircle, LockKeyhole, RefreshCw, ShieldCheck, Smartphone, Wifi, Trash2, Send } from 'lucide-react'
+import { Check, CheckCircle2, ChevronLeft, ChevronRight, Copy, ExternalLink, GitBranch, Globe2, Heart, LoaderCircle, LockKeyhole, Monitor, Moon, RefreshCw, ShieldCheck, Smartphone, Sun, Wifi, Trash2, Send } from 'lucide-react'
 
 import HermesAgentAppIcon from '../assets/hermes-agent-app-icon.png'
 import { errorMessage, supportsBasicAuth } from '../connection-state'
 import { useEdgeSwipeBack } from '../edge-swipe'
+import type { Accent, Appearance, ChatLayout, DarkVariant, ThemeMode } from '../appearance'
 import { nativeSignIn, passwordSignIn, probeHermesGateway } from '../hermes'
 import {
   clearPerformanceBuffer,
@@ -52,7 +53,6 @@ function useScrolledPastTop(): { scrolled: boolean; ref: (el: HTMLDivElement | n
   return { scrolled, ref }
 }
 
-type Theme = 'dark' | 'light' | 'grey'
 type Page = 'root' | 'pairing' | 'about' | 'appearance' | 'diagnostics'
 
 type Props = {
@@ -60,8 +60,8 @@ type Props = {
   sessions: number
   connected: boolean
   endpoint?: string
-  theme: Theme
-  setTheme: (theme: Theme) => void
+  appearance: Appearance
+  setAppearance: (update: (current: Appearance) => Appearance) => void
   uiScale?: number
   setUiScale?: (scale: number) => void
   close: () => void
@@ -70,10 +70,30 @@ type Props = {
   onPaired: (endpoint: string) => Promise<void>
 }
 
-const themes: Array<{ id: Theme; label: string; description: string }> = [
-  { id: 'light', label: 'White', description: 'Clean white canvas & daylight contrast' },
-  { id: 'grey', label: 'Grey', description: 'Refined charcoal & graphite monochrome' },
-  { id: 'dark', label: 'Black / OLED Dark', description: 'Deep obsidian & OLED true black' },
+const themeModes: Array<{ id: ThemeMode; label: string; Icon: typeof Sun }> = [
+  { id: 'system', label: 'System', Icon: Monitor },
+  { id: 'light', label: 'Light', Icon: Sun },
+  { id: 'dark', label: 'Dark', Icon: Moon },
+]
+
+const darkVariants: Array<{ id: DarkVariant; label: string; note: string }> = [
+  { id: 'charcoal', label: 'Charcoal', note: 'Charcoal is a soft grey that is easy on the eyes.' },
+  { id: 'graphite', label: 'Graphite', note: 'Graphite is a deeper grey with more contrast.' },
+  { id: 'black', label: 'Black', note: 'Black saves battery on OLED screens.' },
+]
+
+const accents: Array<{ id: Accent; label: string }> = [
+  { id: 'iris', label: 'Iris' },
+  { id: 'ocean', label: 'Ocean' },
+  { id: 'mint', label: 'Mint' },
+  { id: 'sunset', label: 'Sunset' },
+  { id: 'rose', label: 'Rose' },
+  { id: 'mono', label: 'Mono' },
+]
+
+const chatLayouts: Array<{ id: ChatLayout; label: string }> = [
+  { id: 'bubbles', label: 'Bubbles' },
+  { id: 'compact', label: 'Compact' },
 ]
 
 const external = (href: string) => ({ href, onClick: (event: React.MouseEvent<HTMLAnchorElement>) => { event.preventDefault(); void invoke('open_external_url', { url: href }).catch(() => window.open(href, '_blank', 'noopener,noreferrer')) } })
@@ -291,54 +311,94 @@ function PairingSettings({ back, onPaired, onPairingBusy, initialEndpoint }: { b
 
 function AppearanceSettings({
   back,
-  theme,
-  setTheme,
+  appearance,
+  setAppearance,
   uiScale,
   setUiScale,
 }: {
   back: () => void
-  theme: Theme
-  setTheme: (theme: Theme) => void
+  appearance: Appearance
+  setAppearance: (update: (current: Appearance) => Appearance) => void
   uiScale: number
   setUiScale: (scale: number) => void
 }) {
   const shellRef = useRef<HTMLElement>(null)
   useEdgeSwipeBack(shellRef, back)
+  const set = <K extends keyof Appearance>(key: K, value: Appearance[K]) => setAppearance(current => ({ ...current, [key]: value }))
 
   const scalePercent = Math.round(uiScale * 100)
   const isDefault = Math.abs(uiScale - 1.15) < 0.02
 
   return (
     <main ref={shellRef} className="app panel appearance-screen">
-      <Header title="Appearance" subtitle="Theme & Text Size" back={back}/>
+      <Header title="Appearance" subtitle="" back={back} compact/>
+      <h1 className="appearance-title">Appearance</h1>
+
+      <div className={`appearance-sample is-${appearance.chatLayout}`} aria-hidden="true">
+        <div className="appearance-sample-bot">
+          <span className="appearance-sample-avatar"/>
+          <p>Want a weekly disk check?</p>
+        </div>
+        <p className="appearance-sample-user">Yes, every Monday</p>
+      </div>
 
       <section className="settings-group">
         <p className="settings-group-header">Theme</p>
-        <div className="settings-group-body">
-          {themes.map(item => {
-            const isSelected = item.id === theme
-            return (
-              <button
-                key={item.id}
-                type="button"
-                className={`settings-cell settings-theme-cell ${isSelected ? 'is-selected' : ''}`}
-                onClick={() => setTheme(item.id)}
-              >
-                <span className={`theme-swatch theme-${item.id}`}/>
-                <span className="settings-cell-stack">
-                  <span className="settings-cell-label">{item.label}</span>
-                  <span className="settings-cell-detail">{item.description}</span>
-                </span>
-                {isSelected && <Check size={19} className="settings-check" aria-hidden="true"/>}
-              </button>
-            )
-          })}
+        <div className="appearance-tiles" role="radiogroup" aria-label="Theme">
+          {themeModes.map(({ id, label, Icon }) => (
+            <button key={id} type="button" role="radio" aria-checked={appearance.mode === id} className={`appearance-tile-option ${appearance.mode === id ? 'is-selected' : ''}`} onClick={() => set('mode', id)}>
+              <span className={`appearance-tile tile-${id} tone-${appearance.dark}`}>
+                <i/><i/><i/>
+                {appearance.mode === id && <Check className="appearance-tile-check" size={14} strokeWidth={3}/>}
+              </span>
+              <span className="appearance-tile-label"><Icon size={16}/>{label}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="settings-group">
+        <p className="settings-group-header">Dark mode</p>
+        <div className="appearance-tiles" role="radiogroup" aria-label="Dark mode">
+          {darkVariants.map(({ id, label }) => (
+            <button key={id} type="button" role="radio" aria-checked={appearance.dark === id} className={`appearance-tile-option ${appearance.dark === id ? 'is-selected' : ''}`} onClick={() => set('dark', id)}>
+              <span className={`appearance-tile tile-dark tone-${id}`}>
+                <i/><i/><i/>
+                {appearance.dark === id && <Check className="appearance-tile-check" size={14} strokeWidth={3}/>}
+              </span>
+              <span className="appearance-tile-label">{label}</span>
+            </button>
+          ))}
+        </div>
+        <p className="settings-group-footnote">{darkVariants.find(item => item.id === appearance.dark)?.note}</p>
+      </section>
+
+      <section className="settings-group">
+        <p className="settings-group-header">Accent</p>
+        <div className="settings-group-body appearance-accents" role="radiogroup" aria-label="Accent color">
+          {accents.map(({ id, label }) => (
+            <button key={id} type="button" role="radio" aria-checked={appearance.accent === id} className={`appearance-accent ${appearance.accent === id ? 'is-selected' : ''}`} onClick={() => set('accent', id)}>
+              <span className={`appearance-swatch swatch-${id}`}>{appearance.accent === id && <Check size={16} strokeWidth={3}/>}</span>
+              <span>{label}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="settings-group">
+        <p className="settings-group-header">Chat layout</p>
+        <div className="settings-group-body appearance-segment-body">
+          <div className="appearance-segment" role="radiogroup" aria-label="Chat layout">
+            {chatLayouts.map(({ id, label }) => (
+              <button key={id} type="button" role="radio" aria-checked={appearance.chatLayout === id} className={appearance.chatLayout === id ? 'is-selected' : ''} onClick={() => set('chatLayout', id)}>{label}</button>
+            ))}
+          </div>
         </div>
       </section>
 
       <section className="settings-group">
         <div className="settings-group-header-row">
-          <p className="settings-group-header">Text &amp; display size</p>
+          <p className="settings-group-header">Text size</p>
           <span className="settings-group-value">{scalePercent}%</span>
         </div>
 
@@ -382,11 +442,6 @@ function AppearanceSettings({
             ? 'Text and interface elements scale together across chats, tabs, and tasks.'
             : 'Text and interface elements scale together. Reset to return to the default size.'}
         </p>
-
-        <div className="settings-preview" aria-hidden="true">
-          <span className="settings-preview-sender">Hermes Agent</span>
-          <p>Text and interface elements scale smoothly across chats, tabs, and tasks.</p>
-        </div>
       </section>
     </main>
   )
@@ -539,7 +594,7 @@ function DiagnosticsSettings({ back }: { back: () => void }) {
   )
 }
 
-export function ConnectionSettings({ profiles, sessions, connected, endpoint, theme, setTheme, uiScale, setUiScale, close, refresh, onPairingBusy, onPaired }: Props) {
+export function ConnectionSettings({ profiles, sessions, connected, endpoint, appearance, setAppearance, uiScale, setUiScale, close, refresh, onPairingBusy, onPaired }: Props) {
   const [page, setPage] = useState<Page>('root')
   const [syncState, setSyncState] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle')
   const [isClosing, setIsClosing] = useState(false)
@@ -1044,8 +1099,8 @@ export function ConnectionSettings({ profiles, sessions, connected, endpoint, th
       return (
         <AppearanceSettings
           back={popPage}
-          theme={theme}
-          setTheme={setTheme}
+          appearance={appearance}
+          setAppearance={setAppearance}
           uiScale={uiScale ?? 1}
           setUiScale={setUiScale ?? (() => {})}
         />

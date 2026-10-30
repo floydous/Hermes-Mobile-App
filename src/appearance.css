@@ -1,0 +1,61 @@
+/*
+ * Appearance settings applied on <html> by src/appearance.ts:
+ * data-tone (dark variant), data-accent and data-chat-layout.
+ * The theme itself is still data-theme, styled in theme.css.
+ */
+
+/* Graphite: a deeper dark grey than Charcoal (the original Grey theme). */
+:root[data-theme='grey'][data-tone='graphite'] {
+  --bg: #141416;
+  --panel: #1c1c1f;
+  --surface: #26262a;
+  --border: rgba(255, 255, 255, 0.1);
+  --glass-fill-strong: rgba(38, 38, 42, 0.97);
+}
+
+:root[data-theme='grey'][data-tone='graphite'] .user-bubble {
+  background: #2c2c31 !important;
+}
+
+:root[data-theme='grey'][data-tone='graphite'] .assistant-bubble {
+  background: #1d1d20;
+}
+
+:root[data-theme='grey'][data-tone='graphite'] .bot-status-pip {
+  border-color: var(--bg);
+}
+
+/* --- Accent colors ------------------------------------------------------ */
+/* Each accent has a lighter value for the dark themes and a deeper one for
+   Light, so it keeps its contrast on both. --accent-ink is text on it. */
+:root {
+  --accent-ink: #ffffff;
+}
+
+:root[data-accent='iris'] { --accent: #8b80ff; }
+:root[data-accent='ocean'] { --accent: #3ab4ff; }
+:root[data-accent='mint'] { --accent: #34d399; }
+:root[data-accent='sunset'] { --accent: #fb923c; }
+:root[data-accent='rose'] { --accent: #fb7185; }
+:root[data-accent='mono'] { --accent: #e4e4e7; --accent-ink: #09090b; }
+
+:root[data-theme='light'][data-accent='iris'] { --accent: #5b4fe0; }
+:root[data-theme='light'][data-accent='ocean'] { --accent: #0a7cff; }
+:root[data-theme='light'][data-accent='mint'] { --accent: #0e9f6e; }
+:root[data-theme='light'][data-accent='sunset'] { --accent: #ea6c0a; }
+:root[data-theme='light'][data-accent='rose'] { --accent: #e5365a; }
+:root[data-theme='light'][data-accent='mono'] { --accent: #09090b; --accent-ink: #ffffff; }
+
+/* --- Compact chat layout ------------------------------------------------ */
+/* Replies read as plain text on the page; your own messages keep their bubble. */
+:root[data-chat-layout='compact'] .app.chat-shell .assistant-bubble {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+:root[data-chat-layout='compact'] .app.chat-shell .thread-content {
+  gap: 10px;
+}

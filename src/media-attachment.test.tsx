@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { renderToString } from 'react-dom/server'
 
-import { MarkdownContent, cacheImageDataUrl, parseFileReference } from './components/MarkdownContent'
+import { FileAttachmentCard, MarkdownContent, cacheImageDataUrl, parseFileReference, rememberFileSize, splitFileAttachments, stripAttachedContextScaffolding } from './components/MarkdownContent'
 
 describe('Media and Attachment parsing in MarkdownContent', () => {
   it('renders MEDIA: file path as an interactive attachment card with filename and badge', () => {
@@ -257,5 +257,35 @@ MEDIA:/home/floydyra/.hermes/cache/scratch/sample_image.png
     expect(html).not.toContain('--- Attached Context ---')
     expect(html).not.toContain('binary file, not inlined as text')
     expect(html).not.toContain('do not tell the user the file type is unsupported')
+  })
+})
+
+describe('splitFileAttachments', () => {
+  it('moves files out of the bubble text and reads their size from the attached context', () => {
+    const raw = 'Look at this\n@file:`/home/u/report.pdf`\n\n--- Attached Context ---\n\n📎 @file:`/home/u/report.pdf` (application/pdf, 49.2 KB) — binary file, not inlined as text.'
+    const { text, files } = splitFileAttachments(stripAttachedContextScaffolding(raw), raw)
+    expect(text).toBe('Look at this')
+    expect(files).toEqual([{ path: '/home/u/report.pdf', size: '49 KB' }])
+  })
+
+  it('measures text files the backend inlined, and files sent from this device', () => {
+    const body = 'x'.repeat(3000)
+    const raw = `@file:/home/u/notes.json\n\nSee\n\n--- Attached Context ---\n\n📄 @file:/home/u/notes.json (117 tokens)\n\`\`\`json\n${body}\n\`\`\``
+    expect(splitFileAttachments(stripAttachedContextScaffolding(raw), raw).files[0].size).toBe('3 KB')
+    rememberFileSize('sent.zip', 5 * 1024 * 1024)
+    expect(splitFileAttachments('Here\nAttached: sent.zip').files[0].size).toBe('5.0 MB')
+  })
+
+  it('keeps images in the bubble and leaves plain text untouched', () => {
+    expect(splitFileAttachments('MEDIA:/tmp/chart.png\nNice').files).toEqual([])
+    expect(splitFileAttachments('Just words').text).toBe('Just words')
+  })
+
+  it('shows the type and size under a middle-truncated name', () => {
+    const html = renderToString(<FileAttachmentCard rawPath="/a/tka-2026-kisi-kisi-semua-mapel.pdf" kind="attachment" detail="49 KB"/>)
+    expect(html).toContain('file-thumb pdf')
+    // The name loses its extension and keeps its last 8 characters whole: tka-2026-kisi-kisi-se…ua-mapel
+    expect(html).toContain('<span>tka-2026-kisi-kisi-sem</span><span>ua-mapel</span>')
+    expect(html).toContain('PDF · 49 KB')
   })
 })

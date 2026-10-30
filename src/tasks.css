@@ -19,17 +19,29 @@
   line-height: 1.1;
 }
 
-.tasks-group {
-  margin: 0 0 24px;
+/* A quiet count and the next run under the title. */
+.tasks-large-title:has(+ .tasks-summary) {
+  margin-bottom: 4px;
 }
 
+.tasks-summary {
+  margin: 0 4px 24px;
+  color: var(--muted);
+  font-size: var(--type-subhead);
+}
+
+.tasks-group {
+  margin: 0 0 26px;
+}
+
+/* Sentence-case section headers, as in the iOS grouped lists. */
 .tasks-group-header {
-  margin: 0 16px 6px;
+  margin: 0 16px 7px;
   color: var(--muted);
   font-size: var(--type-footnote);
   font-weight: 500;
-  letter-spacing: 0.2px;
-  text-transform: uppercase;
+  letter-spacing: 0.01em;
+  text-transform: none;
 }
 
 .tasks-group-header-row {
@@ -53,7 +65,8 @@
 
 .tasks-group-body {
   overflow: hidden;
-  border-radius: calc(26px / 1.15);
+  border: 1px solid var(--border);
+  border-radius: calc(16px / 1.15);
   background: var(--panel);
 }
 
@@ -94,13 +107,58 @@
 .task-row-open {
   min-width: 0;
   flex: 1 1 auto;
-  display: grid;
-  gap: 2px;
-  padding: 9px 0 9px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0 10px 16px;
   border: 0;
   background: none;
   color: inherit;
   text-align: left;
+}
+
+.task-row-text {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+/* Separators start at the text, past the icon, as in iOS Settings. */
+.tasks-group-body > .task-row + .task-row::before {
+  left: calc(16px + 30px / 1.15 + 12px);
+}
+
+/* iOS Settings-style icon tile, colored by state. */
+.task-icon {
+  flex: none;
+  width: calc(30px / 1.15);
+  height: calc(30px / 1.15);
+  display: grid;
+  place-items: center;
+  border-radius: calc(7px / 1.15);
+  background: var(--accent);
+  color: var(--accent-ink, #ffffff);
+}
+
+.task-icon.running {
+  background: #34c759;
+  color: #ffffff;
+}
+
+.task-icon.paused {
+  background: #8e8e93;
+  color: #ffffff;
+}
+
+.task-icon.error {
+  background: #ff453a;
+  color: #ffffff;
+}
+
+.task-icon.large {
+  width: calc(64px / 1.15);
+  height: calc(64px / 1.15);
+  border-radius: calc(15px / 1.15);
 }
 
 .task-row-open:active {
@@ -111,7 +169,7 @@
   overflow: hidden;
   color: var(--text);
   font-size: var(--type-body);
-  font-weight: 600;
+  font-weight: 400;
   letter-spacing: -0.2px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -316,17 +374,25 @@
   animation: glass-menu-in 0.38s cubic-bezier(0.34, 1.25, 0.64, 1);
 }
 
+/* Centered hero: the task's icon, its name and its status. */
 .task-detail-hero {
-  margin: 2px 4px 20px;
+  display: grid;
+  justify-items: center;
+  margin: 0 4px 26px;
+  text-align: center;
+}
+
+.task-detail-hero .task-icon {
+  margin-bottom: 14px;
 }
 
 .task-detail-hero h1 {
   margin: 0 0 4px;
   color: var(--text);
-  font-size: var(--type-title1);
-  font-weight: 700;
-  letter-spacing: -0.5px;
-  line-height: 1.12;
+  font-size: var(--type-title2);
+  font-weight: 600;
+  letter-spacing: -0.3px;
+  line-height: 1.2;
   overflow-wrap: anywhere;
 }
 
@@ -337,7 +403,7 @@
 }
 
 .task-state {
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .task-state.scheduled {
@@ -393,7 +459,7 @@
   justify-content: flex-start;
   gap: 10px;
   color: var(--accent);
-  font-weight: 500;
+  font-weight: 400;
 }
 
 .task-field-action:active:not(:disabled),
@@ -452,8 +518,6 @@
   padding: 10px 18px;
   border-radius: 999px;
   background: var(--glass-fill-strong, var(--panel));
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
   color: var(--text);
   font-size: var(--type-subhead);
@@ -468,8 +532,6 @@
   overflow: hidden;
   border-radius: calc(26px / 1.15);
   background: var(--glass-fill-strong, var(--panel));
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
   text-align: center;
   animation: glass-pop-in 0.2s ease;

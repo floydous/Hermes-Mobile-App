@@ -86,12 +86,17 @@ describe('Page transition contract', () => {
     // going back then shows an empty screen while it is rebuilt from scratch.
     expect(appSource).not.toMatch(/if \(createOpen\) return/)
     expect(appSource).not.toMatch(/if \(selected && profileSheet\) return/)
+    // Same for Tasks: the list stays mounted under Task Details and New Task.
+    expect(tasksView).not.toMatch(/if \(selected\) \{\s*return/)
+    expect(tasksView).not.toMatch(/if \(isCreateOpen\) \{\s*return/)
     expect(appSource).toContain("className={chatCovered ? 'is-covered' : undefined}")
     // The page underneath only dims; it is never pushed sideways.
-    const covered = transitionsCss.match(/\.app\.roster-shell\.is-covered,\s*\.page-host\.is-covered\s*\{[^}]*\}/s)
+    // The dim is an overlay, not a filter: a filter is a full GPU pass per frame on Android.
+    const covered = transitionsCss.match(/\.app\.roster-shell\.is-covered::after,\s*\.page-host\.is-covered::after\s*\{[^}]*\}/s)
     expect(covered).toBeTruthy()
-    expect(covered![0]).toContain('brightness')
+    expect(covered![0]).toContain('opacity: 0.3')
     expect(covered![0]).not.toContain('transform')
+    expect(transitionsCss).not.toMatch(/is-covered\s*\{[^}]*filter/s)
   })
 
   it('keeps the chat bundle off the startup path', () => {
