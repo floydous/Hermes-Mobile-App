@@ -121,6 +121,9 @@ export default defineConfig({
     hmr: host ? { protocol: 'ws', host, port: 1421 } : undefined,
   },
   build: {
+    // Small font subsets were inlined into the CSS as base64 (~112 kB parsed at every
+    // launch, mostly .woff fallbacks a WebView never uses). Ship them as files instead.
+    assetsInlineLimit: filePath => (/\.(woff2?|ttf)$/.test(filePath) ? false : undefined),
     rollupOptions: {
       output: {
         manualChunks(id) {

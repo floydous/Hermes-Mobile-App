@@ -1,0 +1,32 @@
+/*
+ * One type and control scale for the in-app screens: the iOS Dynamic Type
+ * sizes (default "Large" setting, in pt) divided by the app's default 1.15 UI
+ * zoom. At the default Text size they render at exactly the iOS size on a
+ * phone, and they still follow the Text size setting like everything else.
+ * The message action sheet is calibrated on the same basis.
+ *
+ * Use these instead of literal px so every screen shares one rhythm.
+ */
+:root {
+  --type-large-title: calc(34px / 1.15); /* screen titles: Tasks */
+  --type-title1: calc(28px / 1.15);      /* detail page titles */
+  --type-title2: calc(22px / 1.15);      /* empty states, sheet titles */
+  --type-title3: calc(20px / 1.15);
+  --type-body: calc(17px / 1.15);        /* rows, menus, buttons; semibold = headline */
+  --type-callout: calc(16px / 1.15);     /* long-form text inside groups */
+  --type-subhead: calc(15px / 1.15);     /* row subtitles, secondary lines */
+  --type-footnote: calc(13px / 1.15);    /* section headers, notes */
+  --type-caption: calc(12px / 1.15);
+
+  /*
+   * Top inset for the status bar and camera. The app draws edge to edge, and
+   * Android WebViews often report 0 for env(safe-area-inset-top), which put
+   * the top buttons under the camera. The floor is 32dp on screen at any
+   * Text size; a real, larger system inset still wins.
+   */
+  --safe-top: max(env(safe-area-inset-top, 0px), calc(32px / var(--ui-scale, 1)));
+
+  --control: calc(44px / 1.15);          /* iOS minimum touch target: nav buttons */
+  --row: calc(50px / 1.15);              /* single-line list row */
+  --row-two-line: calc(62px / 1.15);     /* title + subtitle row */
+}

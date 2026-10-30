@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, ChevronRight, Cpu, FileText, Info, Pencil, Save, SlidersHorizontal, Wrench, X } from 'lucide-react'
+import { Check, ChevronLeft, ChevronRight, Cpu, FileText, Info, Pencil, Save, SlidersHorizontal, Wrench } from 'lucide-react'
 
 import { loadModelOptions, loadProfileDetails, setProfileDescription, setProfileModel, setProfileSoul, type LiveProfile, type LiveSession, type ModelOptions, type ProfileDetails } from '../hermes'
 import { BotAvatar } from './BotAvatar'
@@ -50,7 +50,7 @@ export function BotProfileSheet({ profile, session, onClose, onUpdated }: Props)
 
   if (managingCapabilities) return <PageHost zIndex={80}><CapabilityManager profile={profile} session={session} onBack={() => setManagingCapabilities(false)} onUpdated={() => { void reload(); onUpdated() }}/></PageHost>
   return <main ref={shellRef} className="app profile-sheet">
-    <header className="profile-sheet-head"><button className="round-control" onClick={onClose} aria-label="Close Bot settings"><X size={18}/></button><b>Bot settings</b><span/></header>
+    <header className="profile-sheet-head"><button className="round-control" onClick={onClose} aria-label="Back"><ChevronLeft size={18}/></button><b>Bot settings</b><span/></header>
     <section className="profile-identity"><BotAvatar profile={profile} fallbackName={session.profile} variant="welcome"/><h1>{botName}</h1><p>@{session.profile}</p></section>
     {error && <p className="profile-error">{error}</p>}
     <section className="profile-section profile-soul"><div className="profile-section-label"><FileText size={14}/> SOUL</div><textarea aria-label={`${botName} SOUL.md`} disabled={!details || savingSoul} value={soulDraft} onChange={event => setSoulDraft(event.target.value)} placeholder="Loading SOUL.md…"/><div className="profile-soul-footer"><p>Your Hermes injects the teammate-messaging protocol automatically.</p>{soulDirty && <button disabled={savingSoul} onClick={() => void saveSoul()}>{savingSoul ? 'Saving…' : <><Save size={14}/> Save SOUL</>}</button>}</div></section>

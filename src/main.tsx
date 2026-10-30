@@ -26,9 +26,12 @@ import './profile-sheet.css'
 import './management.css'
 import './appearance-picker.css'
 import './theme.css'
+import './type.css'
 import './connection-settings.css'
 import './edge-swipe.css'
 import './transitions.css'
+import './glass.css'
+import './tasks.css'
 
 try {
   const savedTheme = localStorage.getItem('hermes-mobile-theme') || 'light'

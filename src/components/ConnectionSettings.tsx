@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, CheckCircle2, ChevronLeft, ChevronRight, Copy, ExternalLink, GitBranch, Globe2, Heart, LoaderCircle, LockKeyhole, RefreshCw, ShieldCheck, Smartphone, Wifi, Trash2, Send } from 'lucide-react'
 
@@ -598,6 +598,33 @@ export function ConnectionSettings({ profiles, sessions, connected, endpoint, th
     }
   }, [])
 
+  /*
+   * iOS sheet presentation: while the sheet is up, the app behind it recedes
+   * into a rounded card (transitions.css, `.sheet-presented`). The class goes
+   * as soon as the sheet starts closing, so the card grows back in step with
+   * the sheet sliding away.
+   */
+  useLayoutEffect(() => {
+    const root = document.documentElement
+    root.classList.toggle('sheet-presented', !isClosing)
+    return () => root.classList.remove('sheet-presented')
+  }, [isClosing])
+
+  // While the grabber is dragged, the card follows: it grows back toward full
+  // size as the sheet is pulled down. Set on the roster itself so the per-frame
+  // change does not restyle the whole document.
+  useLayoutEffect(() => {
+    const root = document.documentElement
+    const roster = document.querySelector<HTMLElement>('.app.roster-shell')
+    if (!isDragging || !roster) return
+    root.classList.add('sheet-dragging')
+    roster.style.setProperty('--sheet-progress', String(Math.max(0, 1 - dragY / Math.max(1, window.innerHeight * 0.9))))
+    return () => {
+      root.classList.remove('sheet-dragging')
+      roster.style.removeProperty('--sheet-progress')
+    }
+  }, [isDragging, dragY])
+
   const handleClose = useCallback(() => {
     if (isClosingRef.current) return
     isClosingRef.current = true
@@ -623,10 +650,9 @@ export function ConnectionSettings({ profiles, sessions, connected, endpoint, th
    * Horizontal page navigation with an iOS-style push / pop transition.
    *
    * Two layers live in the sheet: the root Settings page and the current
-   * sub-page. One number drives both: `navOffset` is the sub-page's
-   * translateX. The root page always sits one sheet-width behind it, so a
-   * push (sub-page from +width to 0) and a pop (sub-page from 0 to +width)
-   * are the same motion seen from opposite ends.
+   * sub-page. `navOffset` is the sub-page's translateX: a push slides it
+   * from +width to 0 over the root, a pop slides it back out. The root
+   * stays put and only dims while it is covered.
    * ------------------------------------------------------------------- */
 
   const prefersReducedMotion = useCallback(() => {
@@ -717,11 +743,14 @@ export function ConnectionSettings({ profiles, sessions, connected, endpoint, th
     appRoot.setAttribute('inert', '')
     appRoot.setAttribute('aria-hidden', 'true')
     const sheet = sheetRef.current
-    sheet?.querySelector<HTMLElement>('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])')?.focus()
+    // preventScroll: the sheet is still below the screen when this runs, and a
+    // plain focus() scrolled its clipped page stack (564px) to reveal the
+    // button, snapping the sheet up long before its rise animation got there.
+    sheet?.querySelector<HTMLElement>('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])')?.focus({ preventScroll: true })
     return () => {
       if (!hadInert) appRoot.removeAttribute('inert')
       appRoot.removeAttribute('aria-hidden')
-      previouslyFocused?.focus?.()
+      previouslyFocused?.focus?.({ preventScroll: true })
     }
   }, [])
 
@@ -1195,9 +1224,8 @@ export function ConnectionSettings({ profiles, sessions, connected, endpoint, th
         onTouchCancel={handleTouchCancel}
       >
         {/*
-          Two stacked pages. The root Settings page sits one sheet-width
-          behind the sub-page; both move together so a push and a pop read as
-          the same slide seen from opposite ends.
+          Two stacked pages. A sub-page slides in from the right on top of the
+          root Settings page, which stays where it is and dims beneath it.
 
           The stack carries the exit animation, so it moves the root AND the
           sub-page. On the wrapper it moved only the root, and the sub-page
@@ -1212,33 +1240,19 @@ export function ConnectionSettings({ profiles, sessions, connected, endpoint, th
         >
           <div className="settings-sheet-anim">
             <div
-              className={`settings-page settings-page-root ${navAnimating && !navDragging ? 'is-transitioning' : ''} ${isDragging ? 'is-dragging' : ''} ${isSettling ? 'is-settling' : ''}`}
+              className={`settings-page settings-page-root ${navAnimating && !navDragging ? 'is-transitioning' : ''} ${isDragging ? 'is-dragging' : ''} ${isSettling ? 'is-settling' : ''} ${page !== 'root' && (navOffset === 0 || navDragging) ? 'is-covered' : ''}`}
               style={{
-                // Two motions on one element: the horizontal push/pop offset and
-                // the vertical drag-to-dismiss. The root page carries both so the
-                // sheet itself never moves or resizes.
-                //
-                // The root TRAILS the sub-page by exactly one page width, it is
-                // not mirrored against it. Mirroring made the two pages
-                // separate instead of moving as a pair, which opened a gap in
-                // the middle of the screen and showed the app behind the
-                // sheet. On a push the root also lurched backwards mid-slide
-                // (-435px -> 0px) as it was reset to its end position.
-                //
-                // `100%` is the root's own width, i.e. the sheet width, so
-                // this needs no layout read during render.
+                // The root never moves sideways: a sub-page slides in OVER it
+                // and the root only dims underneath, then brightens as the
+                // sub-page slides away. It carries only the vertical
+                // drag-to-dismiss, so the sheet itself never moves or resizes.
                 //
                 // The drag offset applies only while dragging. On a dismiss
                 // the exit animation takes over on the page stack, which
                 // carries both the root and the sub-page, and starts from
                 // the drag offset so the sheet keeps sliding down from the
                 // finger instead of jumping up to the top first.
-                transform: [
-                  page === 'root'
-                    ? 'translateX(0)'
-                    : `translateX(calc(${navOffset}px - 100%))`,
-                  isDragging ? `translateY(${dragY}px)` : '',
-                ].filter(Boolean).join(' '),
+                transform: isDragging ? `translateY(${dragY}px)` : 'translateY(0)',
               }}
             >
               <div

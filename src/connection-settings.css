@@ -32,7 +32,7 @@
 }
 .connection-head h2 {
   margin: 0;
-  font-size: 21px;
+  font-size: var(--type-title2);
   font-weight: 700;
   letter-spacing: -0.4px;
   line-height: 1.2;
@@ -79,7 +79,7 @@
 .settings-group-header {
   margin: 0 0 7px 16px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--type-footnote);
   font-weight: 500;
   letter-spacing: 0.01em;
   text-transform: none;
@@ -97,7 +97,7 @@
 .settings-group-value {
   margin-right: 16px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--type-footnote);
   font-variant-numeric: tabular-nums;
 }
 
@@ -115,7 +115,7 @@
   align-items: center;
   gap: 12px;
   width: 100%;
-  min-height: 44px;
+  min-height: var(--control);
   padding: 11px 16px;
   border: 0;
   background: transparent;
@@ -133,7 +133,7 @@
 }
 
 .settings-cell-label {
-  font-size: 17px;
+  font-size: var(--type-body);
   line-height: 1.3;
   letter-spacing: -0.2px;
   flex: 1;
@@ -150,7 +150,7 @@
 }
 .settings-cell-detail {
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--type-subhead);
   line-height: 1.38;
 }
 .settings-cell-detail.is-alert {
@@ -158,7 +158,7 @@
 }
 .settings-cell-value {
   color: var(--muted);
-  font-size: 17px;
+  font-size: var(--type-body);
   line-height: 1.3;
   letter-spacing: -0.2px;
   white-space: nowrap;
@@ -252,19 +252,19 @@
 }
 .settings-field-label {
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--type-footnote);
   font-weight: 500;
 }
 .settings-field input {
   width: 100%;
-  height: 40px;
+  height: calc(44px / 1.15);
   border: 1px solid var(--border);
   border-radius: 9px;
   background: var(--surface);
   color: var(--text);
   outline: 0;
   padding: 0 12px;
-  font-size: 16px;
+  font-size: var(--type-body);
 }
 .settings-field input:focus {
   border-color: var(--accent);
@@ -317,13 +317,13 @@
   justify-content: center;
   gap: 8px;
   width: 100%;
-  min-height: 48px;
+  min-height: calc(50px / 1.15);
   padding: 0 18px;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--panel);
   color: var(--text);
-  font-size: 16px;
+  font-size: var(--type-body);
   font-weight: 600;
   transition: opacity 0.15s ease, background 0.15s ease;
   -webkit-tap-highlight-color: transparent;
@@ -360,14 +360,14 @@
   opacity: 0.65;
 }
 .settings-identity img {
-  width: 62px;
-  height: 62px;
+  width: calc(62px / 1.15);
+  height: calc(62px / 1.15);
   border-radius: 50%;
   background: #fff;
   object-fit: cover;
 }
 .settings-identity-name {
-  font-size: 17px;
+  font-size: var(--type-body);
   font-weight: 600;
   letter-spacing: -0.2px;
 }
@@ -389,7 +389,7 @@
   gap: 6px;
   flex: 1 1 auto;
   min-width: 0;
-  min-height: 44px;
+  min-height: var(--control);
   padding: 0 12px;
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -416,7 +416,7 @@
   align-items: flex-start;
   gap: 7px;
   margin: 12px 16px 0;
-  font-size: 13px;
+  font-size: var(--type-footnote);
   line-height: 1.4;
 }
 .settings-status svg {
@@ -433,7 +433,7 @@
 .settings-group-footnote {
   margin: 8px 16px 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--type-footnote);
   line-height: 1.4;
 }
 .settings-disclosure {
@@ -629,7 +629,7 @@
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.62);
-  animation: settings-backdrop-in 0.24s ease forwards;
+  animation: settings-backdrop-in 0.35s ease forwards;
   will-change: opacity;
 }
 
@@ -683,9 +683,11 @@
  * in 33ms — and spent the remaining 300ms creeping sub-pixel. That is what
  * read as a blink.
  *
- * This curve keeps a real start slope and spreads the travel over most of
- * the duration: the edge moves every frame, 50% of the travel lands at
- * ~130ms, and the peak speed drops from 10.1k px/s to 4.3k px/s.
+ * The next curve, `cubic-bezier(0.32, 0.6, 0.35, 1)` over 0.42s, still
+ * landed half the travel in 105ms and 90% in 240ms, but it only felt like a
+ * snap because a focus() call was scrolling the sheet up ahead of it. With
+ * that fixed, a plain ease over 0.35s lands half at ~105ms and 90% at
+ * ~220ms: brisk, and the edge still moves every frame.
  */
 .settings-sheet-anim {
   position: absolute;
@@ -698,7 +700,7 @@
   height: 100%;
   display: flex;
   flex-direction: column;
-  animation: settings-sheet-up 0.42s cubic-bezier(0.32, 0.6, 0.35, 1) both;
+  animation: settings-sheet-up 0.35s cubic-bezier(0.25, 0.1, 0.25, 1) both;
 }
 
 /*
@@ -770,8 +772,8 @@
 }
 
 /*
- * The root page and the sub-page move as one: the sub-page slides in from
- * the right while the root page slides out to the left behind it.
+ * A sub-page slides in full screen over the root page; the root stays where
+ * it is and dims while it is covered.
  */
 .settings-page-root {
   z-index: 1;
@@ -779,6 +781,16 @@
 .settings-page-sub {
   z-index: 2;
   box-shadow: -8px 0 24px rgba(0, 0, 0, 0.28);
+}
+.settings-page-root.is-covered {
+  filter: brightness(0.7);
+}
+
+/* The app-wide page entrance slides every `.app` in from the right. Inside
+   the sheet that fought the sheet rising from the bottom, and doubled the
+   sub-page's own slide, so pages here do not run it. */
+.settings-modal-sheet .app {
+  animation: none;
 }
 
 /*
@@ -815,7 +827,8 @@
 
 /* The transition is armed only after the start position is committed. */
 .settings-page.is-transitioning {
-  transition: transform 300ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 300ms cubic-bezier(0.16, 1, 0.3, 1),
+              filter 300ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -933,7 +946,7 @@
 }
 
 .connection-screen .connection-endpoint {
-  font-size: 16px;
+  font-size: var(--type-body);
   font-weight: 650;
   letter-spacing: -0.2px;
   line-height: 1.25;
@@ -992,7 +1005,7 @@
   gap: 7px;
   justify-self: start;
   margin-top: 6px;
-  min-height: 44px;
+  min-height: var(--control);
   padding: 0 18px;
   font-size: 14px;
   font-weight: 600;
@@ -1051,7 +1064,7 @@
 .settings-modal-scroll > .appearance-screen,
 .settings-modal-scroll > .pairing-screen,
 .settings-modal-scroll > .about-screen {
-  padding-top: calc(18px + env(safe-area-inset-top, 0px)) !important;
+  padding-top: calc(18px + var(--safe-top)) !important;
 }
 
 @keyframes settings-backdrop-in {

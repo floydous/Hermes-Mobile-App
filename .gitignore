@@ -18,3 +18,8 @@ skills-lock.json
 hermes-caduceus-themes.html
 android-debug*.log
 scripts/__pycache__/
+.claude/
+graphify-out/
+.graphifyignore
+demo.html
+src/demo-entry.tsx

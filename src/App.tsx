@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, startTransition } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, startTransition } from 'react'
 import { Bot, CalendarClock, ListTodo, MessageSquare, Plus, RefreshCw, Search, Settings as SettingsIcon, Users, X } from 'lucide-react'
 
-import { ChatView } from './components/ChatView'
 import { BotAvatar } from './components/BotAvatar'
 import { BotAppearancePicker } from './components/BotAppearancePicker'
 import { BotProfileSheet } from './components/BotProfileSheet'
@@ -100,7 +99,12 @@ import {
 } from './clarify-isolation'
 
 import { classifyInteractiveRowGesture, computeNextSwipeTab, isHorizontalSwipeIntent, type Tab } from './tab-swipe'
-import { PageHost, PAGE_EXIT_STATE, usePageExit } from './page-transition'
+import { FreezeWhileCovered, PageHost, PAGE_EXIT_STATE, usePageExit } from './page-transition'
+
+// The chat pulls in the markdown, KaTeX and highlight.js bundle (~600 kB), which
+// the roster never needs, so it loads after the roster paints instead of at launch.
+const loadChatView = () => import('./components/ChatView')
+const ChatView = lazy(() => loadChatView().then(module => ({ default: module.ChatView })))
 type DraftBot = { role: string; name: string; description: string; soul: string; model: string; provider: string; shape: string }
 type Theme = 'dark' | 'light' | 'grey'
 
@@ -226,6 +230,12 @@ export default function App() {
         switchTabRafRef.current = null
       }
     }
+  }, [])
+
+  // Warm the chat bundle once startup settles so the first chat opens without waiting on it.
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void loadChatView() }, 800)
+    return () => window.clearTimeout(timer)
   }, [])
   const [profiles, setProfiles] = useState<LiveProfile[]>([])
   const profilesRef = useRef<LiveProfile[]>(profiles)
@@ -2408,13 +2418,17 @@ export default function App() {
     )
   }
 
-  if (createOpen) return <PageHost state={wizardExiting ? PAGE_EXIT_STATE : undefined} zIndex={70}><CreateWizard step={createStep} setStep={setCreateStep} draft={botDraft} setDraft={setBotDraft} creating={creating} error={error} close={closeWizard} finish={() => void finishCreate()}/></PageHost>
-  if (selected && profileSheet) return <PageHost state={profileExiting ? PAGE_EXIT_STATE : undefined} zIndex={70}><BotProfileSheet profile={profiles.find(profile => profile.name === selected.profile)} session={selected} onClose={closeProfile} onUpdated={() => void refresh()}/></PageHost>
+  // Pushed pages stack on top of the page they came from, which stays mounted
+  // underneath (drifting left, dimmed) so going back reveals it instead of
+  // re-creating it.
+  const rosterCovered = (Boolean(selected) && !chatExiting) || (createOpen && !wizardExiting)
+  const chatCovered = profileSheet && !profileExiting
 
   return (
     <>
+      <FreezeWhileCovered covered={rosterCovered}>
       <main
-        className={`app roster-shell tab-slide-${slideDirection}`}
+        className={`app roster-shell tab-slide-${slideDirection}${rosterCovered ? ' is-covered' : ''}`}
         onTouchStart={selected ? undefined : handleRosterTouchStart}
         onTouchMove={selected ? undefined : handleRosterTouchMove}
         onTouchEnd={selected ? undefined : handleRosterTouchEnd}
@@ -2451,7 +2465,7 @@ export default function App() {
             <div className="header-action-group">
               <button
                 type="button"
-                className={`header-action-btn primary action-group-trigger ${actionMenuOpen ? 'open' : ''}`}
+                className={`icon-button action-group-trigger ${actionMenuOpen ? 'open' : ''}`}
                 aria-haspopup={profiles.length > 1 ? 'menu' : undefined}
                 aria-expanded={profiles.length > 1 ? actionMenuOpen : undefined}
                 aria-label="New chat session"
@@ -2464,8 +2478,7 @@ export default function App() {
                   }
                 }}
               >
-                <Plus size={16}/>
-                <span>{creatingSession ? 'Creating…' : 'New'}</span>
+                {creatingSession ? <RefreshCw size={16} className="pull-refresh-spinner"/> : <Plus size={18}/>}
               </button>
               {actionMenuOpen && profiles.length > 1 && <>
                 <button
@@ -2498,14 +2511,13 @@ export default function App() {
             <div className="header-action-group">
               <button
                 type="button"
-                className={`header-action-btn primary action-group-trigger ${actionMenuOpen ? 'open' : ''}`}
+                className={`icon-button action-group-trigger ${actionMenuOpen ? 'open' : ''}`}
                 aria-haspopup="menu"
                 aria-expanded={actionMenuOpen}
                 aria-label={tab === 'tasks' ? 'New task or bot' : 'New bot or group'}
                 onClick={() => setActionMenuOpen(open => !open)}
               >
-                <Plus size={16}/>
-                <span>New</span>
+                <Plus size={18}/>
               </button>
               {actionMenuOpen && <>
                 <button
@@ -2592,7 +2604,6 @@ export default function App() {
                       {isWorking && (
                         <span className={`bot-status-pip ${isWaitingInput ? 'waiting' : ''}`} aria-hidden="true"/>
                       )}
-                      {session?.unread && !isWorking && <span className="bot-unread-pip" aria-hidden="true"/>}
                     </div>
                     <span className="bot-copy">
                       <b>{profile.display_name || titleize(profile.name)}</b>
@@ -2613,11 +2624,7 @@ export default function App() {
                     </span>
                     <span className="meta">
                       {ago(session?.last_active)}
-                      {session?.unread && (
-                        <span className="unread-badge">
-                          {session.unread_count && session.unread_count > 99 ? '99+' : session.unread_count || 1}
-                        </span>
-                      )}
+                      {session?.unread && <span className="unread-dot" role="img" aria-label={`${session.unread_count || 1} unread`}/>}
                     </span>
                   </button>
                 )
@@ -2666,7 +2673,6 @@ export default function App() {
                         {isWorking && (
                           <span className={`bot-status-pip ${isWaitingInput ? 'waiting' : ''}`} aria-hidden="true"/>
                         )}
-                        {session.unread && !isWorking && <span className="bot-unread-pip" aria-hidden="true"/>}
                       </div>
                       <span className="bot-copy">
                         <b>{session.title || 'Untitled session'}</b>
@@ -2691,11 +2697,7 @@ export default function App() {
                         ) : (
                           ago(session.last_active)
                         )}
-                        {session.unread && !isOpening && (
-                          <span className="unread-badge">
-                            {session.unread_count && session.unread_count > 99 ? '99+' : session.unread_count || 1}
-                          </span>
-                        )}
+                        {session.unread && !isOpening && <span className="unread-dot" role="img" aria-label={`${session.unread_count || 1} unread`}/>}
                       </span>
                     </button>
                   )
@@ -2715,12 +2717,14 @@ export default function App() {
       />
     <NavIsland tab={tab} setTab={switchTab}/>
   </main>
+      </FreezeWhileCovered>
   {selected && (
-    <PageHost state={chatExiting ? PAGE_EXIT_STATE : undefined} zIndex={60}>
+    <PageHost state={chatExiting ? PAGE_EXIT_STATE : undefined} className={chatCovered ? 'is-covered' : undefined} zIndex={60}>
     <ErrorBoundary
       onError={cancelPendingCachedHydration}
       onReset={() => { cancelPendingCachedHydration(); setSelected(null) }}
     >
+      <Suspense fallback={<main className="app chat-shell"/>}>
       <ChatView
         session={selected}
         perfTraceId={sessionOpenTraceMapRef.current.get(selected.id)}
@@ -2752,9 +2756,12 @@ export default function App() {
           markSessionUnread(selected.id, messageTimestamp)
         }}
       />
+      </Suspense>
     </ErrorBoundary>
     </PageHost>
   )}
+  {selected && profileSheet && <PageHost state={profileExiting ? PAGE_EXIT_STATE : undefined} zIndex={70}><BotProfileSheet profile={profiles.find(profile => profile.name === selected.profile)} session={selected} onClose={closeProfile} onUpdated={() => void refresh()}/></PageHost>}
+  {createOpen && <PageHost state={wizardExiting ? PAGE_EXIT_STATE : undefined} zIndex={70}><CreateWizard step={createStep} setStep={setCreateStep} draft={botDraft} setDraft={setBotDraft} creating={creating} error={error} close={closeWizard} finish={() => void finishCreate()}/></PageHost>}
 
   {settings && (
     <ConnectionSettings

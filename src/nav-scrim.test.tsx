@@ -19,7 +19,7 @@ describe('Bottom navigation fade scrim', () => {
 
   it('provides smooth color-mix enhancement for theme transitions', () => {
     expect(css).toContain('@supports (background: color-mix(in srgb, black, white))')
-    expect(css).toContain('color-mix(in srgb, var(--bg)')
+    expect(css).toContain('color-mix(in srgb, var(--bg, #010102)')
   })
 
   it('hides the scrim when task details are open', () => {

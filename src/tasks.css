@@ -1,0 +1,610 @@
+/*
+ * Tasks tab and Task Details, built on the iOS grouped list: a large title,
+ * inset rounded groups with hairline separators, quiet section headers, and
+ * a Clock › Alarms style row (name and cadence on the left, on/off switch on
+ * the right). Controls that act on a task live on its detail page.
+ */
+/* The roster already pads every tab 20px at the sides. */
+.roster-shell .tasks-sheet,
+.tasks-sheet {
+  padding: 8px 0 calc(112px + env(safe-area-inset-bottom));
+}
+
+.tasks-large-title {
+  margin: 4px 4px 18px;
+  color: var(--text);
+  font-size: var(--type-large-title);
+  font-weight: 700;
+  letter-spacing: -0.6px;
+  line-height: 1.1;
+}
+
+.tasks-group {
+  margin: 0 0 24px;
+}
+
+.tasks-group-header {
+  margin: 0 16px 6px;
+  color: var(--muted);
+  font-size: var(--type-footnote);
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
+}
+
+.tasks-group-header-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 0 16px 7px;
+}
+
+.tasks-group-header-row .tasks-group-header {
+  margin: 0;
+}
+
+.tasks-header-action {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: var(--type-subhead);
+}
+
+.tasks-group-body {
+  overflow: hidden;
+  border-radius: calc(26px / 1.15);
+  background: var(--panel);
+}
+
+.tasks-group-body > * {
+  position: relative;
+}
+
+/* Hairline separators, inset from the leading edge as in iOS lists. */
+.tasks-group-body > * + *::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 16px;
+  right: 0;
+  border-top: 1px solid var(--border);
+  pointer-events: none;
+}
+
+.tasks-note {
+  margin: 0 16px 16px;
+  color: var(--muted);
+  font-size: var(--type-footnote);
+  line-height: 1.4;
+}
+
+.tasks-note.error {
+  color: #ff6961;
+}
+
+/* --- List rows ----------------------------------------------------------- */
+.task-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: var(--row-two-line);
+}
+
+.task-row-open {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: grid;
+  gap: 2px;
+  padding: 9px 0 9px 16px;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: left;
+}
+
+.task-row-open:active {
+  opacity: 0.6;
+}
+
+.task-row-title {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--type-body);
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-row-detail {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--type-subhead);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-row.paused .task-row-title {
+  color: var(--muted);
+}
+
+.task-row.error .task-row-detail {
+  color: #ff6961;
+}
+
+.task-row.running .task-row-detail {
+  color: #0a84ff;
+}
+
+.task-row-live {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulse-red 1.2s infinite;
+}
+
+.task-row-skeleton {
+  height: var(--row-two-line);
+  background: linear-gradient(90deg, var(--panel), var(--surface), var(--panel));
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+/* --- iOS switch ---------------------------------------------------------- */
+/* iOS switch metrics (51 x 31 pt, 27 pt knob) on the shared scale. */
+.ios-switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: calc(51px / 1.15);
+  height: calc(31px / 1.15);
+  margin-right: 16px;
+}
+
+.task-field .ios-switch {
+  margin-right: 0;
+}
+
+.ios-switch input {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.ios-switch span {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 16%, transparent);
+  transition: background 0.25s ease;
+}
+
+.ios-switch span::after {
+  content: '';
+  position: absolute;
+  top: calc(2px / 1.15);
+  left: calc(2px / 1.15);
+  width: calc(27px / 1.15);
+  height: calc(27px / 1.15);
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15), 0 1px 1px rgba(0, 0, 0, 0.16);
+  transition: transform 0.25s var(--ease-page, ease);
+}
+
+.ios-switch input:checked + span {
+  background: #34c759;
+}
+
+.ios-switch input:checked + span::after {
+  transform: translateX(calc(20px / 1.15));
+}
+
+.ios-switch input:disabled + span {
+  opacity: 0.5;
+}
+
+.ios-switch input:focus-visible + span {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* --- Empty state (iOS "content unavailable") ----------------------------- */
+.tasks-unavailable {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 16vh;
+  padding: 0 32px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.tasks-unavailable svg {
+  width: calc(48px / 1.15);
+  height: calc(48px / 1.15);
+  margin-bottom: 12px;
+  color: var(--quiet);
+}
+
+.tasks-unavailable b {
+  color: var(--text);
+  font-size: var(--type-title2);
+  font-weight: 700;
+}
+
+.tasks-unavailable p {
+  margin: 4px 0 12px;
+  font-size: var(--type-subhead);
+  line-height: 1.4;
+}
+
+.tasks-unavailable button {
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: var(--type-body);
+  font-weight: 550;
+}
+
+/* --- Task Details -------------------------------------------------------- */
+/* Pushed pages sit in a fixed, clipped PageHost, so the page has to be the
+   host's height and scroll itself; growing taller cut off everything below. */
+.app.task-create-sheet {
+  height: 100%;
+}
+
+.app.task-detail {
+  height: 100%;
+  overflow-y: auto;
+  padding: 0 16px calc(40px + env(safe-area-inset-bottom));
+}
+
+.task-detail-nav {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  height: calc(var(--safe-top) + var(--control) + 14px);
+  margin: 0 -16px;
+  padding: var(--safe-top) 14px 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--bg) 85%, transparent) 0%, color-mix(in srgb, var(--bg) 35%, transparent) 40%, transparent 70%);
+  pointer-events: none;
+}
+
+.task-detail-nav > * {
+  pointer-events: auto;
+}
+
+.task-detail-nav .round-control {
+  width: var(--control);
+  height: var(--control);
+}
+
+.task-more {
+  position: relative;
+}
+
+.task-more .popover-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 29;
+  border: 0;
+  background: transparent;
+}
+
+.task-more-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 31;
+  width: calc(250px / 1.15);
+  padding: 5px;
+  border-radius: calc(24px / 1.15);
+  transform-origin: calc(100% - var(--control) / 2) calc(-8px - var(--control) / 2);
+  animation: glass-menu-in 0.38s cubic-bezier(0.34, 1.25, 0.64, 1);
+}
+
+.task-detail-hero {
+  margin: 2px 4px 20px;
+}
+
+.task-detail-hero h1 {
+  margin: 0 0 4px;
+  color: var(--text);
+  font-size: var(--type-title1);
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  line-height: 1.12;
+  overflow-wrap: anywhere;
+}
+
+.task-detail-hero p {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--type-subhead);
+}
+
+.task-state {
+  font-weight: 600;
+}
+
+.task-state.scheduled {
+  color: #34c759;
+}
+
+.task-state.running {
+  color: #0a84ff;
+}
+
+.task-state.paused {
+  color: #ff9f0a;
+}
+
+.task-state.error {
+  color: #ff6961;
+}
+
+.task-field {
+  width: 100%;
+  min-height: var(--row);
+  padding: 0 16px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: var(--type-body);
+  text-align: left;
+}
+
+.task-field > span:first-child {
+  flex: 0 0 auto;
+}
+
+.task-field > span + span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-field .mono {
+  font-family: var(--font-mono);
+  font-size: var(--type-subhead);
+}
+
+.task-field-action {
+  justify-content: flex-start;
+  gap: 10px;
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.task-field-action:active:not(:disabled),
+.task-delete-row:active {
+  background: var(--surface);
+}
+
+.task-field-action:disabled {
+  opacity: 0.45;
+}
+
+.task-instructions {
+  margin: 0;
+  padding: 12px 16px;
+  color: var(--secondary);
+  font-size: var(--type-callout);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* Padding inside a clamped box is part of the visible overflow and shows a
+   sliver of the next line, so the bottom gap becomes a margin instead. */
+.task-instructions.clamped {
+  display: -webkit-box;
+  margin-bottom: 12px;
+  padding-bottom: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 8;
+}
+
+.task-instructions.empty {
+  color: var(--muted);
+  white-space: normal;
+}
+
+.task-delete-row {
+  width: 100%;
+  min-height: var(--row);
+  border: 0;
+  background: transparent;
+  color: #ff453a;
+  font-size: var(--type-body);
+  font-weight: 500;
+}
+
+.tasks-toast {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(28px + env(safe-area-inset-bottom));
+  z-index: 40;
+  width: max-content;
+  margin: 0 auto;
+  padding: 10px 18px;
+  border-radius: 999px;
+  background: var(--glass-fill-strong, var(--panel));
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  color: var(--text);
+  font-size: var(--type-subhead);
+  font-weight: 550;
+  animation: glass-pop-in 0.2s ease;
+}
+
+/* --- Delete alert (iOS alert) -------------------------------------------- */
+/* iOS alert: 270 pt wide, 17 pt semibold title, 13 pt message. */
+.tasks-alert {
+  width: min(calc(270px / 1.15), 100%);
+  overflow: hidden;
+  border-radius: calc(26px / 1.15);
+  background: var(--glass-fill-strong, var(--panel));
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+  text-align: center;
+  animation: glass-pop-in 0.2s ease;
+}
+
+.tasks-alert-body {
+  padding: 17px 16px 14px;
+}
+
+.tasks-alert h2 {
+  margin: 0 0 4px;
+  color: var(--text);
+  font-size: var(--type-body);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.tasks-alert p {
+  margin: 0;
+  color: var(--secondary);
+  font-size: var(--type-footnote);
+  line-height: 1.4;
+}
+
+.tasks-alert footer {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-top: 1px solid var(--border);
+}
+
+.tasks-alert footer button {
+  min-height: var(--control);
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: var(--type-body);
+}
+
+.tasks-alert footer button + button {
+  border-left: 1px solid var(--border);
+}
+
+.tasks-alert footer .destructive {
+  color: #ff453a;
+  font-weight: 600;
+}
+
+.tasks-alert footer button:disabled {
+  opacity: 0.5;
+}
+
+/* --- Instructions editor (iOS sheet) ------------------------------------- */
+.task-modal-backdrop.sheet {
+  place-items: end stretch;
+  padding: 0;
+}
+
+.task-prompt-sheet {
+  width: 100%;
+  max-width: 720px;
+  height: min(88dvh, 720px);
+  justify-self: center;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: env(safe-area-inset-bottom);
+  border-radius: calc(26px / 1.15) calc(26px / 1.15) 0 0;
+  background: var(--panel);
+  animation: tasks-sheet-up 0.38s var(--ease-page, ease);
+}
+
+.task-sheet-nav {
+  height: calc(56px / 1.15);
+  flex: 0 0 auto;
+  padding: 0 16px;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+}
+
+.task-sheet-nav b {
+  color: var(--text);
+  font-size: var(--type-body);
+  font-weight: 600;
+}
+
+.task-sheet-nav button {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: var(--type-body);
+}
+
+.task-sheet-nav .save {
+  justify-self: end;
+  font-weight: 600;
+}
+
+.task-sheet-nav button:disabled {
+  opacity: 0.4;
+}
+
+.task-prompt-sheet textarea {
+  width: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
+  padding: 16px;
+  border: 0;
+  outline: 0;
+  resize: none;
+  background: transparent;
+  color: var(--text);
+  font: var(--type-body)/1.5 var(--font-sans);
+}
+
+@keyframes tasks-sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tasks-alert,
+  .tasks-toast,
+  .task-prompt-sheet,
+  .task-more-menu,
+  .task-row-live,
+  .task-row-skeleton {
+    animation: none !important;
+  }
+
+  .ios-switch span,
+  .ios-switch span::after {
+    transition: none;
+  }
+}

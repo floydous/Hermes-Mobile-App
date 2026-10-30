@@ -3,12 +3,14 @@ import {
   ArrowUp,
   BrainCircuit,
   Check,
-  ChevronDown,
+  ChevronRight,
+  Cpu,
   FileText,
   LoaderCircle,
   Mic,
   Paperclip,
   Pencil,
+  Plus,
   Search,
   Sparkles,
   Square,
@@ -24,6 +26,7 @@ import { BotAvatar } from './BotAvatar'
 import { applySlashCompletion } from '../slash-routing'
 import { isExpectedVoiceCleanupError, VOICE_AUTOSEND_HOLD_MS } from '../voice-input'
 import { recordTracePhase } from '../remote-logger'
+import { MENU_CLOSE_MS, usePageExit } from '../page-transition'
 
 export type ComposerEditRequest = { text: string; messageId?: number; nonce: number }
 export type ComposerDropFilesRef = { current: ((files: File[]) => void) | null }
@@ -44,7 +47,6 @@ export type ComposerProps = {
   cancelEdit?: () => void
   dropFilesRef: ComposerDropFilesRef
   onControlError: (message: string) => void
-  onModelLabel: (model: string) => void
   onSessionModelChange: (model: string) => void
   submit: (attachments: { name: string; refText: string }[], text: string, options?: { editMessageId?: number }) => Promise<boolean>
   submitVoice: (text: string) => Promise<boolean>
@@ -68,10 +70,13 @@ const formatFileSize = (size: number) => size < 1024 * 1024 ? `${Math.max(1, Mat
 const maxAttachmentBytes = 50 * 1024 * 1024
 const MODEL_OPTIONS_CACHE = new Map<string, ModelOptions>()
 
-export const Composer = memo(function Composer({ session, profiles, sending, draggingFiles, editRequest, cancelEdit, dropFilesRef, onControlError, onModelLabel, onSessionModelChange, submit, submitVoice, stop, perfTraceId }: ComposerProps) {
+export const Composer = memo(function Composer({ session, profiles, sending, draggingFiles, editRequest, cancelEdit, dropFilesRef, onControlError, onSessionModelChange, submit, submitVoice, stop, perfTraceId }: ComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const dockRef = useRef<HTMLElement>(null)
   const [draft, setDraft] = useState('')
+  const [plusMenu, setPlusMenu] = useState(false)
+  const { isExiting: plusMenuClosing, requestClose: closePlusMenu } = usePageExit(() => setPlusMenu(false), MENU_CLOSE_MS)
   const [modelMenu, setModelMenu] = useState(false)
   const [reasoningMenu, setReasoningMenu] = useState(false)
   const [modelSearch, setModelSearch] = useState('')
@@ -143,7 +148,15 @@ export const Composer = memo(function Composer({ session, profiles, sending, dra
     }).catch(() => setModelOptions({}))
   }, [session.profile])
 
-  useEffect(() => { onModelLabel(model) }, [model, onModelLabel])
+  // The dock floats over the thread, so the thread pads its end by the dock's live height.
+  useLayoutEffect(() => {
+    const dock = dockRef.current
+    const shell = dock?.closest<HTMLElement>('.chat-shell')
+    if (!dock || !shell) return
+    const observer = new ResizeObserver(() => shell.style.setProperty('--chat-dock-h', `${dock.offsetHeight}px`))
+    observer.observe(dock)
+    return () => { observer.disconnect(); shell.style.removeProperty('--chat-dock-h') }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -398,7 +411,12 @@ export const Composer = memo(function Composer({ session, profiles, sending, dra
     {slashOpen && (slashItems.length || slashLoading) && <section className="slash-popover" aria-label="Hermes skills and commands" role="listbox"><div className="slash-popover-head"><Sparkles size={14}/><span>{slashLoading ? 'Loading Hermes skills…' : 'Hermes skills & commands'}</span></div>{slashItems.slice(0, 12).map((item, index) => <button className={`${index === slashIndex ? 'selected' : ''} ${item.kind === 'skill' ? 'skill' : 'command'}`} key={`${item.text}:${index}`} type="button" role="option" aria-selected={index === slashIndex} onMouseDown={event => event.preventDefault()} onClick={() => chooseSlash(item)}><span className="slash-item-icon">{item.kind === 'skill' ? <Sparkles size={14}/> : '/'}</span><span><b>{item.display || item.text}</b><small>{item.meta || (item.kind === 'skill' ? 'Installed Hermes skill' : 'Hermes command')}</small></span></button>)}</section>}
     {mentionOpen && <div className="mention-popover">{mentions.map(item => <button key={item.name} onClick={() => setDraft(draft.replace(/@[\w-]*$/, `@${item.name} `))}><BotAvatar profile={item} fallbackName={item.name} variant="mention"/><span><b>{item.display_name || titleize(item.name)}</b><small>@{item.name}</small></span></button>)}</div>}
 
-    {(modelMenu || reasoningMenu) && <button className="popover-scrim" aria-label="Close menu" onClick={() => { setModelMenu(false); setReasoningMenu(false) }}/>}
+    {(plusMenu || modelMenu || reasoningMenu) && <button className="popover-scrim" aria-label="Close menu" onClick={() => { if (plusMenu) closePlusMenu(); setModelMenu(false); setReasoningMenu(false) }}/>}
+    {plusMenu && <section className={`composer-plus-menu ${plusMenuClosing ? 'is-closing' : ''}`} role="menu" aria-label="Attach and chat options">
+      <button role="menuitem" disabled={sending} onClick={() => { closePlusMenu(); fileInputRef.current?.click() }}><Paperclip size={16}/><span>Attach files</span></button>
+      <button role="menuitem" onClick={() => { closePlusMenu(); setModelMenu(true) }}><Cpu size={16}/><span>Model</span><small>{model || 'Default model'}</small><ChevronRight size={14}/></button>
+      <button role="menuitem" onClick={() => { closePlusMenu(); setReasoningMenu(true) }}><BrainCircuit size={16}/><span>Reasoning</span><small>{labelReasoning(reasoning)}</small><ChevronRight size={14}/></button>
+    </section>}
     {modelMenu && <section className="model-popover">
       <div className="model-search"><Search size={14}/><input value={modelSearch} onChange={event => setModelSearch(event.target.value)} placeholder="Search models"/></div>
       <small className="popover-label">Available models</small>
@@ -406,8 +424,11 @@ export const Composer = memo(function Composer({ session, profiles, sending, dra
     </section>}
     {reasoningMenu && <section className="reasoning-popover"><small className="popover-label">Reasoning effort</small>{reasoningChoices.map(item => <button className={item === reasoning ? 'selected' : ''} key={item} onClick={() => void chooseReasoning(item)}><span>{labelReasoning(item)}</span>{item === reasoning && <span>✓</span>}</button>)}</section>}
 
-    <footer className="chat-dock">
-      {voiceState !== 'idle' ? <div className={`recording-composer ${voiceAutoSend ? 'voice-autosend' : ''}`}><button onClick={() => void finishVoice(true)} aria-label="Cancel voice input"><X size={18}/></button>{voiceAutoSend && <small className="voice-autosend-label">Auto-send</small>}<span><i/>0:{String(recordSeconds).padStart(2, '0')}</span><div className="voice-bars">{voiceState === 'processing' ? 'Transcribing your voice…' : voiceInterim || (voiceAutoSend ? 'Release to send' : 'Listening…')}</div><button className="composer-send" onClick={() => void finishVoice()} aria-label="Finish voice input"><ArrowUp size={16}/></button></div> : <div className={`ai-composer ${draggingFiles ? 'file-drop-active' : ''}`}>
+    <footer className="chat-dock" ref={dockRef}>
+      {voiceState !== 'idle' ? <div className={`recording-composer ${voiceAutoSend ? 'voice-autosend' : ''}`}><button onClick={() => void finishVoice(true)} aria-label="Cancel voice input"><X size={18}/></button>{voiceAutoSend && <small className="voice-autosend-label">Auto-send</small>}<span><i/>0:{String(recordSeconds).padStart(2, '0')}</span><div className="voice-bars">{voiceState === 'processing' ? 'Transcribing your voice…' : voiceInterim || (voiceAutoSend ? 'Release to send' : 'Listening…')}</div><button className="composer-send" onClick={() => void finishVoice()} aria-label="Finish voice input"><ArrowUp size={16}/></button></div> : <div className="composer-row">
+        <button className={`composer-plus ${plusMenu ? 'open' : ''}`} onClick={() => { if (plusMenu) closePlusMenu(); else setPlusMenu(true); setModelMenu(false); setReasoningMenu(false) }} aria-label="Attach files, model and reasoning" aria-haspopup="menu" aria-expanded={plusMenu}><Plus size={18}/></button>
+        <input ref={fileInputRef} className="attachment-input" type="file" multiple onChange={onFileInput} aria-label="Choose files to attach"/>
+        <div className={`ai-composer ${draggingFiles ? 'file-drop-active' : ''}`}>
         {draggingFiles && <div className="file-drop-hint"><Paperclip size={15}/><span>Drop files to send to Hermes</span></div>}
         {editRequest && (
           <div className="composer-edit-banner" role="status" aria-label="Editing message">
@@ -431,16 +452,12 @@ export const Composer = memo(function Composer({ session, profiles, sending, dra
         )}
         {!!attachments.length && <div className="attachment-list" aria-label="Attached files">{attachments.map(item => <div className={`attachment-chip ${item.status}`} key={item.id}><FileText size={15}/><span><b>{item.name}</b><small>{item.error || (item.status === 'uploading' ? 'Uploading to Hermes…' : formatFileSize(item.size))}</small></span>{item.status === 'uploading' ? <LoaderCircle className="attachment-spinner" size={14}/> : item.status === 'ready' ? <Check size={14}/> : <span className="attachment-failed">!</span>}<button type="button" onClick={() => setAttachments(items => items.filter(current => current.id !== item.id))} aria-label={`Remove ${item.name}`}><Trash2 size={13}/></button></div>)}</div>}
         {voiceReview && <div className="voice-review" aria-label="Voice transcription ready to edit"><Mic size={15}/><span><b>Voice transcription</b><small>Edit before sending</small></span><button type="button" onClick={() => { setVoiceReview(''); setDraft('') }} aria-label="Discard voice transcription"><X size={14}/></button></div>}
-        <textarea ref={textareaRef} value={draft} disabled={sending || voiceState !== 'idle'} rows={1} placeholder="Ask anything…  /commands" onChange={event => setDraft(event.target.value)} onKeyDown={handleComposerKeyDown}/>
-        <div className="composer-toolbar">
-          <input ref={fileInputRef} className="attachment-input" type="file" multiple onChange={onFileInput} aria-label="Choose files to attach"/>
-          <button className={`composer-icon ${attachments.length ? 'attachment-active' : ''}`} disabled={sending || voiceState !== 'idle'} title="Attach files" onClick={() => fileInputRef.current?.click()} aria-label="Attach files"><Paperclip size={17}/></button>
-          <button className="composer-selector" onClick={() => { setModelMenu(value => !value); setReasoningMenu(false) }}><span>{model || 'Default model'}</span><ChevronDown size={13}/></button>
-          <button className="composer-selector effort" onClick={() => { setReasoningMenu(value => !value); setModelMenu(false) }}><BrainCircuit size={14}/><span>{labelReasoning(reasoning)}</span><ChevronDown size={13}/></button>
-          <span className="toolbar-spacer"/>
-          {!draft && !sending && <button className="composer-icon voice-trigger" disabled={voiceState !== 'idle'} title="Tap to dictate. Hold for 2.5 seconds to dictate and send." onPointerDown={onMicPointerDown} onPointerUp={onMicPointerUp} onPointerCancel={onMicPointerUp} onClick={onMicClick} aria-label="Record voice. Hold for 2.5 seconds to auto-send"><Mic size={17}/></button>}
-          {sending ? <button className="composer-send stop" onClick={stop} aria-label="Stop Hermes"><Square size={12} fill="currentColor"/></button> : <button className="composer-send" disabled={!draft.trim() && !attachments.some(item => item.status === 'ready')} onClick={() => void submitWithAttachments()} aria-label="Send message"><ArrowUp size={17}/></button>}
+        <div className="composer-input-row">
+          <textarea ref={textareaRef} value={draft} disabled={sending || voiceState !== 'idle'} rows={1} placeholder={`Ask ${profiles.find(item => item.name === session.profile)?.display_name || titleize(session.profile)}`} onChange={event => setDraft(event.target.value)} onKeyDown={handleComposerKeyDown}/>
+          {!draft && !sending && <button className="composer-icon voice-trigger" disabled={voiceState !== 'idle'} title="Tap to dictate. Hold for 2.5 seconds to dictate and send." onPointerDown={onMicPointerDown} onPointerUp={onMicPointerUp} onPointerCancel={onMicPointerUp} onClick={onMicClick} aria-label="Record voice. Hold for 2.5 seconds to auto-send"><Mic size={16}/></button>}
+          {sending ? <button className="composer-send stop" onClick={stop} aria-label="Stop Hermes"><Square size={12} fill="currentColor"/></button> : <button className="composer-send" disabled={!draft.trim() && !attachments.some(item => item.status === 'ready')} onClick={() => void submitWithAttachments()} aria-label="Send message"><ArrowUp size={15}/></button>}
         </div>
+      </div>
       </div>}
     </footer>
   </>

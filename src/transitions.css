@@ -1,6 +1,9 @@
 :root {
   --ease-out-smooth: cubic-bezier(0.16, 1, 0.3, 1);
-  --duration-page: 0.3s;
+  /* iOS navigation timing: a long, fast-settling curve. Most of the travel
+     happens early and the page eases gently into place. */
+  --ease-page: cubic-bezier(0.32, 0.72, 0, 1);
+  --duration-page: 0.45s;
   --duration-tab: 0.24s;
   /*
    * Page transitions follow the iOS navigation model: a new page is pushed
@@ -12,10 +15,11 @@
   --page-slide-in: 100%;
 }
 
-/* Base page smooth entrance */
+/* Base page smooth entrance. No standing will-change: the animation promotes
+   the page while it runs, and a permanent hint kept every page on its own
+   GPU layer for its whole lifetime. */
 .app {
   animation: app-page-enter var(--duration-page) var(--ease-out-smooth) backwards;
-  will-change: opacity, transform;
 }
 
 /*
@@ -32,8 +36,9 @@
      it is centred and may be narrower than the viewport, so without this
      the page underneath shows through at the edges. */
   background: var(--bg, #010102);
-  animation: app-page-in var(--duration-page) var(--ease-out-smooth) backwards;
-  will-change: opacity, transform;
+  /* Depth on the leading edge while the page travels; off-screen once it rests. */
+  box-shadow: -14px 0 36px rgba(0, 0, 0, 0.28);
+  animation: app-page-in var(--duration-page) var(--ease-page) backwards;
 }
 
 .page-host > .app {
@@ -42,20 +47,107 @@
 }
 
 /*
- * A page that is leaving slides out to the right and fades.
+ * A page that is leaving slides out to the right.
  *
  * It is kept mounted for the length of the animation by the exit hook.
  * Without that it is unmounted the instant it is asked to close and never
  * animates at all.
  */
 .page-host.is-page-exiting {
-  animation: app-page-exit var(--duration-page) var(--ease-out-smooth) forwards;
+  animation: app-page-exit var(--duration-page) var(--ease-page) forwards;
   pointer-events: none;
 }
 
 /* Returning to main Roster */
 .app.roster-shell {
   animation-name: app-roster-enter;
+  /* Origin stays at the top here too, so the card grows back from the top
+     edge after `.sheet-presented` is removed instead of jumping to centre. */
+  transform-origin: 50% 0;
+  transition: filter var(--duration-page) var(--ease-page),
+              transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1),
+              border-radius 0.3s cubic-bezier(0.2, 0.8, 0.2, 1),
+              background-color 0.35s var(--ease-out-smooth),
+              color 0.35s var(--ease-out-smooth);
+}
+
+/*
+ * iOS sheet presentation (Settings): the app behind the sheet recedes into a
+ * rounded card just below the status bar, against black, on the sheet's own
+ * entrance timing, and grows back as the sheet leaves. `--sheet-progress`
+ * (1 = fully presented) is set while the grabber is dragged, so the card
+ * follows the finger with transitions off.
+ */
+html.sheet-presented,
+html.sheet-presented body,
+html.sheet-presented #root {
+  background-color: #000;
+}
+
+html.sheet-presented .app.roster-shell {
+  transform: translateY(calc((var(--safe-top) + 10px) * var(--sheet-progress, 1))) scale(calc(1 - 0.08 * var(--sheet-progress, 1)));
+  border-radius: calc(14px * var(--sheet-progress, 1));
+  /* On the black theme the card's edge would vanish into the black around it. */
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--text) 10%, transparent);
+  transition: filter var(--duration-page) var(--ease-page),
+              transform 0.35s cubic-bezier(0.25, 0.1, 0.25, 1),
+              border-radius 0.35s cubic-bezier(0.25, 0.1, 0.25, 1),
+              background-color 0.35s var(--ease-out-smooth),
+              color 0.35s var(--ease-out-smooth);
+}
+
+html.sheet-dragging .app.roster-shell {
+  transition: none;
+}
+
+/*
+ * A page under a pushed page (the roster under a chat, a chat under Bot
+ * settings) stays exactly where it is and only dims, then brightens as the
+ * pushed page slides away. Nothing underneath is pushed, matching the
+ * Settings sheet.
+ */
+.page-host {
+  transition: filter var(--duration-page) var(--ease-page);
+}
+
+.app.roster-shell.is-covered,
+.page-host.is-covered {
+  filter: brightness(0.7);
+}
+
+/*
+ * The pushed chat's glass controls materialize as the page lands, growing
+ * out of a blur with a slight overshoot, and dissolve as it leaves.
+ */
+.page-host .chat-header > *,
+.page-host .composer-row > * {
+  animation: glass-materialize 0.42s cubic-bezier(0.34, 1.45, 0.64, 1) 0.12s backwards;
+}
+
+.page-host.is-page-exiting .chat-header > *,
+.page-host.is-page-exiting .composer-row > * {
+  animation: glass-dematerialize 0.2s ease-in forwards;
+}
+
+@keyframes glass-materialize {
+  0% {
+    opacity: 0;
+    transform: scale(0.8);
+    filter: blur(6px);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+
+@keyframes glass-dematerialize {
+  100% {
+    opacity: 0;
+    transform: scale(0.85);
+    filter: blur(4px);
+  }
 }
 
 @keyframes app-page-enter {
@@ -86,17 +178,14 @@
 }
 
 /*
- * Going back: the page that is leaving slides out to the right, revealing
- * the page underneath. It fades slightly at the very end so the page
- * underneath reads as being uncovered.
+ * Going back: the page that is leaving slides out to the right, opaque,
+ * revealing the page underneath as it returns from its parallax offset.
  */
 @keyframes app-page-exit {
   0% {
-    opacity: 1;
     transform: none;
   }
   100% {
-    opacity: 0.4;
     transform: translateX(var(--page-slide-in));
   }
 }
@@ -126,7 +215,6 @@
 .bot-list,
 .roster-shell .tasks-sheet {
   animation: app-tab-enter var(--duration-tab) var(--ease-out-smooth) backwards;
-  will-change: opacity, transform;
 }
 
 .roster-shell.tab-slide-forward .bot-list,
@@ -175,7 +263,6 @@
 /* Create wizard step transition */
 .wizard > section {
   animation: app-step-enter 0.24s var(--ease-out-smooth) backwards;
-  will-change: opacity, transform;
 }
 
 @keyframes app-step-enter {
@@ -196,9 +283,16 @@
   .page-host > .app,
   .app.roster-shell,
   .bot-list,
-  .wizard > section {
+  .wizard > section,
+  .page-host .chat-header > *,
+  .page-host .composer-row > * {
     animation: none !important;
     transform: none !important;
     will-change: auto !important;
+  }
+
+  .app.roster-shell.is-covered,
+  .page-host.is-covered {
+    filter: none;
   }
 }

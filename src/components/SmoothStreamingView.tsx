@@ -48,7 +48,7 @@ export function SmoothStreamingView({ text }: { text: string }) {
 
   const flushQueueImmediately = () => {
     if (tickerTimerRef.current != null) {
-      window.clearTimeout(tickerTimerRef.current)
+      cancelAnimationFrame(tickerTimerRef.current)
       tickerTimerRef.current = null
     }
     isTickingRef.current = false
@@ -72,9 +72,10 @@ export function SmoothStreamingView({ text }: { text: string }) {
 
     isTickingRef.current = true
 
-    // Batch tokens dynamically if a large packet burst arrives so the stream stays fluid
+    // Batch tokens dynamically if a large packet burst arrives so the stream stays fluid.
+    // One batch per frame; the floor of 2 keeps pace with the old 10ms ticker.
     const remainingCount = queueRef.current.length
-    const batchSize = remainingCount > 80 ? 6 : remainingCount > 30 ? 3 : remainingCount > 10 ? 2 : 1
+    const batchSize = remainingCount > 80 ? 10 : remainingCount > 30 ? 5 : remainingCount > 10 ? 3 : 2
     const tokens = queueRef.current.splice(0, batchSize)
 
     tokens.forEach(tok => {
@@ -82,7 +83,6 @@ export function SmoothStreamingView({ text }: { text: string }) {
       span.textContent = tok
       span.style.display = 'inline'
       span.style.opacity = '0'
-      span.style.willChange = 'opacity'
       container.appendChild(span)
 
       // Smoothly ease opacity from 0% to 100% on entry
@@ -95,7 +95,7 @@ export function SmoothStreamingView({ text }: { text: string }) {
     // Consolidate older spans whose opacity has settled to keep the DOM element count bounded (<60 nodes)
     consolidateSettledNodes(container)
 
-    tickerTimerRef.current = window.setTimeout(tick, 10)
+    tickerTimerRef.current = requestAnimationFrame(tick)
   }
 
   useEffect(() => {

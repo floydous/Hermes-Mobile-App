@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDown, Eraser, History, LoaderCircle, Paperclip, RotateCw, X } from 'lucide-react'
+import { ChevronDown, ChevronLeft, Eraser, History, LoaderCircle, MoreHorizontal, Paperclip, RotateCw, Settings2, X } from 'lucide-react'
 import type { DragEvent } from 'react'
 
 import { BotAvatar } from './BotAvatar'
@@ -12,6 +12,7 @@ import { SCROLL_FOLLOW_THRESHOLD, shouldStickToBottom } from '../scroll-follow'
 import { formatResponseStats } from '../message-stats'
 import { getInitialSpinnerPhrase, getProgressiveSpinnerPhrase, getRandomToolThreshold } from '../spinner-phrases'
 import { useEdgeSwipeBack } from '../edge-swipe'
+import { MENU_CLOSE_MS, usePageExit } from '../page-transition'
 import { remoteLog, recordTracePhase } from '../remote-logger'
 import { Composer, type ComposerDropFilesRef, type ComposerEditRequest } from './Composer'
 import type { LiveMessage, LiveProfile, LiveSession, LiveUsage } from '../hermes'
@@ -225,6 +226,8 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
   const [confirmClearOpen, setConfirmClearOpen] = useState(false)
   const [confirmClearExiting, setConfirmClearExiting] = useState(false)
   const [clearing, setClearing] = useState(false)
+  const [moreMenu, setMoreMenu] = useState(false)
+  const { isExiting: moreMenuClosing, requestClose: closeMoreMenu } = usePageExit(() => setMoreMenu(false), MENU_CLOSE_MS)
 
   useEdgeSwipeBack(shellRef, back, !confirmClearOpen)
 
@@ -259,13 +262,15 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
       if (confirmClearOpen) {
         event.preventDefault()
         closeConfirmClear()
+      } else if (moreMenu) {
+        event.preventDefault()
+        closeMoreMenu()
       }
     }
     window.addEventListener('hermes-mobile-back', onMobileBack)
     return () => window.removeEventListener('hermes-mobile-back', onMobileBack)
-  }, [confirmClearOpen, clearing, confirmClearExiting])
+  }, [confirmClearOpen, clearing, confirmClearExiting, moreMenu])
   const [editRequest, setEditRequest] = useState<ComposerEditRequest | null>(null)
-  const [modelLabel, setModelLabel] = useState(session.model || '')
   const dropFilesRef: ComposerDropFilesRef = useRef<((files: File[]) => void) | null>(null)
   const botProfile = profiles.find(profile => profile.name === (session.profile || 'default'))
   const botName = botProfile?.display_name || (session.title && session.title !== 'Bot Chat' ? session.title : titleize(session.profile || 'default'))
@@ -573,29 +578,30 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
   return <main ref={shellRef} className="app chat-shell" onDragOver={onDragOver} onDrop={onDrop} onDragLeave={() => setDraggingFiles(false)}>
     {draggingFiles && <div className="file-drop-overlay" aria-live="polite"><div><Paperclip size={24}/><b>Drop files to upload to Hermes</b><span>Documents stay on the host for Hermes to read</span></div></div>}
     <header className="chat-header">
-      <button className="round-control" onClick={back} aria-label="Back"><ArrowDown size={18} className="back-chevron"/></button>
-      <div className="chat-title"><button className="chat-identity-button" onClick={openProfile} aria-label={`Open ${botName} settings`}><BotAvatar profile={botProfile} fallbackName={session.profile} variant="header"/><span><b>{botName}</b><small>{botName} · {sending ? 'Working' : modelLabel || 'Hermes default'}</small></span></button></div>
+      <button className="round-control" onClick={back} aria-label="Back"><ChevronLeft size={18}/></button>
+      <button className="chat-identity-button" onClick={openProfile} aria-label={`Open ${botName} settings`}>
+        <BotAvatar profile={botProfile} fallbackName={session.profile} variant="header"/>
+        <b>{botName}</b>
+        {sending && <i className="chat-working-dot" aria-label="Working"/>}
+      </button>
       <div className="chat-header-actions">
-        {clearChat && (
-          <button
-            className="round-control clear-chat-btn"
-            onClick={() => setConfirmClearOpen(true)}
-            aria-label="Clear chat"
-            title="Clear chat & reset agent memory"
-            disabled={clearing}
-          >
-            <Eraser size={16}/>
-          </button>
-        )}
         <button
           className="round-control"
-          onClick={refresh}
-          aria-label="Refresh conversation"
-          title="Refresh conversation"
-          disabled={clearing}
+          onClick={() => moreMenu ? closeMoreMenu() : setMoreMenu(true)}
+          aria-label="More options"
+          aria-haspopup="menu"
+          aria-expanded={moreMenu}
         >
-          <RotateCw size={16}/>
+          <MoreHorizontal size={17}/>
         </button>
+        {moreMenu && <>
+          <button className="popover-scrim" aria-label="Close menu" onClick={closeMoreMenu}/>
+          <div className={`chat-more-menu ${moreMenuClosing ? 'is-closing' : ''}`} role="menu">
+            <button role="menuitem" onClick={() => { closeMoreMenu(); openProfile() }}><Settings2 size={16}/><span>Bot settings</span></button>
+            <button role="menuitem" disabled={clearing} onClick={() => { closeMoreMenu(); refresh() }}><RotateCw size={16}/><span>Refresh conversation</span></button>
+            {clearChat && <button role="menuitem" className="destructive" disabled={clearing} title="Clear chat & reset agent memory" onClick={() => { closeMoreMenu(); setConfirmClearOpen(true) }}><Eraser size={16}/><span>Clear chat</span></button>}
+          </div>
+        </>}
       </div>
     </header>
 
@@ -723,7 +729,7 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
       </div>
     </div>
 
-    {!following && <button className="latest-button" onClick={() => scrollToLatest()}><ArrowDown size={15}/><span>Latest{unreadBelow ? ` · ${unreadBelow}` : ''}</span></button>}
+    {!following && <button className="latest-button" onClick={() => scrollToLatest()} aria-label={unreadBelow ? `Jump to latest, ${unreadBelow} new` : 'Jump to latest'}><ChevronDown size={18}/>{unreadBelow > 0 && <span className="latest-count">{unreadBelow}</span>}</button>}
 
     {pendingClarify ? (
       <ClarifyCard
@@ -732,7 +738,7 @@ export function ChatView({ session, conversationLoading, messages, settledAssist
         onSkip={() => onSkipClarify?.(pendingClarify.requestId)}
       />
     ) : (
-      <Composer session={session} profiles={profiles} sending={sending} draggingFiles={draggingFiles} editRequest={editRequest} cancelEdit={() => setEditRequest(null)} dropFilesRef={dropFilesRef} onControlError={setControlError} onModelLabel={setModelLabel} onSessionModelChange={onSessionModelChange} submit={submit} submitVoice={submitVoice} stop={stop} perfTraceId={perfTraceId}/>
+      <Composer session={session} profiles={profiles} sending={sending} draggingFiles={draggingFiles} editRequest={editRequest} cancelEdit={() => setEditRequest(null)} dropFilesRef={dropFilesRef} onControlError={setControlError} onSessionModelChange={onSessionModelChange} submit={submit} submitVoice={submitVoice} stop={stop} perfTraceId={perfTraceId}/>
     )}
 
     {confirmClearOpen && (

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { skipCoveredRender } from './page-transition'
 
 const transitionsCss = readFileSync(resolve(process.cwd(), 'src/transitions.css'), 'utf8')
 const appSource = readFileSync(resolve(process.cwd(), 'src/App.tsx'), 'utf8')
@@ -67,6 +68,43 @@ describe('Page transition contract', () => {
     const reduced = transitionsCss.slice(transitionsCss.indexOf('@media (prefers-reduced-motion: reduce)'))
     expect(reduced).toContain('.page-host')
     expect(reduced).toContain('animation: none !important')
+  })
+
+  it('skips covered re-renders only while the page stays covered', () => {
+    // Streaming re-renders App per token; the roster under the chat must sit
+    // those out, but render again the moment the chat starts sliding away.
+    expect(skipCoveredRender({ covered: true }, { covered: true })).toBe(true)
+    expect(skipCoveredRender({ covered: true }, { covered: false })).toBe(false)
+    expect(skipCoveredRender({ covered: false }, { covered: true })).toBe(false)
+    expect(skipCoveredRender({ covered: false }, { covered: false })).toBe(false)
+    expect(appSource).toContain('const rosterCovered = (Boolean(selected) && !chatExiting) || (createOpen && !wizardExiting)')
+    expect(appSource).toContain('<FreezeWhileCovered covered={rosterCovered}>')
+  })
+
+  it('stacks pushed pages on top of the page they came from', () => {
+    // Returning a pushed page instead of the tree unmounts the page underneath:
+    // going back then shows an empty screen while it is rebuilt from scratch.
+    expect(appSource).not.toMatch(/if \(createOpen\) return/)
+    expect(appSource).not.toMatch(/if \(selected && profileSheet\) return/)
+    expect(appSource).toContain("className={chatCovered ? 'is-covered' : undefined}")
+    // The page underneath only dims; it is never pushed sideways.
+    const covered = transitionsCss.match(/\.app\.roster-shell\.is-covered,\s*\.page-host\.is-covered\s*\{[^}]*\}/s)
+    expect(covered).toBeTruthy()
+    expect(covered![0]).toContain('brightness')
+    expect(covered![0]).not.toContain('transform')
+  })
+
+  it('keeps the chat bundle off the startup path', () => {
+    // A static import would put markdown, KaTeX and highlight.js back on launch.
+    expect(appSource).not.toMatch(/^import \{ ChatView \}/m)
+    expect(appSource).toContain("lazy(() => loadChatView()")
+  })
+
+  it('does not keep pages on standing GPU layers', () => {
+    const pageRule = transitionsCss.match(/\n\.app\s*\{[^}]*\}/s)
+    const hostRule = transitionsCss.match(/\.page-host\s*\{[^}]*\}/s)
+    expect(pageRule![0]).not.toContain('will-change')
+    expect(hostRule![0]).not.toContain('will-change')
   })
 
   it('does not use a vertical slide for page transitions', () => {

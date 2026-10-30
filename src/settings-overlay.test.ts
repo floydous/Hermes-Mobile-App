@@ -6,6 +6,8 @@ const settingsSource = readFileSync(resolve(process.cwd(), 'src/components/Conne
 const settingsCss = readFileSync(resolve(process.cwd(), 'src/connection-settings.css'), 'utf8')
 const baseCss = readFileSync(resolve(process.cwd(), 'src/styles.css'), 'utf8')
 const themeCss = readFileSync(resolve(process.cwd(), 'src/theme.css'), 'utf8')
+const typeCss = readFileSync(resolve(process.cwd(), 'src/type.css'), 'utf8')
+const transitionsCss = readFileSync(resolve(process.cwd(), 'src/transitions.css'), 'utf8')
 const appSource = readFileSync(resolve(process.cwd(), 'src/App.tsx'), 'utf8')
 
 describe('Settings overlay sheet contract', () => {
@@ -35,14 +37,37 @@ describe('Settings overlay sheet contract', () => {
     expect(settingsCss).toMatch(/\.settings-modal-scroll\s*>\s*\.app\.panel\s*\{[^}]*padding:/s)
   })
 
-  it('keeps the root page trailing the sub-page by one page width', () => {
-    // The root must TRAIL the sub-page, not be mirrored against it.
-    // Mirroring made the two pages separate instead of moving as a pair,
-    // which opened a gap in the middle of the screen and showed the app
-    // behind the sheet -- hit-tested at 120px wide for ~100ms on a pop.
-    // On a push the root also lurched backwards mid-slide (-435px -> 0px).
-    expect(settingsSource).toContain('translateX(calc(${navOffset}px - 100%))')
+  it('slides sub-pages over the root page instead of pushing it away', () => {
+    // A sub-page lands on top of Settings; the root never moves sideways
+    // (it only dims), so nothing is pushed off screen.
+    expect(settingsSource).not.toContain('translateX(calc(${navOffset}px - 100%))')
     expect(settingsSource).not.toContain('translateX(${-navOffset}px)')
+    expect(settingsSource).toContain("transform: isDragging ? `translateY(${dragY}px)` : 'translateY(0)'")
+    expect(settingsCss).toMatch(/\.settings-page-root\.is-covered\s*\{[^}]*brightness/s)
+  })
+
+  it('opens from the bottom without the app-wide sideways page entrance', () => {
+    expect(settingsCss).toMatch(/\.settings-modal-sheet \.app\s*\{[^}]*animation:\s*none/s)
+  })
+
+  it('moves focus into the sheet without scrolling it ahead of its animation', () => {
+    // A plain focus() on open scrolled the clipped page stack to the button,
+    // so the sheet arrived in ~100ms while the scrim and card took 600ms.
+    expect(settingsSource).toContain("?.focus({ preventScroll: true })")
+    expect(settingsSource).not.toMatch(/\[tabindex="-1"\]\)'\)\?\.focus\(\)/)
+  })
+
+  it('presents like an iOS sheet: the app behind recedes into a card', () => {
+    // The class is dropped the moment the sheet starts closing, so the card
+    // grows back in step with the sheet sliding away.
+    expect(settingsSource).toContain("root.classList.toggle('sheet-presented', !isClosing)")
+    const card = transitionsCss.match(/html\.sheet-presented \.app\.roster-shell\s*\{[^}]*\}/s)
+    expect(card).toBeTruthy()
+    expect(card![0]).toContain('scale(')
+    expect(card![0]).toContain('border-radius')
+    // The card follows the grabber while it is dragged.
+    expect(settingsSource).toContain("'--sheet-progress'")
+    expect(transitionsCss).toMatch(/html\.sheet-dragging \.app\.roster-shell\s*\{[^}]*transition:\s*none/s)
   })
 
   it('keeps the full-screen scrim free of backdrop-filter', () => {
@@ -106,15 +131,20 @@ describe('Settings sheet motion contract', () => {
   const hardEaseOut = 'cubic-bezier(0.32, 0.72, 0, 1)'
 
   it('enters on a curve that spreads the travel over the duration', () => {
+    // (0.32, 0.6, 0.35, 1) over 0.42s still landed half the travel in 105ms
+    // and read as snapping open; a plain ease lands half at ~180ms.
     const rule = settingsCss.match(/\.settings-sheet-anim\s*\{[^}]*\}/s)
     expect(rule).toBeTruthy()
     expect(rule![0]).not.toContain(hardEaseOut)
-    expect(rule![0]).toContain('cubic-bezier(0.32, 0.6, 0.35, 1)')
+    expect(rule![0]).toContain('cubic-bezier(0.25, 0.1, 0.25, 1)')
   })
 
-  it('gives the entrance enough time to be seen', () => {
+  it('gives the entrance the iOS sheet pace, with the card and scrim in step', () => {
     const rule = settingsCss.match(/\.settings-sheet-anim\s*\{[^}]*\}/s)
-    expect(rule![0]).toMatch(/0\.4[0-9]s/)
+    expect(rule![0]).toContain('settings-sheet-up 0.35s')
+    expect(settingsCss).toContain('settings-backdrop-in 0.35s')
+    const card = transitionsCss.match(/html\.sheet-presented \.app\.roster-shell\s*\{[^}]*\}/s)
+    expect(card![0]).toContain('transform 0.35s cubic-bezier(0.25, 0.1, 0.25, 1)')
   })
 
   it('springs the grabber back on a curve that does not jump', () => {
@@ -167,9 +197,11 @@ describe('Host card design contract', () => {
     expect(settingsCss).toMatch(/\.connection-screen \.connection-action\s*\{[^}]*justify-self:\s*start/s)
   })
 
-  it('uses the app-wide primary button shape with a 44px touch target', () => {
+  it('uses the app-wide primary button shape with a 44pt touch target', () => {
+    // 44pt is the iOS minimum; the shared token converts it at the default 1.15 UI zoom.
     expect(settingsSource).toContain('className="primary connection-action"')
-    expect(settingsCss).toMatch(/\.connection-screen \.connection-action\s*\{[^}]*min-height:\s*44px/s)
+    expect(settingsCss).toMatch(/\.connection-screen \.connection-action\s*\{[^}]*min-height:\s*var\(--control\)/s)
+    expect(typeCss).toContain('--control: calc(44px / 1.15)')
   })
 
   it('removes the legacy status pill and nested stat box styles', () => {

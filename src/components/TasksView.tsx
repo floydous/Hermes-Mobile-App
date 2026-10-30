@@ -1,17 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   CalendarClock,
-  Check,
   ChevronLeft,
-  ChevronRight,
   Copy,
-  Pause,
-  Pencil,
-  Play,
-  Plus,
+  MoreHorizontal,
   RefreshCw,
   Trash2,
-  X,
   Zap,
 } from 'lucide-react'
 
@@ -27,7 +21,7 @@ import {
   type LiveProfile,
 } from '../hermes'
 import { useEdgeSwipeBack } from '../edge-swipe'
-import { PageHost, PAGE_EXIT_STATE, usePageExit } from '../page-transition'
+import { MENU_CLOSE_MS, PageHost, PAGE_EXIT_STATE, usePageExit } from '../page-transition'
 
 type Props = {
   profiles: LiveProfile[]
@@ -42,6 +36,59 @@ type Props = {
 const jobTitle = (job: CronJob) => (job.name || 'Untitled task').replace(/^\[bot:[^\]]+\]\s*/i, '')
 const stateOf = (job: CronJob) => job.state === 'paused' || job.enabled === false ? 'paused' : job.state === 'running' ? 'running' : job.last_error ? 'error' : 'scheduled'
 const dateLabel = (value?: number | string) => { if (!value) return '—'; const date = new Date(typeof value === 'number' ? value * 1000 : value); return Number.isNaN(date.valueOf()) ? String(value) : date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) }
+
+/** "Today, 6:03 PM" / "Tomorrow, 12:00 AM" for nearby runs, the full date otherwise. */
+export function runLabel(value?: number | string, now = new Date()): string {
+  if (!value) return '—'
+  const date = new Date(typeof value === 'number' ? value * 1000 : value)
+  if (Number.isNaN(date.valueOf())) return String(value)
+  const dayStart = (day: Date) => new Date(day.getFullYear(), day.getMonth(), day.getDate()).valueOf()
+  const days = Math.round((dayStart(date) - dayStart(now)) / 86_400_000)
+  const time = date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+  if (days === 0) return `Today, ${time}`
+  if (days === 1) return `Tomorrow, ${time}`
+  if (days === -1) return `Yesterday, ${time}`
+  return dateLabel(value)
+}
+
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+const everyMinutes = (minutes: number) =>
+  minutes % 1440 === 0 ? (minutes === 1440 ? 'Every day' : `Every ${minutes / 1440} days`)
+    : minutes % 60 === 0 ? (minutes === 60 ? 'Every hour' : `Every ${minutes / 60} hours`)
+      : minutes === 1 ? 'Every minute' : `Every ${minutes} minutes`
+
+/**
+ * The cadence of a schedule in words ("Every day", "Weekdays", "Every 15 minutes").
+ * The time of day is left out on purpose: cron runs in the host's timezone, which
+ * need not be the phone's, so the real local time comes from the next-run timestamp.
+ * Anything this does not recognise is shown as written.
+ */
+export function describeSchedule(schedule?: string): string {
+  const raw = (schedule || '').trim()
+  if (!raw) return 'No schedule'
+  const interval = /^every\s+(\d+)\s*(m|min|mins|minutes?|h|hrs?|hours?|d|days?)$/i.exec(raw)
+  if (interval) {
+    const amount = Number(interval[1])
+    const unit = interval[2][0].toLowerCase()
+    return amount > 0 ? everyMinutes(unit === 'd' ? amount * 1440 : unit === 'h' ? amount * 60 : amount) : raw
+  }
+  const fields = raw.split(/\s+/)
+  if (fields.length !== 5) return raw
+  const [minute, hour, dayOfMonth, month, weekday] = fields
+  if (dayOfMonth !== '*' || month !== '*') return raw
+  const minuteStep = /^\*\/(\d+)$/.exec(minute)
+  if (minuteStep && hour === '*' && weekday === '*') return everyMinutes(Number(minuteStep[1]))
+  if (!/^\d+$/.test(minute)) return raw
+  const hourStep = /^\*\/(\d+)$/.exec(hour)
+  if (hour === '*' && weekday === '*') return 'Every hour'
+  if (hourStep && weekday === '*') return everyMinutes(Number(hourStep[1]) * 60)
+  if (!/^\d+$/.test(hour)) return raw
+  if (weekday === '*') return 'Every day'
+  if (weekday === '1-5') return 'Weekdays'
+  if (weekday === '0,6' || weekday === '6,0') return 'Weekends'
+  if (/^[0-7]$/.test(weekday)) return `Every ${WEEKDAYS[Number(weekday) % 7]}`
+  return raw
+}
 
 export function reconcileTaskJobs(serverJobs: CronJob[], optimisticJobs: ReadonlyMap<string, CronJob>): { jobs: CronJob[]; pending: Map<string, CronJob> } {
   const merged = new Map(serverJobs.map(job => [job.job_id, job]))
@@ -207,7 +254,6 @@ export function TasksView({
   const [loading, setLoading] = useState(() => !hasLoadedTaskJobsOnce)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState('')
-  const [filter, setFilter] = useState<TaskFilter>('all')
   const [internalCreateOpen, setInternalCreateOpen] = useState(false)
   const isCreateOpen = propCreateOpen !== undefined ? propCreateOpen : internalCreateOpen
   const setIsCreateOpen = propSetCreateOpen || setInternalCreateOpen
@@ -293,7 +339,7 @@ export function TasksView({
       (job.prompt || job.prompt_preview || '').toLowerCase().includes(q)
     )
   }, [jobs, query])
-  const { running, scheduled, attention } = useMemo(() => deriveTaskSections(filteredJobs, filter), [filteredJobs, filter])
+  const { running, scheduled, attention } = useMemo(() => deriveTaskSections(filteredJobs, 'all'), [filteredJobs])
   const toggle = async (job: CronJob) => {
     const action = stateOf(job) === 'paused' ? 'resume' : 'pause'
     const desired: CronJob = { ...job, enabled: action === 'resume', state: action === 'resume' ? 'scheduled' : 'paused' }
@@ -324,10 +370,12 @@ export function TasksView({
     try { setSelected(await loadCronJob(job.job_id, job.profile, effectiveBaseUrl)) }
     catch { /* Keep the list payload visible; the full prompt remains available when the gateway supports the detail route. */ }
   }
+  const deleteAlert = deleteCandidate && <DeleteTaskModal job={deleteCandidate} deleting={busy === `${deleteCandidate.job_id}:remove`} onCancel={() => setDeleteCandidate(null)} onConfirm={() => void remove(deleteCandidate)}/>
   if (selected) {
     return active ? (
       <PageHost state={detailExiting ? PAGE_EXIT_STATE : undefined} zIndex={70}>
         <TaskDetail job={selected} busy={busy} back={closeDetail} onRefresh={() => refresh(true, true)} onToggle={toggle} onTrigger={trigger} onDelete={() => setDeleteCandidate(selected)} baseUrl={effectiveBaseUrl}/>
+        {deleteAlert}
       </PageHost>
     ) : null
   }
@@ -338,109 +386,87 @@ export function TasksView({
       </PageHost>
     ) : null
   }
-  const showRunning = running.length > 0
-  const showScheduled = scheduled.length > 0
-  const showOther = attention.length > 0
-  const visibleCount = running.length + scheduled.length + attention.length
-  const runningCount = filteredJobs.filter(job => stateOf(job) === 'running').length
-  const scheduledCount = filteredJobs.filter(job => stateOf(job) === 'scheduled').length
   return (
     <div
       className="tasks-sheet tasks-scroll"
       style={{ display: active ? undefined : 'none', ...style }}
       ref={scrollRef as any}
     >
-
-    <section className="tasks-intro">
-      <h1>Tasks</h1>
-      <p>Schedule and monitor your automations.</p>
-    </section>
-
-    <section className="tasks-overview-stats" aria-label="Task summary">
-      <div><span>ALL TASKS</span><b>{filteredJobs.length}</b></div>
-      <div><span>RUNNING</span><b>{runningCount}</b></div>
-      <div><span>SCHEDULED</span><b>{scheduledCount}</b></div>
-    </section>
-
-    {error && <p className="management-error">{error}</p>}
-    {!filteredJobs.length && loading ? (
-      <div className="tasks-loading-skeleton" aria-label="Loading tasks">
-        <div className="task-card-skeleton" />
-        <div className="task-card-skeleton" />
-        <div className="task-card-skeleton" />
-      </div>
-    ) : !filteredJobs.length ? (
-      <section className="tasks-empty">
-        <CalendarClock size={24}/>
-        <b>No scheduled tasks</b>
-        <p>Automations you create will appear here.</p>
-        <button className="task-outline-pill" onClick={() => setIsCreateOpen(true)}>
-          <Plus size={14}/> Create a task
-        </button>
-      </section>
-    ) : (
-      <>
-        <nav className="tasks-filters" aria-label="Filter tasks">
-          {(['all', 'running', 'scheduled'] as const).map(value => {
-            const count = value === 'all' ? filteredJobs.length : value === 'running' ? runningCount : scheduledCount
-            const label = value === 'all' ? 'All' : value === 'running' ? 'Running' : 'Scheduled'
-            return <button key={value} className={filter === value ? 'active' : ''} aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}<span>{count}</span></button>
-          })}
-        </nav>
-        <div className="tasks-list-heading"><span>{filter === 'all' ? 'YOUR TASKS' : filter === 'scheduled' ? 'SCHEDULED & PAUSED' : 'RUNNING TASKS'}</span><small>{visibleCount} {visibleCount === 1 ? 'task' : 'tasks'}</small></div>
-        {visibleCount === 0 ? (
-          <section className="tasks-empty tasks-filter-empty">
-            <CalendarClock size={22}/>
-            <b>No {filter} tasks</b>
-            <p>Try another filter to see your automations.</p>
-            <button className="task-outline-pill" onClick={() => setFilter('all')}>Show all tasks</button>
-          </section>
-        ) : (
-          <div className="tasks-list-container">
-            {showRunning && <TaskSection id="running-tasks" label="RUNNING NOW" jobs={running} busy={busy} onOpen={openTask} onToggle={toggle} onTrigger={trigger} onDelete={setDeleteCandidate}/>}
-            {showScheduled && <TaskSection id="scheduled-tasks" label="SCHEDULED" jobs={scheduled} busy={busy} onOpen={openTask} onToggle={toggle} onTrigger={trigger} onDelete={setDeleteCandidate}/>}
-            {showOther && <TaskSection label="PAUSED & ATTENTION" jobs={attention} busy={busy} onOpen={openTask} onToggle={toggle} onTrigger={trigger} onDelete={setDeleteCandidate}/>}
+      <h1 className="tasks-large-title">Tasks</h1>
+      {error && <p className="tasks-note error">{error}</p>}
+      {!filteredJobs.length && loading ? (
+        <section className="tasks-group" aria-label="Loading tasks">
+          <div className="tasks-group-body">
+            <div className="task-row-skeleton" />
+            <div className="task-row-skeleton" />
+            <div className="task-row-skeleton" />
           </div>
-        )}
-      </>
-    )}
-    {deleteCandidate && <DeleteTaskModal job={deleteCandidate} deleting={busy === `${deleteCandidate.job_id}:remove`} onCancel={() => setDeleteCandidate(null)} onConfirm={() => void remove(deleteCandidate)}/>}
-  </div>
+        </section>
+      ) : !filteredJobs.length ? (
+        <section className="tasks-unavailable">
+          <CalendarClock size={46} strokeWidth={1.5}/>
+          <b>{query.trim() ? 'No Results' : 'No Tasks'}</b>
+          <p>{query.trim() ? 'No tasks match your search.' : 'Scheduled automations you create appear here.'}</p>
+          {!query.trim() && <button onClick={() => setIsCreateOpen(true)}>New Task</button>}
+        </section>
+      ) : (
+        <>
+          <TaskGroup label="Running" jobs={running} busy={busy} onOpen={openTask} onToggle={toggle}/>
+          <TaskGroup label="Scheduled" jobs={scheduled} busy={busy} onOpen={openTask} onToggle={toggle}/>
+          <TaskGroup label={attention.some(job => stateOf(job) === 'error') ? 'Needs Attention' : 'Paused'} jobs={attention} busy={busy} onOpen={openTask} onToggle={toggle}/>
+        </>
+      )}
+      {deleteAlert}
+    </div>
   )
 }
 
-function TaskSection({ id, label, jobs, busy, onOpen, onToggle, onTrigger, onDelete }: { id?: string; label: string; jobs: CronJob[]; busy: string; onOpen: (job: CronJob) => void; onToggle: (job: CronJob) => void; onTrigger: (job: CronJob) => void; onDelete: (job: CronJob) => void }) {
-  if (!jobs.length) return null
-  return <section className="task-section" id={id}><div className="task-section-head"><span>{label}</span><small>{jobs.length}</small></div>{jobs.map(job => <TaskCard busy={busy} job={job} key={job.job_id} onOpen={onOpen} onToggle={onToggle} onTrigger={onTrigger} onDelete={onDelete}/>)}</section>
-}
-function TaskCard({ busy, job, onOpen, onToggle, onTrigger, onDelete }: { busy: string; job: CronJob; onOpen: (job: CronJob) => void; onToggle: (job: CronJob) => void; onTrigger: (job: CronJob) => void; onDelete: (job: CronJob) => void }) {
-  const state = stateOf(job)
-  const paused = state === 'paused'
-  const title = jobTitle(job)
-  const nextRun = paused ? 'Paused' : state === 'running' ? 'In progress' : `Next ${dateLabel(job.next_run_at)}`
+type RowActions = { busy: string; onOpen: (job: CronJob) => void; onToggle: (job: CronJob) => void }
 
-  return <article className="task-card">
-    <button className="task-card-summary" onClick={() => onOpen(job)} aria-label={`Open ${title} details`}>
-      <i className={`task-item-dot ${state}`} aria-hidden="true" />
-      <span className="task-item-copy">
-        <span className="task-item-title-line">
-          <span className="task-title-text">{title}</span>
-          <span className={`task-status-label ${state}`}>{state}</span>
-        </span>
-        <span className="task-item-meta"><span>{job.schedule || 'No schedule'}</span><span aria-hidden="true">·</span><span>{nextRun}</span></span>
-      </span>
-      <ChevronRight className="task-item-chevron" size={16} aria-hidden="true" />
+function TaskGroup({ label, jobs, ...actions }: { label: string; jobs: CronJob[] } & RowActions) {
+  if (!jobs.length) return null
+  return <section className="tasks-group"><h2 className="tasks-group-header">{label}</h2><div className="tasks-group-body">{jobs.map(job => <TaskRow job={job} key={job.job_id} {...actions}/>)}</div></section>
+}
+
+// Laid out like a Clock › Alarms row: what and when on the left, on/off on the right.
+function TaskRow({ job, busy, onOpen, onToggle }: { job: CronJob } & RowActions) {
+  const state = stateOf(job)
+  const title = jobTitle(job)
+  const cadence = describeSchedule(job.schedule)
+  const detail = state === 'running' ? 'Running now'
+    : state === 'error' ? 'Last run failed'
+      : state === 'paused' ? `${cadence} · Paused`
+        : `${cadence} · ${runLabel(job.next_run_at)}`
+  return <div className={`task-row ${state}`}>
+    <button className="task-row-open" onClick={() => onOpen(job)} aria-label={`Open ${title}`}>
+      <span className="task-row-title">{title}</span>
+      <span className="task-row-detail">{state === 'running' && <i className="task-row-live" aria-hidden="true"/>}{detail}</span>
     </button>
-    <div className="task-card-actions">
-      <button className="task-icon-action" disabled={busy === `${job.job_id}:toggle`} onClick={() => void onToggle(job)} aria-label={`${paused ? 'Resume' : 'Pause'} ${title}`} title={paused ? 'Resume task' : 'Pause task'}>{paused ? <Play size={15}/> : <Pause size={15}/>}</button>
-      <button className="task-icon-action" disabled={paused || busy === `${job.job_id}:trigger`} onClick={() => void onTrigger(job)} aria-label={`Trigger ${title}`} title={busy === `${job.job_id}:trigger` ? 'Running task' : 'Run now'}><Zap size={15}/></button>
-      <button className="task-icon-action delete" disabled={Boolean(busy)} onClick={() => onDelete(job)} aria-label={`Delete ${title}`} title="Delete task"><Trash2 size={15}/></button>
-    </div>
-  </article>
+    <TaskSwitch job={job} busy={busy} onToggle={onToggle}/>
+  </div>
+}
+
+function TaskSwitch({ job, busy, onToggle }: { job: CronJob; busy: string; onToggle: (job: CronJob) => void }) {
+  const enabled = stateOf(job) !== 'paused'
+  return <label className="ios-switch">
+    <input type="checkbox" role="switch" checked={enabled} disabled={busy === `${job.job_id}:toggle`} onChange={() => void onToggle(job)} aria-label={`${enabled ? 'Pause' : 'Resume'} ${jobTitle(job)}`}/>
+    <span aria-hidden="true"/>
+  </label>
 }
 function TaskMetadata({ job }: { job: CronJob }) { const paused = stateOf(job) === 'paused'; return <dl><div><dt>Schedule</dt><dd>{job.schedule || '—'}</dd></div><div><dt>Next</dt><dd>{paused ? 'Paused' : dateLabel(job.next_run_at)}</dd></div><div><dt>Last</dt><dd>{dateLabel(job.last_run_at)}</dd></div>{job.deliver && <div><dt>Deliver</dt><dd>{job.deliver}</dd></div>}{job.model && <div><dt>Model</dt><dd>{job.model}</dd></div>}</dl> }
 function DeleteTaskModal({ job, deleting, onCancel, onConfirm }: { job: CronJob; deleting: boolean; onCancel: () => void; onConfirm: () => void }) {
-  return <div className="task-modal-backdrop" role="presentation" onMouseDown={event => { if (!deleting && event.target === event.currentTarget) onCancel() }}><section className="task-delete-modal" role="alertdialog" aria-modal="true" aria-labelledby="delete-task-title" aria-describedby="delete-task-message"><Trash2 size={22}/><h2 id="delete-task-title">Delete scheduled task?</h2><p id="delete-task-message">Delete “{jobTitle(job)}”? This will remove its schedule and prevent future runs.</p><footer><button disabled={deleting} onClick={onCancel}>Keep task</button><button className="delete" disabled={deleting} onClick={onConfirm}><Trash2 size={15}/>{deleting ? 'Deleting…' : 'Delete task'}</button></footer></section></div>
+  return <div className="task-modal-backdrop" role="presentation" onMouseDown={event => { if (!deleting && event.target === event.currentTarget) onCancel() }}>
+    <section className="tasks-alert" role="alertdialog" aria-modal="true" aria-labelledby="delete-task-title" aria-describedby="delete-task-message">
+      <div className="tasks-alert-body">
+        <h2 id="delete-task-title">Delete “{jobTitle(job)}”?</h2>
+        <p id="delete-task-message">Its schedule is removed and it won’t run again.</p>
+      </div>
+      <footer>
+        <button disabled={deleting} onClick={onCancel}>Cancel</button>
+        <button className="destructive" disabled={deleting} onClick={onConfirm}>{deleting ? 'Deleting…' : 'Delete'}</button>
+      </footer>
+    </section>
+  </div>
 }
 function TaskDetail({
   job,
@@ -465,6 +491,9 @@ function TaskDetail({
   useEdgeSwipeBack(shellRef, back)
   const [error, setError] = useState('')
   const [copied, setCopied] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const { isExiting: menuClosing, requestClose: closeMenu } = usePageExit(() => setMenuOpen(false), MENU_CLOSE_MS)
+  const [expanded, setExpanded] = useState(false)
   const [editPromptOpen, setEditPromptOpen] = useState(false)
   const [promptDraft, setPromptDraft] = useState(job.prompt || job.prompt_preview || '')
   const [savingPrompt, setSavingPrompt] = useState(false)
@@ -473,7 +502,8 @@ function TaskDetail({
   const paused = state === 'paused'
   const isRunning = state === 'running'
   const triggering = busy === `${job.job_id}:trigger`
-  const toggling = busy === `${job.job_id}:toggle`
+  const promptText = job.prompt || job.prompt_preview || ''
+  const cadence = describeSchedule(job.schedule)
 
   useEffect(() => {
     setPromptDraft(job.prompt || job.prompt_preview || '')
@@ -507,20 +537,10 @@ function TaskDetail({
     }
   }
 
-  const toggle = async () => {
-    setError('')
-    try {
-      await onToggle(job)
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Hermes could not update this task.')
-    }
-  }
-
   const copyPrompt = async () => {
-    const text = job.prompt || job.prompt_preview || ''
-    if (!text) return
+    if (!promptText) return
     try {
-      await navigator.clipboard.writeText(text)
+      await navigator.clipboard.writeText(promptText)
       setCopied(true)
       setTimeout(() => setCopied(false), 1600)
     } catch {
@@ -533,181 +553,110 @@ function TaskDetail({
     : isRunning
     ? 'In progress'
     : job.next_run_at
-    ? dateLabel(job.next_run_at)
+    ? runLabel(job.next_run_at)
     : 'None'
 
-  const lastTriggered = job.last_run_at ? dateLabel(job.last_run_at) : 'Never'
+  const lastTriggered = job.last_run_at ? runLabel(job.last_run_at) : 'Never'
+  const statusWord = state === 'error' ? 'Failed' : state.charAt(0).toUpperCase() + state.slice(1)
 
   return (
     <main ref={shellRef} className="app task-detail">
-      {/* iOS Top Nav Header */}
-      <header className="ios-task-header">
-        <button className="ios-nav-back" onClick={back} aria-label="Back to tasks">
-          <ChevronLeft size={18} />
-          <span>Tasks</span>
-        </button>
-        <span className="ios-nav-title">Task Details</span>
-        <button className="ios-nav-action" onClick={() => void onRefresh()} aria-label="Refresh task">
-          <RefreshCw size={17} />
-        </button>
+      <header className="task-detail-nav">
+        <button className="round-control" onClick={back} aria-label="Back to tasks"><ChevronLeft size={18}/></button>
+        <div className="task-more">
+          <button className="round-control" onClick={() => menuOpen ? closeMenu() : setMenuOpen(true)} aria-label="More options" aria-haspopup="menu" aria-expanded={menuOpen}><MoreHorizontal size={17}/></button>
+          {menuOpen && <>
+            <button className="popover-scrim" aria-label="Close menu" onClick={closeMenu}/>
+            <div className={`task-more-menu ${menuClosing ? 'is-closing' : ''}`} role="menu">
+              <button role="menuitem" onClick={() => { closeMenu(); void onRefresh() }}><RefreshCw size={16}/><span>Refresh</span></button>
+              <button role="menuitem" disabled={!promptText} onClick={() => { closeMenu(); void copyPrompt() }}><Copy size={16}/><span>Copy Instructions</span></button>
+              <button role="menuitem" className="destructive" onClick={() => { closeMenu(); onDelete() }}><Trash2 size={16}/><span>Delete Task</span></button>
+            </div>
+          </>}
+        </div>
       </header>
 
-      {/* iOS Clean Title Header */}
-      <section className="ios-task-hero">
-        <h1 className="ios-task-title">{jobTitle(job)}</h1>
-        <div className="ios-task-meta-line">
-          <span className={`ios-status-pill ${state}`}>
-            <span className="ios-status-dot" />
-            <span>{state.charAt(0).toUpperCase() + state.slice(1)}</span>
-          </span>
-          {job.profile && <span className="ios-task-bot-label">Bot: {job.profile}</span>}
+      <section className="task-detail-hero">
+        <h1>{jobTitle(job)}</h1>
+        <p><span className={`task-state ${state}`}>{statusWord}</span>{job.profile && <> · {job.profile}</>}</p>
+      </section>
+
+      {error && <p className="tasks-note error">{error}</p>}
+
+      <section className="tasks-group">
+        <div className="tasks-group-body">
+          <div className="task-field"><span>Enabled</span><TaskSwitch job={job} busy={busy} onToggle={onToggle}/></div>
+          <button className="task-field task-field-action" disabled={triggering} onClick={() => void trigger()}><Zap size={16}/><span>{triggering ? 'Running…' : 'Run Now'}</span></button>
         </div>
       </section>
 
-      {/* iOS Dual Action Buttons */}
-      <section className="ios-task-actions">
-        <button
-          type="button"
-          className="ios-action-primary"
-          disabled={triggering}
-          onClick={() => void trigger()}
-        >
-          <Zap size={16} />
-          <span>{triggering ? 'Running…' : 'Trigger now'}</span>
-        </button>
-        <button
-          type="button"
-          className="ios-action-secondary"
-          disabled={toggling}
-          onClick={() => void toggle()}
-        >
-          {paused ? (
-            <>
-              <Play size={15} />
-              <span>Resume</span>
-            </>
-          ) : (
-            <>
-              <Pause size={15} />
-              <span>Pause</span>
-            </>
-          )}
-        </button>
-      </section>
-
-      {error && <p className="management-error">{error}</p>}
-
-      {/* Inset Group: Timing */}
-      <section className="ios-inset-group">
-        <div className="ios-group-header">TIMING</div>
-        <div className="ios-group-card">
-          <div className="ios-group-row">
-            <span className="ios-row-label">Schedule</span>
-            <span className="ios-row-value monospace">{job.schedule || 'None'}</span>
-          </div>
-          <div className="ios-group-row">
-            <span className="ios-row-label">Next Run</span>
-            <span className="ios-row-value">{nextRun}</span>
-          </div>
-          <div className="ios-group-row">
-            <span className="ios-row-label">Last Triggered</span>
-            <span className="ios-row-value">{lastTriggered}</span>
-          </div>
+      <section className="tasks-group">
+        <h2 className="tasks-group-header">Schedule</h2>
+        <div className="tasks-group-body">
+          <div className="task-field"><span>Repeats</span><span>{cadence}</span></div>
+          {job.schedule && cadence !== job.schedule && <div className="task-field"><span>Cron</span><span className="mono">{job.schedule}</span></div>}
+          <div className="task-field"><span>Next Run</span><span>{nextRun}</span></div>
+          <div className="task-field"><span>Last Run</span><span>{lastTriggered}</span></div>
         </div>
       </section>
 
-      {/* Inset Group: Configuration */}
       {(job.profile || job.model || job.deliver) && (
-        <section className="ios-inset-group">
-          <div className="ios-group-header">CONFIGURATION</div>
-          <div className="ios-group-card">
-            {job.profile && (
-              <div className="ios-group-row">
-                <span className="ios-row-label">Target Bot</span>
-                <span className="ios-row-value">{job.profile}</span>
-              </div>
-            )}
-            {job.model && (
-              <div className="ios-group-row">
-                <span className="ios-row-label">Model</span>
-                <span className="ios-row-value monospace">{job.model}</span>
-              </div>
-            )}
-            {job.deliver && (
-              <div className="ios-group-row">
-                <span className="ios-row-label">Delivery</span>
-                <span className="ios-row-value">{job.deliver}</span>
-              </div>
-            )}
+        <section className="tasks-group">
+          <h2 className="tasks-group-header">Configuration</h2>
+          <div className="tasks-group-body">
+            {job.profile && <div className="task-field"><span>Bot</span><span>{job.profile}</span></div>}
+            {job.model && <div className="task-field"><span>Model</span><span>{job.model}</span></div>}
+            {job.deliver && <div className="task-field"><span>Delivery</span><span>{job.deliver}</span></div>}
           </div>
         </section>
       )}
 
-      {/* Inset Group: Instructions / Prompt */}
-      <section className="ios-inset-group">
-        <div className="ios-group-header-with-actions">
-          <span className="ios-group-header">INSTRUCTIONS</span>
-          <div className="ios-prompt-actions">
-            <button
-              type="button"
-              className="ios-prompt-btn"
-              onClick={copyPrompt}
-              disabled={!job.prompt && !job.prompt_preview}
-            >
-              {copied ? <Check size={12} /> : <Copy size={12} />}
-              <span>{copied ? 'Copied' : 'Copy'}</span>
-            </button>
-            <button
-              type="button"
-              className="ios-prompt-btn"
-              disabled={savingPrompt}
-              onClick={() => setEditPromptOpen(true)}
-            >
-              <Pencil size={12} />
-              <span>{job.prompt || job.prompt_preview ? 'Edit' : 'Add'}</span>
-            </button>
-          </div>
+      <section className="tasks-group">
+        <div className="tasks-group-header-row">
+          <h2 className="tasks-group-header">Instructions</h2>
+          <button className="tasks-header-action" disabled={savingPrompt} onClick={() => setEditPromptOpen(true)}>{promptText ? 'Edit' : 'Add'}</button>
         </div>
-        <div className="ios-group-card ios-prompt-card">
-          {job.prompt || job.prompt_preview ? (
-            <pre className="ios-prompt-text">
-              {job.prompt || job.prompt_preview}
-            </pre>
-          ) : (
-            <div className="ios-prompt-empty">
-              <span>No custom instructions configured. This task executes its configured script or automated delivery target.</span>
-            </div>
-          )}
+        <div className="tasks-group-body">
+          {promptText ? <>
+            <p className={`task-instructions ${expanded ? '' : 'clamped'}`}>{promptText}</p>
+            {promptText.length > 320 && <button className="task-field task-field-action" onClick={() => setExpanded(open => !open)}><span>{expanded ? 'Show Less' : 'Show More'}</span></button>}
+          </> : <p className="task-instructions empty">No instructions. This task runs its configured script or delivery target.</p>}
         </div>
       </section>
 
-      {/* Inset Group: Delete Task */}
-      <section className="ios-inset-group ios-danger-group">
-        <div className="ios-group-card">
-          <button
-            type="button"
-            className="ios-delete-button"
-            onClick={onDelete}
-          >
-            <span>Delete Task</span>
-          </button>
+      <section className="tasks-group">
+        <div className="tasks-group-body">
+          <button className="task-delete-row" onClick={onDelete}>Delete Task</button>
         </div>
       </section>
 
-      {/* Prompt Edit Modal */}
+      {copied && <div className="tasks-toast" role="status">Copied</div>}
+
       {editPromptOpen && (
         <div
-          className="task-modal-backdrop"
+          className="task-modal-backdrop sheet"
           role="presentation"
           onMouseDown={event => {
             if (event.target === event.currentTarget) setEditPromptOpen(false)
           }}
         >
-          <section className="task-prompt-modal" role="dialog" aria-modal="true" aria-label="Edit task prompt">
-            <header>
-              <b>Edit prompt</b>
-              <button onClick={() => setEditPromptOpen(false)} aria-label="Close prompt editor">
-                <X size={18} />
+          <section className="task-prompt-sheet" role="dialog" aria-modal="true" aria-label="Edit instructions">
+            <header className="task-sheet-nav">
+              <button
+                onClick={() => {
+                  setPromptDraft(promptText)
+                  setEditPromptOpen(false)
+                }}
+              >
+                Cancel
+              </button>
+              <b>Instructions</b>
+              <button
+                className="save"
+                disabled={savingPrompt || !promptDraft.trim()}
+                onClick={() => void savePrompt()}
+              >
+                {savingPrompt ? 'Saving…' : 'Save'}
               </button>
             </header>
             <textarea
@@ -715,23 +664,6 @@ function TaskDetail({
               value={promptDraft}
               onChange={event => setPromptDraft(event.target.value)}
             />
-            <footer>
-              <button
-                onClick={() => {
-                  setPromptDraft(job.prompt || job.prompt_preview || '')
-                  setEditPromptOpen(false)
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                className="save"
-                disabled={savingPrompt || !promptDraft.trim()}
-                onClick={() => void savePrompt()}
-              >
-                {savingPrompt ? 'Saving…' : 'Save prompt'}
-              </button>
-            </footer>
           </section>
         </div>
       )}
